@@ -110,6 +110,8 @@ interface RawPending {
 
 const quote = (s: string) => s.replace(/'/g, "''");
 const EVENTUAL = ['ConsistencyLevel', 'eventual'] as const;
+/** Pages de 100 suivies au plus par liste : au-delà, la réponse est marquée tronquée. */
+const MAX_PAGES = 10;
 
 export class GraphDirectory implements Directory {
   constructor(private readonly client: Pick<Client, 'api'>) {}
@@ -193,27 +195,42 @@ export class GraphDirectory implements Directory {
   }
 
   async listByStatut(ext: string, statut: string, hiredSince?: string) {
-    // `ext` est validé à la config, `statut` vient de STATUTS, `hiredSince` d'un calcul de date : sûrs dans le filtre.
-    const since = hiredSince ? ` and employeeHireDate ge ${hiredSince}T00:00:00Z` : '';
+    // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
+    // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
+    // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
     try {
-      const res = await this.client
+      let req = this.client
         .api('/users')
         .header(...EVENTUAL)
-        .filter(`${ext} eq '${statut}'${since}`)
+        .filter(`${ext} eq '${statut}'`)
         .select('id,displayName,jobTitle,department,employeeHireDate')
         .expand('manager($select=id,displayName)')
         .top(100)
-        .count(true)
-        .get();
-      const demandes = ((res?.value ?? []) as RawPending[]).map((u) => ({
-        id: u.id,
-        nom: u.displayName,
-        poste: u.jobTitle ?? null,
-        service: u.department ?? null,
-        manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
-        dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
-      }));
-      return { demandes, tronque: Boolean(res?.['@odata.nextLink']) };
+        .count(true);
+      const raw: RawPending[] = [];
+      let tronque = false;
+      for (let page = 1; ; page++) {
+        const res = await req.get();
+        raw.push(...((res?.value ?? []) as RawPending[]));
+        const next = res?.['@odata.nextLink'] as string | undefined;
+        if (!next) break;
+        if (page >= MAX_PAGES) {
+          tronque = true;
+          break;
+        }
+        req = this.client.api(next).header(...EVENTUAL);
+      }
+      const demandes = raw
+        .map((u) => ({
+          id: u.id,
+          nom: u.displayName,
+          poste: u.jobTitle ?? null,
+          service: u.department ?? null,
+          manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
+          dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
+        }))
+        .filter((d) => !hiredSince || (d.dateArrivee !== null && d.dateArrivee >= hiredSince));
+      return { demandes, tronque };
     } catch (err) {
       throw wrap(err);
     }

@@ -15,6 +15,7 @@ export interface Call {
   path: string;
   headers: Record<string, string>;
   filter?: string;
+  expand?: string;
   search?: string;
   body?: unknown;
 }
@@ -51,6 +52,8 @@ export class FakeGraph {
   putFailuresLeft = 0;
   /** UPN existant mais invisible au 1er contrôle de disponibilité (course entre contrôle et création). */
   hiddenOnce = new Set<string>();
+  /** Taille de page des listes d'utilisateurs filtrées par statut (0 : tout d'un coup), avec @odata.nextLink. */
+  pageSize = 0;
   private seq = 0;
 
   addUser(upn: string, displayName = 'Compte Test', accountEnabled = true): string {
@@ -91,7 +94,7 @@ export class FakeGraph {
       filter: (f: string) => ((call.filter = f), req),
       search: (s: string) => ((call.search = s), req),
       select: () => req,
-      expand: () => req,
+      expand: (e: string) => ((call.expand = e), req),
       top: () => req,
       count: () => req,
       get: async () => this.handle(call),
@@ -103,7 +106,20 @@ export class FakeGraph {
     return req;
   }
 
-  private handle(call: Call): unknown {
+  private handle(input: Call): unknown {
+    // Un nextLink est une URL absolue : on en extrait chemin, filtre, expand et position.
+    let skip = 0;
+    let call = input;
+    if (call.path.startsWith('https://graph.microsoft.com/v1.0')) {
+      const u = new URL(call.path);
+      skip = Number(u.searchParams.get('$skiptoken') ?? 0);
+      call = {
+        ...call,
+        path: u.pathname.replace('/v1.0', ''),
+        filter: u.searchParams.get('$filter') ?? undefined,
+        expand: u.searchParams.get('$expand') ?? undefined,
+      };
+    }
     this.calls.push(call);
     const { method, path } = call;
     if (method === 'GET' && path === '/users') {
@@ -117,7 +133,9 @@ export class FakeGraph {
       const ext = /(extension_\w+) eq '([^']+)'/.exec(call.filter ?? '');
       if (ext) {
         const since = /employeeHireDate ge (\d{4}-\d{2}-\d{2})/.exec(call.filter ?? '')?.[1];
-        const value = [...this.users.values()]
+        // Comportement mesuré sur le vrai Graph : statut + employeeHireDate + $expand => 400.
+        if (since && call.expand) throw graphError(400, 'Request_UnsupportedQuery', 'Unsupported or invalid query filter clause specified');
+        const all = [...this.users.values()]
           .filter((u) => u.props[ext[1] as string] === ext[2])
           .filter((u) => !since || String(u.props.employeeHireDate).slice(0, 10) >= since)
           .map((u) => ({
@@ -128,7 +146,11 @@ export class FakeGraph {
             employeeHireDate: u.props.employeeHireDate,
             manager: u.manager ? this.managerOf(u.manager) : undefined,
           }));
-        return { value };
+        if (!this.pageSize) return { value: all };
+        const value = all.slice(skip, skip + this.pageSize);
+        if (skip + this.pageSize >= all.length) return { value };
+        const q = [`$filter=${encodeURIComponent(call.filter ?? '')}`, call.expand ? `$expand=${encodeURIComponent(call.expand)}` : '', `$skiptoken=${skip + this.pageSize}`];
+        return { value, '@odata.nextLink': `https://graph.microsoft.com/v1.0/users?${q.filter(Boolean).join('&')}` };
       }
       const upn = /userPrincipalName eq '([^']+)'/.exec(call.filter ?? '')?.[1];
       if (upn && this.hiddenOnce.delete(upn)) return { value: [] };

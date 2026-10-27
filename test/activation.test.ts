@@ -176,6 +176,47 @@ describe('GET /api/activations', () => {
     ]);
     expect((await h.call('GET', '/api/activations', DIR_ID)).status).toBe(403);
   });
+
+  it('ne filtre côté Graph que sur le statut : statut + date + $expand est refusé (400 Request_UnsupportedQuery)', async () => {
+    const g = h.ctx.graph;
+    g.addPending(EXT, { givenName: 'Recent', surname: 'Actif', statut: 'Actif', hireDate: '2026-10-25', enabled: true });
+    g.addPending(EXT, { givenName: 'Ancien', surname: 'Actif', statut: 'Actif', hireDate: '2026-06-01', enabled: true });
+
+    const res = await h.callRh('GET', '/api/activations');
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { demandes: { nom: string }[] };
+    expect(out.demandes.map((d) => d.nom)).toEqual(['Recent Actif']);
+
+    const lists = g.calls.filter((c) => c.method === 'GET' && c.path === '/users');
+    expect(lists.length).toBeGreaterThan(0);
+    for (const c of lists) {
+      expect(c.filter).toMatch(/^extension_\w+ eq '[^']+'$/);
+      expect(c.filter).not.toContain('employeeHireDate');
+      expect(c.headers.ConsistencyLevel).toBe('eventual');
+    }
+  });
+
+  it('suit les pages Graph : la date est filtrée dans le code, aucun compte récent n’est manqué', async () => {
+    const g = h.ctx.graph;
+    g.pageSize = 2;
+    for (let i = 0; i < 5; i++) g.addPending(EXT, { givenName: `Vieux${i}`, surname: 'Actif', statut: 'Actif', hireDate: '2026-01-01', enabled: true });
+    g.addPending(EXT, { givenName: 'Recent', surname: 'Actif', statut: 'Actif', hireDate: '2026-10-26', enabled: true });
+    for (let i = 0; i < 3; i++) g.addPending(EXT, { givenName: `Valide${i}`, surname: 'Test', statut: 'Validé', hireDate: TODAY });
+
+    const out = (await (await h.callRh('GET', '/api/activations')).json()) as { demandes: { nom: string; statut: string }[]; tronque: boolean };
+    expect(out.tronque).toBe(false);
+    expect(out.demandes.map((d) => d.nom).sort()).toEqual(['Recent Actif', 'Valide0 Test', 'Valide1 Test', 'Valide2 Test']);
+  });
+
+  it('plafonne le nombre de pages et signale tronque', async () => {
+    const g = h.ctx.graph;
+    g.pageSize = 1;
+    for (let i = 0; i < 12; i++) g.addPending(EXT, { givenName: `V${i}`, surname: 'Test', statut: 'Validé', hireDate: TODAY });
+
+    const out = (await (await h.callRh('GET', '/api/activations')).json()) as { demandes: unknown[]; tronque: boolean };
+    expect(out.tronque).toBe(true);
+    expect(out.demandes).toHaveLength(10);
+  });
 });
 
 describe('pages HTML', () => {
