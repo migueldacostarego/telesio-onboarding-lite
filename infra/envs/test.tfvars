@@ -14,6 +14,9 @@ sharepoint_site_id        = "telesiosandbox.sharepoint.com,2d8b30fc-31cb-4e5e-b1
 sharepoint_drive_id       = "b!_DCLLcsxXk6xu3i2lclsKn6NGam9jUxBjQ2ZYzG4uVfzh8EO915jQYBK01W-WkX0"
 sharepoint_folder_pattern = "{nom} {prenom}"
 
+# Grant write posé à la main via Graph Explorer (le jeton az n'a pas Sites.FullControl.All).
+manage_sharepoint_grant = false
+
 # Utilisateur RH de test (rh@telesiosandbox.onmicrosoft.com).
 rh_principal_object_ids        = ["1ec27e9b-ae17-43a4-98e6-2be67f1dcaad"]
 direction_principal_object_ids = []

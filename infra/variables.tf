@@ -90,6 +90,12 @@ variable "sharepoint_site_id" {
   }
 }
 
+variable "manage_sharepoint_grant" {
+  description = "Terraform pose le grant write sur le site (exige Sites.FullControl.All pour l'identité d'apply). false : grant posé à la main, hors Terraform (voir README)."
+  type        = bool
+  default     = true
+}
+
 variable "sharepoint_drive_id" {
   description = "Id Graph de la bibliothèque (drive) du site."
   type        = string

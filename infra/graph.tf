@@ -40,16 +40,20 @@ resource "msgraph_resource" "status_extension" {
   }
 
   # Détruire l'extension efface le statut de tous les comptes d'onboarding.
+  # Graph renvoie le nom complet (extension_<appId>_statutOnboarding) à la relecture : sans
+  # ignore_changes, Terraform y verrait une dérive du body et tenterait de la modifier.
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [body]
   }
 }
 
 # Sites.Selected n'ouvre aucun site tant qu'un grant explicite n'existe pas : rôle write sur le seul
 # site SHAREPOINT_SITE_ID, pour l'identité managée (identifiée par son client ID).
-# L'appelant (Terraform) doit pouvoir gérer les permissions du site (voir README).
+# L'appelant (Terraform) doit pouvoir gérer les permissions du site (voir README), sinon
+# manage_sharepoint_grant = false et le grant est posé à la main.
 resource "msgraph_resource" "sharepoint_site_grant" {
-  count = var.sharepoint_site_id == "" ? 0 : 1
+  count = var.sharepoint_site_id != "" && var.manage_sharepoint_grant ? 1 : 0
 
   url = "/sites/${var.sharepoint_site_id}/permissions"
 

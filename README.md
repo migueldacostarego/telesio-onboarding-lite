@@ -71,7 +71,7 @@ Application permissions accordées par Terraform ([infra/graph.tf](infra/graph.t
 | `User.ReadWrite.All` | Créer le compte désactivé, écrire ses attributs et `statutOnboarding`, puis l'activer. |
 | `User.Read.All` | Résoudre le manager et vérifier la disponibilité de l'email (UPN/mail) avant création. |
 | `UserAuthenticationMethod.ReadWrite.All` | Lister, supprimer et créer le TAP (`/authentication/temporaryAccessPassMethods`) à l'activation et à la régénération. **Sensible** : permet de gérer les méthodes d'authentification de n'importe quel utilisateur, donc de prendre un compte. Garde-fous dans l'app : seulement sur un compte d'onboarding au statut `Validé` ou `Actif` récent, rôle RH, usage unique, chaque action tracée (objectIds, jamais le TAP). |
-| `Sites.Selected` | Accès limité à **un seul** site SharePoint : créer les dossiers dans la bibliothèque `SHAREPOINT_DRIVE_ID`. Le grant explicite (rôle `write`, `POST /sites/{id}/permissions`) est posé par Terraform sur `sharepoint_site_id`. |
+| `Sites.Selected` | Accès limité à **un seul** site SharePoint : créer les dossiers dans la bibliothèque `SHAREPOINT_DRIVE_ID`. Le grant explicite (rôle `write`, `POST /sites/{id}/permissions`) est posé par Terraform sur `sharepoint_site_id`, ou à la main si `manage_sharepoint_grant = false` (voir ci-dessous). |
 | `GroupMember.Read.All` | `checkMemberGroups` : vérifier que le valideur appartient (même indirectement) au groupe `DIRECTION_OBJECT_ID`. Nécessaire seulement si `DIRECTION_TYPE=group`. |
 
 ## Développement
@@ -103,7 +103,7 @@ npm run dev     # build + démarre sur le port 3000
 
 1. **Identité d'apply** (une par environnement, inscription d'application avec identifiants fédérés GitHub, sujets `repo:<org>/<repo>:environment:dev` et `:environment:prod`) :
    - Azure : `Contributor` sur l'abonnement (création du groupe de ressources), `Storage Blob Data Contributor` sur le compte d'état ;
-   - Graph (application) : `Application.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All` (permissions Graph de l'identité managée et rôles RH/Direction), `Sites.FullControl.All` (grant SharePoint, seulement si `sharepoint_site_id` est renseigné).
+   - Graph (application) : `Application.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All` (permissions Graph de l'identité managée et rôles RH/Direction), `Sites.FullControl.All` (grant SharePoint, seulement si `sharepoint_site_id` est renseigné et `manage_sharepoint_grant` vaut `true`).
 2. **Consentement administrateur** : ces permissions Graph exigent un consentement d'administrateur. Il doit être donné une seule fois, à la main, par un compte `Privileged Role Administrator` ou `Global Administrator` Entra. Même chose pour la permission `UserAuthenticationMethod.ReadWrite.All` : Terraform l'attribue à l'identité managée, ce qui suppose que l'identité d'apply ait `AppRoleAssignment.ReadWrite.All` consenti.
 3. **Identité de plan** (lecture seule, une seule pour les PR, sujet `repo:<org>/<repo>:pull_request`) : `Reader`, `Storage Blob Data Reader` sur les états, et en lecture Graph au moins `Application.Read.All`. Certaines lectures (dont les permissions de site) peuvent exiger davantage : à ajuster à la première exécution.
 4. **GitHub** : variables de dépôt `AZURE_TENANT_ID`, `AZURE_CLIENT_ID_PLAN`, `AZURE_SUBSCRIPTION_ID_DEV`, `AZURE_SUBSCRIPTION_ID_PROD` ; environnements `dev` et `prod` avec les variables `AZURE_CLIENT_ID` et `AZURE_SUBSCRIPTION_ID`. Sur l'environnement `prod`, activer **Required reviewers** : c'est ce qui protège l'apply de prod. Aucun secret.
@@ -144,6 +144,19 @@ terraform apply -var-file=envs/dev.tfvars
 
 Avant le premier apply : renseigner `upn_domain` dans `envs/<env>.tfvars` (l'app refuse de démarrer sans). `direction_*` et `sharepoint_*` peuvent rester vides (routes Direction fermées, pas de grant SharePoint) jusqu'à décision.
 
+#### Grant SharePoint : géré par Terraform ou posé à la main
+
+La variable `manage_sharepoint_grant` (défaut `true`) décide qui pose le grant `write` du site :
+
+- `true` : Terraform le crée via `msgraph`. L'identité d'apply doit avoir `Sites.FullControl.All`.
+- `false` : Terraform ne gère pas le grant. À utiliser quand l'apply tourne avec un jeton qui n'a pas ce droit (par exemple `az login`, dont le jeton n'a aucun scope `Sites.*` : l'erreur est un 403 `accessDenied`). Poser alors le grant une fois, avec un compte administrateur ayant consenti `Sites.FullControl.All` (Graph Explorer, par exemple) :
+
+  `POST https://graph.microsoft.com/v1.0/sites/{sharepoint_site_id}/permissions`, corps `{"roles": ["write"], "grantedToIdentities": [{"application": {"id": "<managed_identity_client_id>", "displayName": "<nom de l'identité managée>"}}]}`
+
+  `managed_identity_client_id` est une sortie Terraform. Vérifier ensuite avec `GET /sites/{id}/permissions`. Le grant n'est pas dans l'état Terraform : il survit à un `destroy` et doit être retiré à la main (`DELETE /sites/{id}/permissions/{permission-id}`).
+
+L'environnement `test` utilise `false` ([envs/test.tfvars](infra/envs/test.tfvars)).
+
 ### CI/CD (OIDC, actions épinglées par SHA)
 
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) : build, lint, tests de l'app.
@@ -154,7 +167,7 @@ L'apply de prod re-planifie après approbation : relire le plan de la PR avant d
 
 ### Limites connues
 
-`terraform fmt` et `terraform validate` passent ; **`plan` et `apply` n'ont jamais été exécutés** (pas de tenant). À surveiller à la première exécution : la relecture Graph des ressources `msgraph_resource` (extension d'attribut, grant de site), le délai de propagation du credential fédéré avant la première connexion, et le déploiement zip avec l'authentification de base désactivée (Entra uniquement).
+`terraform fmt` et `terraform validate` passent. `plan` et `apply` ont été exécutés sur l'environnement `test` seulement (`dev` et `prod` : jamais). Le zip deploy fonctionne avec l'authentification de base désactivée. La relecture Graph de l'extension d'attribut renvoie le nom complet : `ignore_changes = [body]` évite une dérive permanente. À surveiller sur `dev` et `prod` : la relecture Graph du grant de site (si `manage_sharepoint_grant = true`) et le délai de propagation du credential fédéré avant la première connexion.
 
 Dépendances : versions épinglées, publiées depuis plus de 7 jours au moment de l'installation (`npm install --before=<date du jour - 7 j>`).
 
