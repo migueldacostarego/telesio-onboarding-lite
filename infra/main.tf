@@ -120,7 +120,7 @@ resource "azurerm_linux_web_app" "main" {
 
   app_settings = local.app_settings
 
-  # Easy Auth (authsettingsV2) : connexion Entra obligatoire sauf /healthz, flux code.
+  # Easy Auth (authsettingsV2) : connexion Entra obligatoire sauf /healthz, flux hybride (code id_token).
   # Le « secret » est l'identité managée : client_secret_setting_name pointe vers
   # OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID (voir la documentation App Service).
   auth_settings_v2 {

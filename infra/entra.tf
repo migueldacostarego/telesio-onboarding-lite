@@ -1,5 +1,5 @@
 # Inscription d'application pour Easy Auth, rôles RH et Direction, credential fédéré.
-# Sans secret ni flux implicite : Easy Auth utilise le flux code, avec l'identité managée
+# Sans secret ni jeton d'accès implicite : Easy Auth utilise le flux hybride, avec l'identité managée
 # comme assertion client.
 
 locals {
@@ -16,8 +16,10 @@ resource "azuread_application_registration" "web" {
   sign_in_audience               = "AzureADMyOrg"
   requested_access_token_version = 2
 
-  # Flux code uniquement : le flux implicite reste désactivé.
-  implicit_id_token_issuance_enabled     = false
+  # Easy Auth utilise le flux hybride (response_type=code id_token) et refuse tout callback sans
+  # id_token : les ID tokens doivent donc être activés (sinon 401 sur /.auth/login/aad/callback).
+  # L'émission implicite de jetons d'accès reste désactivée.
+  implicit_id_token_issuance_enabled     = true
   implicit_access_token_issuance_enabled = false
 }
 

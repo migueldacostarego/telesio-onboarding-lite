@@ -50,11 +50,11 @@ Le valideur est défini par `DIRECTION_TYPE` + `DIRECTION_OBJECT_ID` : `user` (c
 
 ## Easy Auth (Entra)
 
-Terraform ([infra/entra.tf](infra/entra.tf), [infra/main.tf](infra/main.tf)) crée tout, sans secret ni flux implicite :
+Terraform ([infra/entra.tf](infra/entra.tf), [infra/main.tf](infra/main.tf)) crée tout, sans secret ni jeton d'accès implicite (les ID tokens sont activés : Easy Auth exige le flux hybride) :
 
 - l'inscription d'application, avec les rôles d'application `RH` et `Direction`, et son service principal (`app_role_assignment_required` : seuls les utilisateurs affectés à un rôle se connectent) ;
 - un **credential fédéré** : l'identité managée de la Web App (émetteur `https://login.microsoftonline.com/<tenant>/v2.0`, sujet = objectId de l'identité, audience `api://AzureADTokenExchange`) remplace le secret client ;
-- `authsettingsV2` : authentification obligatoire sauf `/healthz`, flux code, `client_secret_setting_name = OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID`, ce réglage d'application contenant le client ID de l'identité managée (pas celui de l'inscription), comme le décrit la documentation App Service.
+- `authsettingsV2` : authentification obligatoire sauf `/healthz`, flux hybride `code id_token` (forcer `response_type=code` donne un 401 au callback : « no 'id_token' »), `client_secret_setting_name = OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID`, ce réglage d'application contenant le client ID de l'identité managée (pas celui de l'inscription), comme le décrit la documentation App Service.
 
 Les rôles s'affectent par `rh_principal_object_ids` et `direction_principal_object_ids` (fichiers `envs/*.tfvars`) ou dans le portail. Le valideur `direction_object_id` reçoit **automatiquement** le rôle `Direction`, car `app_role_assignment_required` refuse à la connexion toute personne sans rôle. L'API n'exige pas ce rôle : le valideur reste déterminé par `DIRECTION_TYPE` et `DIRECTION_OBJECT_ID`.
 
