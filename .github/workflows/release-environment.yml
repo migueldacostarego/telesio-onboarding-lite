@@ -1,0 +1,78 @@
+# Workflow réutilisable : terraform apply d'un environnement, puis déploiement de l'app.
+# Variables attendues (Settings > Environments > <env> > Variables), jamais de secret :
+#   AZURE_CLIENT_ID        identité d'apply de l'environnement (identifiant fédéré : environment:<env>)
+#   AZURE_SUBSCRIPTION_ID  abonnement de l'environnement
+# Variable de dépôt : AZURE_TENANT_ID
+name: Release environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: dev ou prod
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: terraform-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init -backend-config=envs/${{ inputs.environment }}.backend.hcl
+
+      - name: Terraform plan
+        working-directory: infra
+        run: terraform plan -var-file=envs/${{ inputs.environment }}.tfvars -out=tfplan
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply tfplan
+
+      - name: Sorties Terraform
+        id: tf
+        working-directory: infra
+        run: |
+          echo "app_name=$(terraform output -raw app_name)" >> "$GITHUB_OUTPUT"
+          echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: app-package
+
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: azure/webapps-deploy@02a81bead70021f5284939794bcec79c271ab383 # v3.0.8
+        with:
+          app-name: ${{ steps.tf.outputs.app_name }}
+          package: app.zip
+
+      # /healthz est exclu de l'authentification Easy Auth.
+      - name: Contrôle de santé
+        run: curl --fail --silent --show-error --retry 10 --retry-delay 15 --retry-all-errors "${{ steps.tf.outputs.app_url }}/healthz"
