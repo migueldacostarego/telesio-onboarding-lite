@@ -13,3 +13,6 @@ infra/.terraform/
 *.tfplan
 tfplan
 crash.log
+
+# Réglages d'éditeur
+.vscode/
