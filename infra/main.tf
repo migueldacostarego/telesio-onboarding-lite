@@ -144,4 +144,10 @@ resource "azurerm_linux_web_app" "main" {
   }
 
   depends_on = [azuread_application_federated_identity_credential.easyauth]
+
+  # Azure ajoute ce tag tout seul quand Application Insights est relié : sans cela,
+  # chaque plan proposerait de le retirer.
+  lifecycle {
+    ignore_changes = [tags["hidden-link: /app-insights-resource-id"]]
+  }
 }
