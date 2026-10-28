@@ -11,6 +11,8 @@ label{display:block;margin:.5rem 0}input,select,button{font:inherit;padding:.35r
 input{width:100%;max-width:28rem;box-sizing:border-box}
 table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
 .msg{padding:.6rem;margin:.8rem 0;border:1px solid #888}.err{border-color:#b00020}.ok{border-color:#1b6e2d}
+.msg.err.lic{border-width:3px;font-weight:600}
+.warn{border-color:#b26a00}.msg.warn{border-width:3px;font-weight:600}
 .tap{font:1.6rem monospace;letter-spacing:.1em;padding:.6rem;border:2px solid #1a1a1a;display:inline-block;margin:.5rem 0}
 `;
 
@@ -64,9 +66,9 @@ function el(tag, props, ...kids) {
   for (const kid of kids) e.append(kid);
   return e;
 }
-function say(text, kind) {
+function say(text, kind, extra) {
   const m = $('msg'); m.replaceChildren();
-  if (text) m.append(el('div', { class: 'msg ' + (kind || ''), text }));
+  if (text) m.append(el('div', { class: 'msg ' + (kind || '') + (extra ? ' ' + extra : ''), text }));
 }
 async function api(method, path, body) {
   try {
@@ -93,6 +95,19 @@ function describe(r) {
 
 export const DEMANDE_SCRIPT = `
 let timer;
+async function loadLicences() {
+  const r = await api('GET', '/api/licences');
+  if (!r.ok) return say(describe(r), 'err');
+  const sel = $('licence');
+  sel.replaceChildren(el('option', { value: '', text: 'Choisir une licence' }));
+  for (const l of r.data.licences) {
+    const text = l.libelle + ' : ' + (l.disponibles > 0 ? l.disponibles + ' disponible' + (l.disponibles > 1 ? 's' : '') : 'aucune disponible');
+    const props = { value: l.skuId, text };
+    if (l.disponibles === 0) props.disabled = '';
+    sel.append(el('option', props));
+  }
+}
+loadLicences();
 $('q').addEventListener('input', () => {
   clearTimeout(timer);
   timer = setTimeout(search, 300);
@@ -117,11 +132,13 @@ $('form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   say('');
   const f = new FormData($('form'));
-  const body = Object.fromEntries(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId'].map((k) => [k, String(f.get(k) || '')]));
+  const body = Object.fromEntries(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'licence'].map((k) => [k, String(f.get(k) || '')]));
   const r = await api('POST', '/api/demandes', body);
+  if (!r.ok && r.data && r.data.code === 'licence_indisponible') { loadLicences(); return say('Aucune licence disponible pour ce choix : choisissez une autre licence.', 'err', 'lic'); }
   if (!r.ok) return say(describe(r), 'err');
   say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + '. Elle attend la validation de la direction.', 'ok');
   $('form').reset(); $('manager').textContent = 'aucun';
+  loadLicences();
 });
 `;
 
@@ -146,8 +163,14 @@ async function act(d, action, body) {
   say('');
   if (action === 'refuser' && !confirm('Refuser cette demande ? Le compte sera supprimé (récupérable 30 jours).')) return;
   const r = await api('POST', '/api/demandes/' + d.id + '/' + action, body);
+  if (!r.ok && r.data && r.data.code === 'licence_indisponible') {
+    return say('Aucune licence disponible : la demande de ' + d.nom + ' reste en attente. Libérez ou commandez une licence, puis validez à nouveau.', 'err', 'lic');
+  }
+  if (r.status === 202 && r.data && r.data.code === 'licence_en_cours') {
+    return say(r.data.message + ' (demande de ' + d.nom + ', toujours en attente).', 'warn');
+  }
   if (!r.ok) return say(describe(r), 'err');
-  say(action === 'valider' ? 'Demande validée, dossier SharePoint prêt.' : 'Demande refusée, compte supprimé.', 'ok');
+  say(action === 'valider' ? 'Demande validée, licence attribuée, dossier SharePoint prêt.' : 'Demande refusée, compte supprimé.', 'ok');
   load();
 }
 load();

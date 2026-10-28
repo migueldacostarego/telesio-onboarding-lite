@@ -4,12 +4,16 @@ import { DirectoryError, type Directory, type OnboardingUser, type PendingDemand
 import { buildFolderName } from './folder';
 import type { Library } from './sharepoint';
 import { ServiceError } from './demandes';
+import { ensureLicense } from './licence';
 
 export interface DirectionDeps {
   config: ReadyConfig;
   directory: Directory;
   library?: Library;
   audit: Audit;
+  /** Attentes entre deux lectures de l'état de licence (traitement par groupe asynchrone). */
+  licensePollDelaysMs?: number[];
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** Exécute une étape Graph ; toute erreur devient un 502 qui nomme l'étape (jamais de message brut). */
@@ -43,7 +47,7 @@ async function loadForAction(
   allowed: readonly string[],
 ): Promise<OnboardingUser> {
   const user = await step(deps, actor, 'lecture', id, {}, () =>
-    deps.directory.getOnboardingUser(id, deps.config.statusExtension),
+    deps.directory.getOnboardingUser(id, deps.config.statusExtension, deps.config.licenseExtension),
   );
   if (!user) {
     deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
@@ -71,22 +75,35 @@ export async function listDemandes(
 export interface Validation {
   id: string;
   statut: 'Validé';
+  /** deja : le compte portait déjà la licence (reprise), aucun ajout au groupe. */
+  licence: { deja: boolean };
   dossier: { id: string; url: string | null; cree: boolean };
   /** true : demande déjà Validé, seule la création du dossier a été reprise. */
   reprise: boolean;
 }
 
 /**
- * EnAttente → Validé, puis dossier SharePoint (idempotent).
- * Un compte déjà Validé est accepté : c'est la reprise après un échec SharePoint (le statut reste Validé).
+ * Licence (avant toute écriture de statut), puis EnAttente → Validé, puis dossier SharePoint (idempotent).
+ * Aucune licence disponible : 409 et le statut ne change pas.
+ * Un compte déjà Validé est accepté : c'est la reprise après un échec SharePoint (le statut reste Validé) ;
+ * un compte déjà licencié ne repasse pas par le décompte.
  */
 export async function validerDemande(deps: DirectionDeps, actor: string, id: string): Promise<Validation> {
   const { config, directory, audit, library } = deps;
   if (!library) {
     throw new ServiceError(503, { error: 'SharePoint non configuré (SHAREPOINT_SITE_ID, SHAREPOINT_DRIVE_ID)' });
   }
+  if (config.licenses.length === 0) throw new ServiceError(503, { error: 'Licences non configurées (LICENSES)' });
   const user = await loadForAction(deps, actor, id, ['EnAttente', 'Validé']);
   const reprise = user.statut === 'Validé';
+
+  // Le SKU est celui choisi par RH (extension licenceOnboarding) ; absent ou retiré de la liste : 409, rien n'est écrit.
+  const option = config.licenses.find((l) => l.skuId === user.licence);
+  if (!option) {
+    audit.track({ action: 'licence.non_choisie', actor, outcome: 'refuse', cible: id });
+    throw new ServiceError(409, { error: 'Licence non définie ou non proposée pour cette demande', code: 'licence_inconnue' });
+  }
+  const licence = await ensureLicense(deps, actor, id, option);
 
   if (!reprise) {
     await step(deps, actor, 'statut', id, {}, () => directory.setExtension(id, config.statusExtension, 'Validé'));
@@ -106,7 +123,7 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
   const folder = await step(deps, actor, 'dossier_sharepoint', id, after, () => library.ensureFolder(name));
   // Ni le nom du dossier (contient le nom de la personne) ni l'URL ne sont tracés.
   audit.track({ action: 'demande.dossier', actor, outcome: 'ok', cible: id, dossier: folder.id, cree: folder.created });
-  return { id, statut: 'Validé', dossier: { id: folder.id, url: folder.webUrl, cree: folder.created }, reprise };
+  return { id, statut: 'Validé', licence, dossier: { id: folder.id, url: folder.webUrl, cree: folder.created }, reprise };
 }
 
 /** Trace le refus (longueur du motif seulement), puis supprime le compte (corbeille Entra, 30 jours). */

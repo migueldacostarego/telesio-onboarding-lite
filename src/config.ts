@@ -23,6 +23,17 @@ export interface Config {
   direction: { type?: DirectionType; objectId?: string };
   /** Dossier SharePoint : site, bibliothèque (drive) et motif de nom ({nom}, {prenom}, {id}). */
   sharePoint: { siteId?: string; driveId?: string; folderPattern: string };
+  /** Licences proposées à RH : un SKU et son groupe Entra (licence par groupe). Vide = demandes et validation répondent 503. */
+  licenses: LicenseOption[];
+  /** Nom complet de l'attribut d'extension qui porte le skuId choisi : extension_<appId sans tirets>_licenceOnboarding. */
+  licenseExtension?: string;
+}
+
+export interface LicenseOption {
+  skuId: string;
+  libelle: string;
+  /** Groupe de sécurité porteur de la licence de ce SKU. */
+  groupId: string;
 }
 
 export type ReadyConfig = Config & { upnDomain: string; statusExtension: string };
@@ -46,6 +57,35 @@ function intIn(raw: string | undefined, name: string, def: number, min: number, 
   return n;
 }
 
+/** LICENSES : tableau JSON [{ skuId, libelle, groupId }] ; GUID valides et uniques, libellé de 1 à 64 caractères. */
+function parseLicenses(raw: string | undefined): LicenseOption[] {
+  const v = opt(raw);
+  if (v === undefined) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(v);
+  } catch {
+    throw new Error('LICENSES invalide (attendu : tableau JSON [{ "skuId", "libelle", "groupId" }])');
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('LICENSES invalide (tableau non vide attendu)');
+  const seenSku = new Set<string>();
+  const seenGroup = new Set<string>();
+  return parsed.map((item: unknown, i: number) => {
+    const o = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+    const skuId = typeof o.skuId === 'string' ? o.skuId.trim().toLowerCase() : '';
+    const groupId = typeof o.groupId === 'string' ? o.groupId.trim().toLowerCase() : '';
+    const libelle = typeof o.libelle === 'string' ? o.libelle.trim() : '';
+    if (!GUID_RE.test(skuId)) throw new Error(`LICENSES[${i}].skuId invalide (attendu : GUID)`);
+    if (!GUID_RE.test(groupId)) throw new Error(`LICENSES[${i}].groupId invalide (attendu : GUID)`);
+    if (libelle.length < 1 || libelle.length > 64) throw new Error(`LICENSES[${i}].libelle invalide (1 à 64 caractères)`);
+    if (seenSku.has(skuId)) throw new Error(`LICENSES[${i}].skuId en double`);
+    if (seenGroup.has(groupId)) throw new Error(`LICENSES[${i}].groupId en double (un groupe par SKU)`);
+    seenSku.add(skuId);
+    seenGroup.add(groupId);
+    return { skuId, libelle, groupId };
+  });
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const type = opt(env.DIRECTION_TYPE);
   if (type !== undefined && type !== 'user' && type !== 'group') {
@@ -65,6 +105,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const driveId = opt(env.SHAREPOINT_DRIVE_ID);
   if (siteId !== undefined && !GRAPH_ID_RE.test(siteId)) throw new Error('SHAREPOINT_SITE_ID invalide');
   if (driveId !== undefined && !GRAPH_ID_RE.test(driveId)) throw new Error('SHAREPOINT_DRIVE_ID invalide');
+  const licenses = parseLicenses(env.LICENSES);
+  const licenseExtension = opt(env.ENTRA_LICENSE_EXTENSION);
+  if (licenseExtension !== undefined && !EXTENSION_RE.test(licenseExtension)) {
+    throw new Error('ENTRA_LICENSE_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
+  }
+  if (licenses.length > 0 && licenseExtension === undefined) {
+    throw new Error('ENTRA_LICENSE_EXTENSION requis quand LICENSES est défini');
+  }
   const folderPattern = opt(env.SHAREPOINT_FOLDER_PATTERN) ?? DEFAULT_FOLDER_PATTERN;
   const patternError = checkFolderPattern(folderPattern);
   if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
@@ -86,6 +134,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustAuthHeaders: easyAuth || devBypass,
     direction: { type, objectId },
     sharePoint: { siteId, driveId, folderPattern },
+    licenses,
+    licenseExtension,
   };
 }
 

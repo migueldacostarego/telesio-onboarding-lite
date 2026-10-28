@@ -29,6 +29,8 @@ export interface NewUser {
   employeeHireDate: string;
   jobTitle: string;
   department: string;
+  /** Requis pour qu'Entra attribue une licence (licence par groupe). */
+  usageLocation: string;
   passwordProfile: { password: string; forceChangePasswordNextSignIn: boolean };
 }
 
@@ -42,6 +44,8 @@ export interface OnboardingUser {
   statut: string | null;
   /** AAAA-MM-JJ (employeeHireDate) ; null si absente. */
   dateArrivee: string | null;
+  /** skuId choisi par RH (extension licenceOnboarding) ; null si absent (demande antérieure au choix de licence). */
+  licence: string | null;
 }
 
 /** Réponse Graph réduite aux champs utiles ; le secret n'existe que dans cet objet, jamais dans un log. */
@@ -62,7 +66,37 @@ export interface PendingDemande {
   dateArrivee: string | null;
 }
 
+/** Disponibilité d'un SKU : prepaidUnits.enabled et consumedUnits de GET /subscribedSkus. */
+export interface SkuAvailability {
+  enabled: number;
+  consumed: number;
+}
+
+/** Entrée licenseAssignmentStates de l'utilisateur pour un SKU (null : pas encore traitée par Entra). */
+export interface LicenseState {
+  /** Active, ActiveWithError, Disabled, Error. */
+  state: string;
+  /** CountViolation, MutuallyExclusiveViolation, DependencyViolation, ProhibitedInUsageLocationViolation, UniquenessViolation, Other ; null si aucune. */
+  error: string | null;
+  /** Id du groupe qui porte la licence ; null si attribuée directement. */
+  assignedByGroup: string | null;
+}
+
+/** Lecture de licenseAssignmentStates : l'entrée du SKU (null si absente) et le nombre total d'entrées de l'utilisateur. */
+export interface LicenseRead {
+  entry: LicenseState | null;
+  total: number;
+}
+
 export interface Directory {
+  /** GET /subscribedSkus : unités par skuId (en minuscules). Un SKU absent du tenant n'y figure pas. */
+  listSkuAvailability(): Promise<Map<string, SkuAvailability>>;
+  /** GET /users/{id}?$select=id,licenseAssignmentStates ; l'entrée est retrouvée par skuId (sans tenir compte de la casse). */
+  readLicenseStates(userId: string, skuId: string): Promise<LicenseRead>;
+  /** Idempotent : un utilisateur déjà membre n'est pas une erreur. */
+  addGroupMember(groupId: string, userId: string): Promise<void>;
+  /** Idempotent : un utilisateur absent du groupe n'est pas une erreur. */
+  removeGroupMember(groupId: string, userId: string): Promise<void>;
   /** hiredSince : AAAA-MM-JJ, ne garde que les arrivées à partir de cette date. */
   listByStatut(
     ext: string,
@@ -73,7 +107,8 @@ export interface Directory {
   listTapIds(userId: string): Promise<string[]>;
   deleteTap(userId: string, tapId: string): Promise<void>;
   createTap(userId: string, lifetimeInMinutes: number): Promise<TapResult>;
-  getOnboardingUser(id: string, ext: string): Promise<OnboardingUser | null>;
+  /** licenseExt : nom de l'extension qui porte le skuId choisi (lue en plus du statut). */
+  getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null>;
   deleteUser(id: string): Promise<void>;
   isMemberOfGroup(userId: string, groupId: string): Promise<boolean>;
   search(q: string): Promise<DirectoryUser[]>;
@@ -236,11 +271,11 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async getOnboardingUser(id: string, ext: string): Promise<OnboardingUser | null> {
+  async getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null> {
     try {
       const u = await this.client
         .api(`/users/${id}`)
-        .select(`id,displayName,givenName,surname,accountEnabled,employeeHireDate,${ext}`)
+        .select(`id,displayName,givenName,surname,accountEnabled,employeeHireDate,${ext}${licenseExt ? `,${licenseExt}` : ''}`)
         .get();
       return {
         id: u.id as string,
@@ -250,6 +285,7 @@ export class GraphDirectory implements Directory {
         accountEnabled: u.accountEnabled !== false,
         statut: typeof u[ext] === 'string' ? (u[ext] as string) : null,
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
+        licence: licenseExt && typeof u[licenseExt] === 'string' ? (u[licenseExt] as string).toLowerCase() : null,
       };
     } catch (err) {
       const e = wrap(err);
@@ -264,6 +300,63 @@ export class GraphDirectory implements Directory {
       await this.client.api(`/users/${id}`).delete();
     } catch (err) {
       throw wrap(err);
+    }
+  }
+
+  async listSkuAvailability(): Promise<Map<string, SkuAvailability>> {
+    try {
+      const res = await this.client.api('/subscribedSkus').get();
+      const out = new Map<string, SkuAvailability>();
+      for (const s of (res?.value ?? []) as { skuId?: string; consumedUnits?: number; prepaidUnits?: { enabled?: number } }[]) {
+        if (s.skuId) out.set(s.skuId.toLowerCase(), { enabled: s.prepaidUnits?.enabled ?? 0, consumed: s.consumedUnits ?? 0 });
+      }
+      return out;
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async readLicenseStates(userId: string, skuId: string): Promise<LicenseRead> {
+    try {
+      const u = await this.client.api(`/users/${userId}`).select('id,licenseAssignmentStates').get();
+      const states = (u?.licenseAssignmentStates ?? []) as {
+        skuId?: string;
+        state?: string;
+        error?: string | null;
+        assignedByGroup?: string | null;
+      }[];
+      const own = states.filter((s) => s.skuId?.toLowerCase() === skuId.toLowerCase());
+      if (own.length === 0) return { entry: null, total: states.length };
+      // Graph renvoie error = "None" (et non null) pour une entrée sans erreur.
+      const erreur = (x: { error?: string | null }) => (x.error && x.error !== 'None' ? x.error : null);
+      // Plusieurs entrées possibles (directe et par groupe) : une entrée sans erreur l'emporte.
+      const s = own.find((x) => x.state === 'Active' && !erreur(x)) ?? own[0]!;
+      return { entry: { state: s.state ?? 'Error', error: erreur(s), assignedByGroup: s.assignedByGroup ?? null }, total: states.length };
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async addGroupMember(groupId: string, userId: string): Promise<void> {
+    try {
+      await this.client
+        .api(`/groups/${groupId}/members/$ref`)
+        .post({ '@odata.id': `https://graph.microsoft.com/v1.0/directoryObjects/${userId}` });
+    } catch (err) {
+      const e = err as { statusCode?: number; message?: string };
+      // Graph répond 400 « One or more added object references already exist » si l'utilisateur est déjà membre.
+      if (e?.statusCode === 400 && /already exist/i.test(e.message ?? '')) return;
+      throw wrap(err);
+    }
+  }
+
+  async removeGroupMember(groupId: string, userId: string): Promise<void> {
+    try {
+      await this.client.api(`/groups/${groupId}/members/${userId}/$ref`).delete();
+    } catch (err) {
+      const e = wrap(err);
+      if (e.kind === 'notFound') return;
+      throw e;
     }
   }
 

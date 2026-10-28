@@ -9,7 +9,8 @@ locals {
   graph_app_roles = [
     "User.ReadWrite.All",                     # créer et activer le compte, écrire statutOnboarding, supprimer
     "User.Read.All",                          # manager, disponibilité de l'UPN
-    "GroupMember.Read.All",                   # checkMemberGroups (valideur de type group)
+    "GroupMember.ReadWrite.All",              # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups (valideur group)
+    "LicenseAssignment.Read.All",             # GET /subscribedSkus : licences disponibles
     "UserAuthenticationMethod.ReadWrite.All", # TAP (sensible)
     "Sites.Selected",                         # un seul site, via le grant ci-dessous
   ]
@@ -42,6 +43,27 @@ resource "msgraph_resource" "status_extension" {
   # Détruire l'extension efface le statut de tous les comptes d'onboarding.
   # Graph renvoie le nom complet (extension_<appId>_statutOnboarding) à la relecture : sans
   # ignore_changes, Terraform y verrait une dérive du body et tenterait de la modifier.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
+# Attribut d'extension licenceOnboarding : skuId choisi par RH, lu à la validation pour viser le bon groupe.
+# Même mécanique que statutOnboarding (nom complet extension_<appId>_licenceOnboarding renvoyé par Graph).
+resource "msgraph_resource" "license_extension" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "licenceOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
   lifecycle {
     prevent_destroy = true
     ignore_changes  = [body]

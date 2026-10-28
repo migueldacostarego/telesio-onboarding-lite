@@ -51,9 +51,11 @@ APPLY_APP="gh-telesio-onboarding-apply-${ENVIRONMENT}"
 ISSUER="https://token.actions.githubusercontent.com"
 GRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
 # Permissions Graph (application). Le plan ne lit que ; l'apply crée les inscriptions qu'il possède et
-# attribue les rôles (permissions de l'identité managée, rôles RH/Direction).
-PLAN_GRAPH_ROLES=(Application.Read.All)
-APPLY_GRAPH_ROLES=(Application.ReadWrite.OwnedBy AppRoleAssignment.ReadWrite.All)
+# attribue les rôles (permissions de l'identité managée, rôles RH/Direction) et gère le groupe de licence.
+# Licence : le plan relit le groupe et sa licence ; l'apply crée le groupe (Group.Create, User.Read.All : minimum
+# documenté du provider azuread_group) et lui attribue le SKU (LicenseAssignment.ReadWrite.All, azuread_group_license).
+PLAN_GRAPH_ROLES=(Application.Read.All Group.Read.All LicenseAssignment.Read.All)
+APPLY_GRAPH_ROLES=(Application.ReadWrite.OwnedBy AppRoleAssignment.ReadWrite.All Group.Create User.Read.All LicenseAssignment.ReadWrite.All)
 
 # Les journaux vont sur stderr : les fonctions renvoient leur résultat sur stdout.
 log() { printf '> %s\n' "$*" >&2; }

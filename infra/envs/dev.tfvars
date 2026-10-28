@@ -15,6 +15,14 @@ sharepoint_site_id        = ""
 sharepoint_drive_id       = ""
 sharepoint_folder_pattern = "{nom} {prenom}"
 
+# Licences proposées à RH : même tenant que test, mêmes SKU ; un groupe propre à dev créé par Terraform.
+licenses = {
+  business-premium = {
+    libelle = "Business Premium"
+    sku_id  = "cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46"
+  }
+}
+
 # Affectation des rôles d'application (objectIds d'utilisateurs ou de groupes).
 rh_principal_object_ids        = ["1ec27e9b-ae17-43a4-98e6-2be67f1dcaad"]
 direction_principal_object_ids = []

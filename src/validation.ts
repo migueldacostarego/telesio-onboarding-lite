@@ -1,3 +1,4 @@
+import type { LicenseOption } from './config';
 import { MAX_LOCAL_BASE, normalizePart, upnBase } from './upn';
 
 export interface DemandeInput {
@@ -8,6 +9,8 @@ export interface DemandeInput {
   poste: string;
   service: string;
   managerId: string;
+  /** skuId (en minuscules) choisi parmi les licences proposées. */
+  licence: string;
 }
 
 export type Validation =
@@ -36,7 +39,7 @@ function isRealDate(s: string): boolean {
 }
 
 /** `today` : AAAA-MM-JJ dans le fuseau métier (voir todayIn). */
-export function validateDemande(body: unknown, today: string): Validation {
+export function validateDemande(body: unknown, today: string, licenses: readonly LicenseOption[]): Validation {
   const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const details: Record<string, string> = {};
 
@@ -64,10 +67,14 @@ export function validateDemande(body: unknown, today: string): Validation {
   const managerId = typeof b.managerId === 'string' ? b.managerId.trim() : '';
   if (!GUID_RE.test(managerId)) details.managerId = 'objectId Entra (GUID) requis';
 
-  if (Object.keys(details).length > 0 || !prenom || !nom || !poste || !service) {
+  const choix = typeof b.licence === 'string' ? b.licence.trim().toLowerCase() : '';
+  const licence = licenses.find((l) => l.skuId === choix)?.skuId;
+  if (!licence) details.licence = 'licence non proposée (choisir dans la liste)';
+
+  if (Object.keys(details).length > 0 || !licence || !prenom || !nom || !poste || !service) {
     return { ok: false, details };
   }
-  return { ok: true, value: { prenom, nom, dateArrivee, poste, service, managerId } };
+  return { ok: true, value: { prenom, nom, dateArrivee, poste, service, managerId, licence } };
 }
 
 export type MotifValidation = { ok: true; motif: string } | { ok: false; details: Record<string, string> };

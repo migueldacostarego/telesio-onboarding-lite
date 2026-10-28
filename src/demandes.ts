@@ -19,10 +19,12 @@ export class ServiceError extends Error {
     public readonly status: number,
     public readonly body: Record<string, unknown>,
   ) {
-    super(String(body.error));
+    super(String(body.error ?? body.message));
   }
 }
 
+/** Pays d'usage posé à la création : Entra n'attribue aucune licence (par groupe) sans usageLocation. */
+export const USAGE_LOCATION = 'FR';
 const MAX_UPN_ATTEMPTS = 20;
 const DEFAULT_RETRY_DELAYS = [500, 1500, 3000];
 
@@ -61,6 +63,15 @@ export async function createDemande(
   let targetId: string | undefined;
 
   try {
+    // Avant toute écriture : la licence choisie doit encore avoir une unité libre (la réservation se fait à la validation).
+    step = 'licence_disponibilite';
+    const units = (await directory.listSkuAvailability()).get(input.licence);
+    if (!units || units.enabled - units.consumed <= 0) {
+      audit.track({ action: 'licence.indisponible', actor, outcome: 'refuse', sku: input.licence, phase: 'demande' });
+      throw new ServiceError(409, { error: 'Aucune licence disponible', code: 'licence_indisponible' });
+    }
+
+    step = 'manager_verification';
     const manager = await directory.getUser(input.managerId);
     if (!manager || !manager.accountEnabled) {
       const details = { managerId: manager ? 'compte désactivé' : 'introuvable' };
@@ -87,6 +98,7 @@ export async function createDemande(
           employeeHireDate: `${input.dateArrivee}T00:00:00Z`,
           jobTitle: input.poste,
           department: input.service,
+          usageLocation: USAGE_LOCATION,
           passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
         });
         upn = candidate;
@@ -117,6 +129,11 @@ export async function createDemande(
       }
     }
     audit.track({ action: 'demande.manager_affecte', actor, outcome: 'ok', cible: targetId });
+
+    // Le choix de licence est posé avant le statut : le statut reste l'écriture finale.
+    step = 'licence_choix';
+    await directory.setExtension(targetId, config.licenseExtension as string, input.licence);
+    audit.track({ action: 'demande.licence_posee', actor, outcome: 'ok', cible: targetId, sku: input.licence });
 
     step = 'statut';
     await directory.setExtension(targetId, config.statusExtension, 'EnAttente');

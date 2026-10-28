@@ -16,6 +16,16 @@ output "status_extension" {
   value       = msgraph_resource.status_extension.output.name
 }
 
+output "license_group_ids" {
+  description = "objectId du groupe de licence de chaque licence proposée (clé de var.licenses)."
+  value       = local.license_group_ids
+}
+
+output "license_extension" {
+  description = "Nom complet de l'attribut d'extension licenceOnboarding (ENTRA_LICENSE_EXTENSION)."
+  value       = msgraph_resource.license_extension.output.name
+}
+
 output "auth_app_client_id" {
   description = "Client ID de l'inscription Easy Auth."
   value       = azuread_application_registration.web.client_id

@@ -113,6 +113,40 @@ variable "sharepoint_folder_pattern" {
   default     = "{nom} {prenom}"
 }
 
+variable "licenses" {
+  description = "Licences proposées à RH, par clé courte (minuscules, chiffres, tirets). sku_id : skuId (GUID) de GET /subscribedSkus, pas son id. group_id vide : Terraform crée le groupe de licence et lui attribue le SKU ; sinon objectId d'un groupe de sécurité existant porteur de la licence (rien n'y est posé). Vide : aucune licence, les demandes et la validation répondent 503."
+  type = map(object({
+    libelle  = string
+    sku_id   = string
+    group_id = optional(string, "")
+  }))
+  default = {}
+
+  validation {
+    condition     = alltrue([for k, v in var.licenses : can(regex("^[a-z0-9-]{1,32}$", k))])
+    error_message = "Les clés de licences doivent être en minuscules, chiffres et tirets (32 caractères max)."
+  }
+
+  validation {
+    condition     = alltrue([for v in values(var.licenses) : length(trimspace(v.libelle)) >= 1 && length(trimspace(v.libelle)) <= 64])
+    error_message = "libelle : 1 à 64 caractères."
+  }
+
+  validation {
+    condition = alltrue([
+      for v in values(var.licenses) :
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", v.sku_id)) &&
+      (v.group_id == "" || can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", v.group_id)))
+    ])
+    error_message = "sku_id et group_id doivent être des GUID (group_id peut être vide)."
+  }
+
+  validation {
+    condition     = length(distinct([for v in values(var.licenses) : lower(v.sku_id)])) == length(var.licenses)
+    error_message = "Un SKU ne peut apparaître qu'une fois."
+  }
+}
+
 variable "tap_lifetime_minutes" {
   description = "Durée de vie du TAP en minutes (10 à 43200). La politique TAP du tenant doit l'accepter."
   type        = number

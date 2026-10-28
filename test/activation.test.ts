@@ -240,6 +240,15 @@ describe('pages HTML', () => {
     expect(html).not.toMatch(/innerHTML|localStorage|sessionStorage/);
     expect(html).not.toMatch(/[—]/); // pas de tiret cadratin dans l'interface
   });
+
+  it('/direction : le 202 « licence en cours » s’affiche en avertissement, le script reste valide', async () => {
+    const html = await (await fetch(`${h.base}/direction`)).text();
+    const script = /<script nonce="[^"]+">([\s\S]*)<\/script>/.exec(html)![1]!;
+    expect(() => new Function(script)).not.toThrow();
+    expect(script).toContain("r.status === 202 && r.data && r.data.code === 'licence_en_cours'");
+    expect(script).toContain("'warn'");
+    expect(html).toContain('.msg.warn{');
+  });
 });
 
 describe('fuseau et config', () => {

@@ -6,6 +6,7 @@ import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations } from '../activation';
 import { listDemandes, refuserDemande, validerDemande } from '../direction';
+import { listLicences, SkuAvailabilityCache } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
 import type { Library } from '../sharepoint';
 import { GUID_RE, validateDemande, validateMotif } from '../validation';
@@ -18,6 +19,8 @@ export interface ApiDeps {
   library?: Library;
   now?: () => Date;
   managerRetryDelaysMs?: number[];
+  /** Attentes entre deux lectures de l'état de licence après l'ajout au groupe. */
+  licensePollDelaysMs?: number[];
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -46,6 +49,8 @@ const json = express.json({ limit: '16kb', inflate: false });
 export function createApiRouter(deps: ApiDeps): Router {
   const { config, directory, audit } = deps;
   const now = deps.now ?? (() => new Date());
+  // Affichage du formulaire RH uniquement : création de demande et validation direction relisent /subscribedSkus en direct.
+  const skuCache = new SkuAvailabilityCache(() => now().getTime());
   const api = Router();
   // Aucune réponse de l'API n'est mise en cache (TAP, listes nominatives), erreurs comprises.
   api.use((_req, res, next) => {
@@ -75,9 +80,26 @@ export function createApiRouter(deps: ApiDeps): Router {
     }
   });
 
+  const noLicenses = (res: Res): boolean => {
+    if (config.licenses.length > 0) return false;
+    res.status(503).json({ error: 'Licences non configurées (LICENSES)' });
+    return true;
+  };
+
+  // GET /api/licences : licences proposées à RH, avec le nombre d'unités libres
+  api.get('/licences', rh, async (_req, res) => {
+    if (noLicenses(res)) return;
+    try {
+      res.json(await listLicences(deps, actor(res), skuCache));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   // POST /api/demandes : crée le compte Entra désactivé (statutOnboarding=EnAttente)
   api.post('/demandes', rh, jsonOnly, json, async (req, res) => {
-    const v = validateDemande(req.body, todayIn(config.timeZone, now()));
+    if (noLicenses(res)) return;
+    const v = validateDemande(req.body, todayIn(config.timeZone, now()), config.licenses);
     if (!v.ok) {
       audit.track({ action: 'demande.rejetee', actor: actor(res), outcome: 'refuse', champs: Object.keys(v.details).join(',') });
       res.status(400).json({ error: 'Entrée invalide', details: v.details });
@@ -87,6 +109,8 @@ export function createApiRouter(deps: ApiDeps): Router {
       const created = await createDemande(deps, actor(res), v.value);
       res.status(201).json(created);
     } catch (err) {
+      // Le formulaire recharge la liste après ce refus : elle doit refléter l'état réel.
+      if (err instanceof ServiceError && err.body.code === 'licence_indisponible') skuCache.invalidate();
       fail(res, err);
     }
   });
@@ -114,6 +138,9 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.json(await validerDemande(deps, actor(res), String(req.params.id)));
     } catch (err) {
       fail(res, err);
+    } finally {
+      // Une validation consomme (ou constate l'absence de) une unité : la liste RH ne doit plus servir l'ancien compte.
+      skuCache.invalidate();
     }
   });
 
