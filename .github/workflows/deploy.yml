@@ -42,8 +42,11 @@ jobs:
     with:
       environment: dev
 
+  # Inactif tant que AZURE_SUBSCRIPTION_ID_PROD est vide. Sans cette condition, référencer l'environnement
+  # « prod » le créerait sans aucune protection.
   prod:
     needs: dev
+    if: ${{ vars.AZURE_SUBSCRIPTION_ID_PROD != '' }}
     uses: ./.github/workflows/release-environment.yml
     with:
       environment: prod

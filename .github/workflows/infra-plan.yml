@@ -1,4 +1,4 @@
-# Plan Terraform sur pull request, pour dev et prod. Identité en LECTURE SEULE (AZURE_CLIENT_ID_PLAN) :
+# Plan Terraform sur pull request, pour dev (et prod dès que AZURE_SUBSCRIPTION_ID_PROD est renseignée). Identité en LECTURE SEULE (AZURE_CLIENT_ID_PLAN) :
 # le code d'une PR s'exécute ici, il ne doit pas disposer des droits d'écriture.
 # Identifiant fédéré attendu sur cette identité : sujet repo:<org>/<repo>:pull_request
 name: Infra plan
@@ -19,16 +19,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - env: dev
-            sub_var: AZURE_SUBSCRIPTION_ID_DEV
-          - env: prod
-            sub_var: AZURE_SUBSCRIPTION_ID_PROD
+        # prod n'entre dans la matrice que lorsque AZURE_SUBSCRIPTION_ID_PROD est renseignée.
+        env: ${{ fromJSON(vars.AZURE_SUBSCRIPTION_ID_PROD != '' && '["dev","prod"]' || '["dev"]') }}
     env:
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID_PLAN }}
       ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ vars[matrix.sub_var] }}
+      ARM_SUBSCRIPTION_ID: ${{ matrix.env == 'prod' && vars.AZURE_SUBSCRIPTION_ID_PROD || vars.AZURE_SUBSCRIPTION_ID_DEV }}
       TF_IN_AUTOMATION: "true"
       TF_INPUT: "0"
     defaults:

@@ -95,37 +95,42 @@ npm run dev     # build + démarre sur le port 3000
 | `main.tf` | Groupe de ressources, identité managée user-assignée, Log Analytics (rétention 365 j) + Application Insights, plan et Web App Node 22 avec les réglages d'application et Easy Auth |
 | `entra.tf` | Inscription d'application, rôles RH et Direction, credential fédéré, URI de redirection |
 | `graph.tf` | Permissions Graph de l'identité managée, extension `statutOnboarding`, grant `write` sur le seul site SharePoint |
-| `envs/<env>.tfvars`, `envs/<env>.backend.hcl` | Paramètres et état (compte de stockage et clé dédiés) de `dev` et `prod` |
+| `envs/<env>.tfvars`, `envs/<env>.backend.hcl` | Paramètres et état (clé dédiée par environnement) de `dev`, `test` et `prod` |
 
 `ENTRA_STATUS_EXTENSION` reçoit le nom complet `extension_<appId>_statutOnboarding` renvoyé par Graph. L'extension est protégée par `prevent_destroy` : la supprimer efface le statut de tous les comptes d'onboarding.
 
 ### Prérequis
 
-1. **Identité d'apply** (une par environnement, inscription d'application avec identifiants fédérés GitHub, sujets `repo:<org>/<repo>:environment:dev` et `:environment:prod`) :
-   - Azure : `Contributor` sur l'abonnement (création du groupe de ressources), `Storage Blob Data Contributor` sur le compte d'état ;
-   - Graph (application) : `Application.ReadWrite.All`, `AppRoleAssignment.ReadWrite.All` (permissions Graph de l'identité managée et rôles RH/Direction), `Sites.FullControl.All` (grant SharePoint, seulement si `sharepoint_site_id` est renseigné et `manage_sharepoint_grant` vaut `true`).
-2. **Consentement administrateur** : ces permissions Graph exigent un consentement d'administrateur. Il doit être donné une seule fois, à la main, par un compte `Privileged Role Administrator` ou `Global Administrator` Entra. Même chose pour la permission `UserAuthenticationMethod.ReadWrite.All` : Terraform l'attribue à l'identité managée, ce qui suppose que l'identité d'apply ait `AppRoleAssignment.ReadWrite.All` consenti.
-3. **Identité de plan** (lecture seule, une seule pour les PR, sujet `repo:<org>/<repo>:pull_request`) : `Reader`, `Storage Blob Data Reader` sur les états, et en lecture Graph au moins `Application.Read.All`. Certaines lectures (dont les permissions de site) peuvent exiger davantage : à ajuster à la première exécution.
-4. **GitHub** : variables de dépôt `AZURE_TENANT_ID`, `AZURE_CLIENT_ID_PLAN`, `AZURE_SUBSCRIPTION_ID_DEV`, `AZURE_SUBSCRIPTION_ID_PROD` ; environnements `dev` et `prod` avec les variables `AZURE_CLIENT_ID` et `AZURE_SUBSCRIPTION_ID`. Sur l'environnement `prod`, activer **Required reviewers** : c'est ce qui protège l'apply de prod. Aucun secret.
-5. **Tenant** : la politique de méthode d'authentification « Temporary Access Pass » doit être activée pour les comptes d'onboarding.
+1. **Identités de la CI** (sans secret, inscriptions d'application avec credentials fédérés GitHub), créées par [scripts/bootstrap-oidc.sh](scripts/bootstrap-oidc.sh), une fois par environnement :
+   - **apply** : `gh-telesio-onboarding-apply-<env>`, une par environnement, credential fédéré de sujet `repo:<org>/<repo>:environment:<env>`.
+     - Azure : `Contributor` sur l'abonnement (création du groupe de ressources), `Storage Blob Data Contributor` sur le conteneur d'état ;
+     - Graph (application) : `Application.ReadWrite.OwnedBy` (crée les inscriptions dont elle est propriétaire ; à remplacer par `Application.ReadWrite.All` si le premier apply la refuse), `AppRoleAssignment.ReadWrite.All` (permissions Graph de l'identité managée et rôles RH/Direction), `Sites.FullControl.All` seulement si `sharepoint_site_id` est renseigné et `manage_sharepoint_grant` vaut `true` (le script ne l'attribue pas ; préférer `false`, comme en test).
+   - **plan** : `gh-telesio-onboarding-plan`, lecture seule, une seule pour tous les environnements, sujet `repo:<org>/<repo>:pull_request`.
+     - Azure : `Reader` sur chaque abonnement, `Storage Blob Data Reader` sur le conteneur d'état ;
+     - Graph : `Application.Read.All`. Certaines lectures (dont les permissions de site) peuvent exiger davantage : à ajuster à la première exécution.
+     - L'état contient les réglages de l'app (dont la chaîne d'ingestion Application Insights) : le code d'une PR du dépôt peut le lire avec cette identité.
+2. **Consentement administrateur** : les permissions Graph exigent un consentement d'administrateur (`Privileged Role Administrator` ou `Global Administrator`). `GRAPH_CONSENT=true scripts/bootstrap-oidc.sh` les attribue avec le compte connecté ; sans cette variable, le script ne les attribue pas et le dit. `UserAuthenticationMethod.ReadWrite.All`, attribuée à l'identité managée par Terraform, suppose que l'identité d'apply ait `AppRoleAssignment.ReadWrite.All` consenti.
+3. **GitHub** (le script affiche les commandes `gh`) : variables de dépôt `AZURE_TENANT_ID`, `AZURE_CLIENT_ID_PLAN`, `AZURE_SUBSCRIPTION_ID_DEV`, `AZURE_SUBSCRIPTION_ID_PROD` ; environnements `dev` et `prod` avec les variables `AZURE_CLIENT_ID` et `AZURE_SUBSCRIPTION_ID`, et un déploiement limité à la branche `main`. Sur `prod`, activer **Required reviewers** : c'est ce qui protège l'apply de prod (décocher « Prevent self-review » s'il n'y a qu'un seul mainteneur). Aucun secret.
+   - **prod inactif tant que `AZURE_SUBSCRIPTION_ID_PROD` est vide** : le plan de prod sort de la matrice de [infra-plan.yml](.github/workflows/infra-plan.yml) et le job `prod` de [deploy.yml](.github/workflows/deploy.yml) est ignoré (sans cela, référencer l'environnement `prod` le créerait sans protection).
+4. **Tenant** : la politique de méthode d'authentification « Temporary Access Pass » doit être activée pour les comptes d'onboarding.
+
+```bash
+ENVIRONMENT=dev AZURE_TENANT_ID=<tenant> AZURE_SUBSCRIPTION_ID=<abonnement> scripts/bootstrap-oidc.sh
+# puis, en tant qu'administrateur, pour les permissions Graph :
+GRAPH_CONSENT=true ENVIRONMENT=dev AZURE_TENANT_ID=<tenant> AZURE_SUBSCRIPTION_ID=<abonnement> scripts/bootstrap-oidc.sh
+```
+
+Le script est idempotent, n'écrit aucun fichier et ne pose rien dans GitHub. Il lit le compte d'état dans `infra/envs/<env>.backend.hcl`, qui doit exister (voir ci-dessous).
 
 ### Bootstrap de l'état
 
-À faire une fois par environnement (compte de stockage sans clé d'accès, authentification Entra uniquement). Les noms doivent correspondre à `infra/envs/<env>.backend.hcl` (à adapter : un nom de compte de stockage est unique dans Azure).
+À faire une fois par abonnement : [scripts/bootstrap-state.sh](scripts/bootstrap-state.sh) crée le groupe de ressources, le compte de stockage sans clé d'accès (authentification Entra uniquement, versions et suppression récupérable 30 jours), le conteneur `tfstate` et le rôle `Storage Blob Data Contributor` pour le compte connecté. Il est idempotent et affiche les valeurs du backend.
 
 ```bash
-ENV=dev; LOC=francecentral
-RG=rg-telesio-tfstate-$ENV; SA=sttelesiotfstate$ENV
-az group create -n $RG -l $LOC
-az storage account create -n $SA -g $RG -l $LOC --sku Standard_LRS \
-  --min-tls-version TLS1_2 --allow-blob-public-access false --allow-shared-key-access false
-az storage account blob-service-properties update --account-name $SA -g $RG --enable-versioning true
-SCOPE=$(az storage account show -n $SA -g $RG --query id -o tsv)
-az role assignment create --assignee <objectId de l'identité d'apply> --role "Storage Blob Data Contributor" --scope $SCOPE
-az role assignment create --assignee <objectId de l'identité de plan> --role "Storage Blob Data Reader" --scope $SCOPE
-# Pour créer le conteneur depuis votre compte, il faut aussi Storage Blob Data Contributor sur $SCOPE.
-az storage container create --account-name $SA -n tfstate --auth-mode login
+AZURE_TENANT_ID=<tenant> AZURE_SUBSCRIPTION_ID=<abonnement> scripts/bootstrap-state.sh
 ```
+
+Le nom du compte dérive de l'abonnement : deux environnements du même abonnement (aujourd'hui `dev` et `test`) partagent le compte et le conteneur, et ne diffèrent que par la clé (`telesio-onboarding-lite.<env>.tfstate`). Les identités de la CI ont leurs rôles sur le conteneur : celle de dev peut donc lire et écrire l'état de test. Un abonnement distinct par environnement (prod) donne un compte distinct.
 
 ### Commandes
 
@@ -160,14 +165,14 @@ L'environnement `test` utilise `false` ([envs/test.tfvars](infra/envs/test.tfvar
 ### CI/CD (OIDC, actions épinglées par SHA)
 
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) : build, lint, tests de l'app.
-- [.github/workflows/infra-plan.yml](.github/workflows/infra-plan.yml) : sur PR touchant `infra/`, `fmt`, `validate` et `plan` de dev et prod avec l'identité de lecture seule.
-- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) : sur `main`, build de l'app, puis `dev` (apply automatique puis déploiement), puis `prod` (même chose, après approbation de l'environnement). La logique commune est dans [release-environment.yml](.github/workflows/release-environment.yml) ; le déploiement termine par un contrôle de `/healthz`.
+- [.github/workflows/infra-plan.yml](.github/workflows/infra-plan.yml) : sur PR touchant `infra/`, `fmt`, `validate` et `plan` de dev (et de prod dès que `AZURE_SUBSCRIPTION_ID_PROD` est renseignée) avec l'identité de lecture seule.
+- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) : sur `main`, build de l'app, puis `dev` (apply automatique puis déploiement), puis `prod` (même chose, après approbation de l'environnement ; ignoré tant que `AZURE_SUBSCRIPTION_ID_PROD` est vide). La logique commune est dans [release-environment.yml](.github/workflows/release-environment.yml) ; le déploiement termine par un contrôle de `/healthz`.
 
 L'apply de prod re-planifie après approbation : relire le plan de la PR avant de merger.
 
 ### Limites connues
 
-`terraform fmt` et `terraform validate` passent. `plan` et `apply` ont été exécutés sur l'environnement `test` seulement (`dev` et `prod` : jamais). Le zip deploy fonctionne avec l'authentification de base désactivée. La relecture Graph de l'extension d'attribut renvoie le nom complet : `ignore_changes = [body]` évite une dérive permanente. À surveiller sur `dev` et `prod` : la relecture Graph du grant de site (si `manage_sharepoint_grant = true`) et le délai de propagation du credential fédéré avant la première connexion.
+`terraform fmt` et `terraform validate` passent. `plan` et `apply` ont été exécutés sur l'environnement `test` seulement (`dev` et `prod` : jamais ; `dev` est configuré pour le tenant de test, `prod` n'est pas configuré). Le zip deploy fonctionne avec l'authentification de base désactivée. La relecture Graph de l'extension d'attribut renvoie le nom complet : `ignore_changes = [body]` évite une dérive permanente. À surveiller sur `dev` et `prod` : la relecture Graph du grant de site (si `manage_sharepoint_grant = true`) et le délai de propagation du credential fédéré avant la première connexion.
 
 Dépendances : versions épinglées, publiées depuis plus de 7 jours au moment de l'installation (`npm install --before=<date du jour - 7 j>`).
 
