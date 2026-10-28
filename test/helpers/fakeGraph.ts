@@ -74,7 +74,7 @@ export class FakeGraph {
   }
 
   /** Compte d'onboarding tel que créé par POST /api/demandes. */
-  addPending(ext: string, p: { givenName: string; surname: string; statut?: string; managerId?: string; hireDate?: string; enabled?: boolean }): string {
+  addPending(ext: string, p: { givenName: string; surname: string; statut?: string; managerId?: string; hireDate?: string; enabled?: boolean; extras?: Record<string, unknown> }): string {
     const id = this.addUser(`${p.givenName}.${p.surname}@exemple.test`.toLowerCase(), `${p.givenName} ${p.surname}`, p.enabled ?? false);
     const u = this.users.get(id)!;
     u.props = {
@@ -84,6 +84,7 @@ export class FakeGraph {
       department: 'Finance',
       employeeHireDate: `${p.hireDate ?? '2026-11-03'}T00:00:00Z`,
       [ext]: p.statut ?? 'EnAttente',
+      ...p.extras,
     };
     if (p.managerId) u.manager = `https://graph.microsoft.com/v1.0/users/${p.managerId}`;
     return id;

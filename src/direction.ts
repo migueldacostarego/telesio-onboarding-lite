@@ -47,7 +47,7 @@ async function loadForAction(
   allowed: readonly string[],
 ): Promise<OnboardingUser> {
   const user = await step(deps, actor, 'lecture', id, {}, () =>
-    deps.directory.getOnboardingUser(id, deps.config.statusExtension),
+    deps.directory.getOnboardingUser(id, deps.config.statusExtension, deps.config.licenseExtension),
   );
   if (!user) {
     deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
@@ -93,13 +93,17 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
   if (!library) {
     throw new ServiceError(503, { error: 'SharePoint non configuré (SHAREPOINT_SITE_ID, SHAREPOINT_DRIVE_ID)' });
   }
-  if (!config.license.groupId || !config.license.skuId) {
-    throw new ServiceError(503, { error: 'Licence non configurée (LICENSE_GROUP_ID, LICENSE_SKU_ID)' });
-  }
+  if (config.licenses.length === 0) throw new ServiceError(503, { error: 'Licences non configurées (LICENSES)' });
   const user = await loadForAction(deps, actor, id, ['EnAttente', 'Validé']);
   const reprise = user.statut === 'Validé';
 
-  const licence = await ensureLicense(deps, actor, id);
+  // Le SKU est celui choisi par RH (extension licenceOnboarding) ; absent ou retiré de la liste : 409, rien n'est écrit.
+  const option = config.licenses.find((l) => l.skuId === user.licence);
+  if (!option) {
+    audit.track({ action: 'licence.non_choisie', actor, outcome: 'refuse', cible: id });
+    throw new ServiceError(409, { error: 'Licence non définie ou non proposée pour cette demande', code: 'licence_inconnue' });
+  }
+  const licence = await ensureLicense(deps, actor, id, option);
 
   if (!reprise) {
     await step(deps, actor, 'statut', id, {}, () => directory.setExtension(id, config.statusExtension, 'Validé'));

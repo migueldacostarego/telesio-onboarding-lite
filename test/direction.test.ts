@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config';
 import { buildFolderName } from '../src/folder';
-import { DIR_ID, EXT, GROUP_ID, LICENSE_GROUP, LICENSE_SKU, RH_ID } from './helpers/ctx';
+import { DIR_ID, EXT, EXT_LIC, GROUP_ID, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
 import { harness } from './helpers/harness';
 
 describe('Direction : personne', () => {
@@ -65,8 +65,8 @@ describe('GET /api/demandes, valider, refuser', () => {
   });
   afterAll(() => h.stop());
 
-  const pending = (given = 'Anna', sur = 'Martin', statut = 'EnAttente') =>
-    h.ctx.graph.addPending(EXT, { givenName: given, surname: sur, statut, managerId });
+  const pending = (given = 'Anna', sur = 'Martin', statut = 'EnAttente', licence: string | null = LICENSE_SKU) =>
+    h.ctx.graph.addPending(EXT, { givenName: given, surname: sur, statut, managerId, extras: licence ? { [EXT_LIC]: licence } : {} });
 
   it('liste uniquement les EnAttente, avec les champs utiles', async () => {
     const id = pending();
@@ -126,6 +126,38 @@ describe('GET /api/demandes, valider, refuser', () => {
       const events = JSON.stringify(h.ctx.events);
       for (const pii of ['Martin', 'Anna', 'exemple.test']) expect(events).not.toContain(pii);
       expect(h.ctx.events.find((e) => e.action === 'licence.attribuee')).toMatchObject({ cible: id, groupe: LICENSE_GROUP, sku: LICENSE_SKU, actor: DIR_ID });
+    });
+
+    it('ajoute au groupe du SKU choisi, pas à un autre', async () => {
+      const id = pending('Béa', 'Autre', 'EnAttente', LICENSE_SKU_B);
+      const res = await h.call('POST', `/api/demandes/${id}/valider`);
+      expect(res.status).toBe(200);
+      expect(h.ctx.graph.groups.get(LICENSE_GROUP_B)?.has(id)).toBe(true);
+      expect(members().size).toBe(0);
+      expect(h.ctx.graph.skus.get(LICENSE_SKU_B)!.consumed).toBe(1);
+      expect(sku().consumed).toBe(1);
+      expect(h.ctx.events.find((e) => e.action === 'licence.attribuee')).toMatchObject({ groupe: LICENSE_GROUP_B, sku: LICENSE_SKU_B });
+    });
+
+    it('SKU choisi à 0 : 409 sans écriture, même si les autres licences sont libres', async () => {
+      const id = pending('Zoé', 'Zero', 'EnAttente', LICENSE_SKU_ZERO);
+      const res = await h.call('POST', `/api/demandes/${id}/valider`);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'Aucune licence disponible', code: 'licence_indisponible' });
+      expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('EnAttente');
+      expect(h.ctx.graph.calls.some((c) => c.method !== 'GET')).toBe(false);
+    });
+
+    it('409 si la demande n’a pas de licence choisie ou si elle n’est plus proposée', async () => {
+      const sans = pending('Luc', 'Ancien', 'EnAttente', null);
+      const retiree = pending('Eva', 'Retiree', 'EnAttente', 'ffffffff-0000-4000-8000-000000000009');
+      for (const id of [sans, retiree]) {
+        const res = await h.call('POST', `/api/demandes/${id}/valider`);
+        expect(res.status).toBe(409);
+        expect(await res.json()).toMatchObject({ code: 'licence_inconnue' });
+        expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('EnAttente');
+      }
+      expect(h.ctx.graph.calls.some((c) => c.method !== 'GET')).toBe(false);
     });
 
     it('attend le traitement asynchrone par groupe', async () => {
@@ -240,7 +272,7 @@ describe('GET /api/demandes, valider, refuser', () => {
     });
 
     it('503 avant toute lecture si la licence n’est pas configurée', async () => {
-      const off = harness({ LICENSE_GROUP_ID: undefined, LICENSE_SKU_ID: undefined });
+      const off = harness({ LICENSES: undefined, ENTRA_LICENSE_EXTENSION: undefined });
       await off.start();
       const id = off.ctx.graph.addPending(EXT, { givenName: 'Eva', surname: 'Test' });
       expect((await off.call('POST', `/api/demandes/${id}/valider`)).status).toBe(503);
@@ -365,8 +397,5 @@ describe('dossier et config', () => {
     expect(() => loadConfig({ SHAREPOINT_FOLDER_PATTERN: '{nom} {upn}' })).toThrow();
     expect(() => loadConfig({ SHAREPOINT_DRIVE_ID: '../x' })).toThrow();
     expect(() => loadConfig({ DIRECTION_OBJECT_ID: 'pas-un-guid' })).toThrow();
-    expect(() => loadConfig({ LICENSE_GROUP_ID: 'pas-un-guid' })).toThrow();
-    expect(() => loadConfig({ LICENSE_SKU_ID: 'pas-un-guid' })).toThrow();
-    expect(loadConfig({}).license).toEqual({ groupId: undefined, skuId: undefined });
   });
 });

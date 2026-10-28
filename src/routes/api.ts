@@ -6,6 +6,7 @@ import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations } from '../activation';
 import { listDemandes, refuserDemande, validerDemande } from '../direction';
+import { listLicences } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
 import type { Library } from '../sharepoint';
 import { GUID_RE, validateDemande, validateMotif } from '../validation';
@@ -77,9 +78,26 @@ export function createApiRouter(deps: ApiDeps): Router {
     }
   });
 
+  const noLicenses = (res: Res): boolean => {
+    if (config.licenses.length > 0) return false;
+    res.status(503).json({ error: 'Licences non configurées (LICENSES)' });
+    return true;
+  };
+
+  // GET /api/licences : licences proposées à RH, avec le nombre d'unités libres
+  api.get('/licences', rh, async (_req, res) => {
+    if (noLicenses(res)) return;
+    try {
+      res.json(await listLicences(deps, actor(res)));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   // POST /api/demandes : crée le compte Entra désactivé (statutOnboarding=EnAttente)
   api.post('/demandes', rh, jsonOnly, json, async (req, res) => {
-    const v = validateDemande(req.body, todayIn(config.timeZone, now()));
+    if (noLicenses(res)) return;
+    const v = validateDemande(req.body, todayIn(config.timeZone, now()), config.licenses);
     if (!v.ok) {
       audit.track({ action: 'demande.rejetee', actor: actor(res), outcome: 'refuse', champs: Object.keys(v.details).join(',') });
       res.status(400).json({ error: 'Entrée invalide', details: v.details });

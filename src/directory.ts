@@ -44,6 +44,8 @@ export interface OnboardingUser {
   statut: string | null;
   /** AAAA-MM-JJ (employeeHireDate) ; null si absente. */
   dateArrivee: string | null;
+  /** skuId choisi par RH (extension licenceOnboarding) ; null si absent (demande antérieure au choix de licence). */
+  licence: string | null;
 }
 
 /** Réponse Graph réduite aux champs utiles ; le secret n'existe que dans cet objet, jamais dans un log. */
@@ -81,8 +83,8 @@ export interface LicenseState {
 }
 
 export interface Directory {
-  /** null : le SKU n'existe pas dans le tenant. */
-  getSkuAvailability(skuId: string): Promise<SkuAvailability | null>;
+  /** GET /subscribedSkus : unités par skuId (en minuscules). Un SKU absent du tenant n'y figure pas. */
+  listSkuAvailability(): Promise<Map<string, SkuAvailability>>;
   getLicenseState(userId: string, skuId: string): Promise<LicenseState | null>;
   /** Idempotent : un utilisateur déjà membre n'est pas une erreur. */
   addGroupMember(groupId: string, userId: string): Promise<void>;
@@ -98,7 +100,8 @@ export interface Directory {
   listTapIds(userId: string): Promise<string[]>;
   deleteTap(userId: string, tapId: string): Promise<void>;
   createTap(userId: string, lifetimeInMinutes: number): Promise<TapResult>;
-  getOnboardingUser(id: string, ext: string): Promise<OnboardingUser | null>;
+  /** licenseExt : nom de l'extension qui porte le skuId choisi (lue en plus du statut). */
+  getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null>;
   deleteUser(id: string): Promise<void>;
   isMemberOfGroup(userId: string, groupId: string): Promise<boolean>;
   search(q: string): Promise<DirectoryUser[]>;
@@ -261,11 +264,11 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async getOnboardingUser(id: string, ext: string): Promise<OnboardingUser | null> {
+  async getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null> {
     try {
       const u = await this.client
         .api(`/users/${id}`)
-        .select(`id,displayName,givenName,surname,accountEnabled,employeeHireDate,${ext}`)
+        .select(`id,displayName,givenName,surname,accountEnabled,employeeHireDate,${ext}${licenseExt ? `,${licenseExt}` : ''}`)
         .get();
       return {
         id: u.id as string,
@@ -275,6 +278,7 @@ export class GraphDirectory implements Directory {
         accountEnabled: u.accountEnabled !== false,
         statut: typeof u[ext] === 'string' ? (u[ext] as string) : null,
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
+        licence: licenseExt && typeof u[licenseExt] === 'string' ? (u[licenseExt] as string).toLowerCase() : null,
       };
     } catch (err) {
       const e = wrap(err);
@@ -292,14 +296,14 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async getSkuAvailability(skuId: string): Promise<SkuAvailability | null> {
+  async listSkuAvailability(): Promise<Map<string, SkuAvailability>> {
     try {
       const res = await this.client.api('/subscribedSkus').get();
-      const sku = ((res?.value ?? []) as { skuId?: string; consumedUnits?: number; prepaidUnits?: { enabled?: number } }[]).find(
-        (s) => s.skuId?.toLowerCase() === skuId.toLowerCase(),
-      );
-      if (!sku) return null;
-      return { enabled: sku.prepaidUnits?.enabled ?? 0, consumed: sku.consumedUnits ?? 0 };
+      const out = new Map<string, SkuAvailability>();
+      for (const s of (res?.value ?? []) as { skuId?: string; consumedUnits?: number; prepaidUnits?: { enabled?: number } }[]) {
+        if (s.skuId) out.set(s.skuId.toLowerCase(), { enabled: s.prepaidUnits?.enabled ?? 0, consumed: s.consumedUnits ?? 0 });
+      }
+      return out;
     } catch (err) {
       throw wrap(err);
     }

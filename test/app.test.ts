@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertReady, loadConfig } from '../src/config';
 import { normalizePart, upnBase } from '../src/upn';
-import { EXT, RH_ID, principal, setup } from './helpers/ctx';
+import { EXT, EXT_LIC, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID, principal, setup } from './helpers/ctx';
 
 describe('API', () => {
   let ctx: ReturnType<typeof setup>;
@@ -21,7 +21,7 @@ describe('API', () => {
   });
   afterAll(() => new Promise((r) => server.close(r)));
 
-  const valid = () => ({ prenom: 'Éloïse', nom: 'De La Cruz', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId });
+  const valid = () => ({ prenom: 'Éloïse', nom: 'De La Cruz', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, licence: LICENSE_SKU });
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     fetch(`${base}/api/demandes`, {
       method: 'POST',
@@ -67,14 +67,45 @@ describe('API', () => {
       const u = ctx.graph.users.get(out.id)!;
       expect(u.manager).toBe(`https://graph.microsoft.com/v1.0/users/${managerId}`);
       expect(u.props[EXT]).toBe('EnAttente');
+      expect(u.props[EXT_LIC]).toBe(LICENSE_SKU);
       const writes = ctx.graph.calls.filter((c) => c.method !== 'GET').map((c) => c.method);
-      expect(writes).toEqual(['POST', 'PUT', 'PATCH']);
+      expect(writes).toEqual(['POST', 'PUT', 'PATCH', 'PATCH']);
+      // Le statut reste la dernière écriture, après le choix de licence.
+      const patches = ctx.graph.calls.filter((c) => c.method === 'PATCH').map((c) => Object.keys(c.body as object)[0]);
+      expect(patches).toEqual([EXT_LIC, EXT]);
 
       // Traces : qui/quoi, sans nom, UPN, mot de passe ni identité de l'embauché.
-      expect(ctx.events.map((e) => e.action)).toEqual(['demande.compte_cree', 'demande.manager_affecte', 'demande.statut_pose']);
+      expect(ctx.events.map((e) => e.action)).toEqual(['demande.compte_cree', 'demande.manager_affecte', 'demande.licence_posee', 'demande.statut_pose']);
       expect(ctx.events.every((e) => e.actor === RH_ID)).toBe(true);
       const logged = JSON.stringify(ctx.events);
       for (const secret of [pw, 'eloise', 'Éloïse', 'cruz', 'exemple.test']) expect(logged.toLowerCase()).not.toContain(secret.toLowerCase());
+    });
+
+    it('accepte une autre licence de la liste', async () => {
+      const res = await post({ ...valid(), prenom: 'Béa', nom: 'Autre', licence: LICENSE_SKU_B.toUpperCase() });
+      expect(res.status).toBe(201);
+      const id = ((await res.json()) as { id: string }).id;
+      expect(ctx.graph.users.get(id)!.props[EXT_LIC]).toBe(LICENSE_SKU_B);
+    });
+
+    it('400 si le SKU est hors liste, sans aucune écriture', async () => {
+      ctx.graph.calls.length = 0;
+      for (const licence of ['ffffffff-0000-4000-8000-000000000009', 'pas-un-guid', 42, '']) {
+        const res = await post({ ...valid(), licence });
+        expect(res.status).toBe(400);
+        expect(Object.keys(((await res.json()) as { details: object }).details)).toEqual(['licence']);
+      }
+      expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    });
+
+    it('409 si la licence choisie n’a plus d’unité libre, sans aucune écriture', async () => {
+      ctx.graph.calls.length = 0;
+      ctx.events.length = 0;
+      const res = await post({ ...valid(), prenom: 'Zoé', nom: 'Zero', licence: LICENSE_SKU_ZERO });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'Aucune licence disponible', code: 'licence_indisponible' });
+      expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+      expect(ctx.events.at(-1)).toMatchObject({ action: 'licence.indisponible', outcome: 'refuse', sku: LICENSE_SKU_ZERO, phase: 'demande' });
     });
 
     it('ajoute un suffixe 2, 3… en cas de collision', async () => {
@@ -117,7 +148,7 @@ describe('API', () => {
       const res = await post({});
       expect(res.status).toBe(400);
       const out = (await res.json()) as { details: Record<string, string> };
-      expect(Object.keys(out.details).sort()).toEqual(['dateArrivee', 'managerId', 'nom', 'poste', 'prenom', 'service']);
+      expect(Object.keys(out.details).sort()).toEqual(['dateArrivee', 'licence', 'managerId', 'nom', 'poste', 'prenom', 'service']);
     });
 
     it.each([
@@ -153,6 +184,26 @@ describe('API', () => {
       const noAuth = await fetch(`${base}/api/demandes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
       expect(noAuth.status).toBe(401);
       expect((await post(valid(), { 'x-ms-client-principal': principal(['Autre']) })).status).toBe(403);
+    });
+  });
+
+  describe('GET /api/licences', () => {
+    it('liste libellé et unités libres (jamais négatives), sans le groupe', async () => {
+      const res = await fetch(`${base}/api/licences`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        licences: [
+          { skuId: LICENSE_SKU, libelle: 'Business Premium', disponibles: 4 },
+          { skuId: LICENSE_SKU_B, libelle: 'Business Standard', disponibles: 3 },
+          { skuId: LICENSE_SKU_ZERO, libelle: 'Business Basic', disponibles: 0 },
+        ],
+      });
+      expect(ctx.graph.calls.filter((c) => c.path === '/subscribedSkus').length).toBeGreaterThan(0);
+    });
+
+    it('403 sans rôle RH', async () => {
+      const res = await fetch(`${base}/api/licences`, { headers: { 'x-ms-client-principal': principal(['Autre']) } });
+      expect(res.status).toBe(403);
     });
   });
 
@@ -196,6 +247,21 @@ describe('config', () => {
     expect(c.sharePoint.siteId).toBeUndefined();
     expect(() => assertReady(c)).toThrow(/UPN_DOMAIN, ENTRA_STATUS_EXTENSION/);
     expect(() => loadConfig({ ENTRA_STATUS_EXTENSION: 'statutOnboarding' })).toThrow();
+  });
+
+  it('valide LICENSES : JSON, GUID, libellé, doublons, extension associée', () => {
+    const sku = 'eeeeeeee-0000-4000-8000-000000000005';
+    const grp = 'dddddddd-0000-4000-8000-000000000004';
+    const ext = 'extension_0123456789abcdef0123456789abcdef_licenceOnboarding';
+    const ok = JSON.stringify([{ skuId: sku.toUpperCase(), libelle: ' Premium ', groupId: grp }]);
+    expect(loadConfig({ LICENSES: ok, ENTRA_LICENSE_EXTENSION: ext }).licenses).toEqual([{ skuId: sku, libelle: 'Premium', groupId: grp }]);
+    expect(loadConfig({}).licenses).toEqual([]);
+    for (const bad of ['pas du json', '[]', '{}', JSON.stringify([{ skuId: 'x', libelle: 'a', groupId: grp }]), JSON.stringify([{ skuId: sku, libelle: '', groupId: grp }]), JSON.stringify([{ skuId: sku, libelle: 'a', groupId: 'x' }]),
+      JSON.stringify([{ skuId: sku, libelle: 'a', groupId: grp }, { skuId: sku, libelle: 'b', groupId: 'dddddddd-0000-4000-8000-000000000009' }]),
+      JSON.stringify([{ skuId: sku, libelle: 'a', groupId: grp }, { skuId: 'eeeeeeee-0000-4000-8000-000000000009', libelle: 'b', groupId: grp }])]) {
+      expect(() => loadConfig({ LICENSES: bad, ENTRA_LICENSE_EXTENSION: ext })).toThrow();
+    }
+    expect(() => loadConfig({ LICENSES: ok })).toThrow(/ENTRA_LICENSE_EXTENSION/);
   });
 
   it('ignore le contournement d’auth de dev en production', () => {

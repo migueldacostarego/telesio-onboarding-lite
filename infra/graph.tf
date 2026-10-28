@@ -49,6 +49,27 @@ resource "msgraph_resource" "status_extension" {
   }
 }
 
+# Attribut d'extension licenceOnboarding : skuId choisi par RH, lu à la validation pour viser le bon groupe.
+# Même mécanique que statutOnboarding (nom complet extension_<appId>_licenceOnboarding renvoyé par Graph).
+resource "msgraph_resource" "license_extension" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "licenceOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
 # Sites.Selected n'ouvre aucun site tant qu'un grant explicite n'existe pas : rôle write sur le seul
 # site SHAREPOINT_SITE_ID, pour l'identité managée (identifiée par son client ID).
 # L'appelant (Terraform) doit pouvoir gérer les permissions du site (voir README), sinon

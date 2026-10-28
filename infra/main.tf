@@ -84,8 +84,8 @@ locals {
     SHAREPOINT_DRIVE_ID       = var.sharepoint_drive_id
     SHAREPOINT_FOLDER_PATTERN = var.sharepoint_folder_pattern
 
-    LICENSE_GROUP_ID = local.license_group_id
-    LICENSE_SKU_ID   = var.license_sku_id
+    LICENSES                = local.licenses_json
+    ENTRA_LICENSE_EXTENSION = msgraph_resource.license_extension.output.name
   }
 
   app_settings = { for k, v in local.app_settings_raw : k => v if v != "" }
