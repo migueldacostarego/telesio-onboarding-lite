@@ -71,6 +71,9 @@ function say(text, kind, extra) {
   if (text) m.append(el('div', { class: 'msg ' + (kind || '') + (extra ? ' ' + extra : ''), text }));
 }
 async function api(method, path, body) {
+  // Écriture en cours : boutons désactivés (double clic), réactivés à la réponse.
+  const locked = method === 'GET' ? [] : [...document.querySelectorAll('button:not([disabled])')];
+  locked.forEach((b) => { b.disabled = true; });
   try {
     const res = await fetch(path, {
       method, credentials: 'same-origin',
@@ -82,6 +85,8 @@ async function api(method, path, body) {
     return { ok: res.ok, status: res.status, data: await res.json() };
   } catch {
     return { ok: false, status: 0, data: { error: 'Réseau indisponible.' } };
+  } finally {
+    locked.forEach((b) => { b.disabled = false; });
   }
 }
 function describe(r) {
@@ -136,7 +141,11 @@ $('form').addEventListener('submit', async (ev) => {
   const r = await api('POST', '/api/demandes', body);
   if (!r.ok && r.data && r.data.code === 'licence_indisponible') { loadLicences(); return say('Aucune licence disponible pour ce choix : choisissez une autre licence.', 'err', 'lic'); }
   if (!r.ok) return say(describe(r), 'err');
-  say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + '. Elle attend la validation de la direction.', 'ok');
+  if (r.data.avertissement === 'manager_non_affecte') {
+    say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + ', mais le manager n’a pas pu être affecté : posez-le dans Entra. Ne renvoyez pas la demande.', 'warn');
+  } else {
+    say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + '. Elle attend la validation de la direction (visible chez elle d’ici une minute).', 'ok');
+  }
   $('form').reset(); $('manager').textContent = 'aucun';
   loadLicences();
 });
@@ -177,41 +186,84 @@ load();
 `;
 
 export const ACTIVATION_SCRIPT = `
-const LABEL = { activer: 'Activer', regenerer: 'Régénérer le TAP' };
+const MOTIFS = [
+  ['code_perdu', 'Code perdu'],
+  ['code_refuse', 'Code refusé par Entra'],
+  ['tap_expire', 'TAP expiré'],
+  ['activation_interrompue', 'Activation interrompue'],
+  ['autre', 'Autre'],
+];
+const quand = (iso, tz) => new Date(iso).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short', timeZone: tz });
 function showTap(d, t) {
   const box = $('tap'); box.replaceChildren();
+  const debut = t.utilisableDansMinutes > 0
+    ? 'Utilisable dans ' + t.utilisableDansMinutes + ' minute' + (t.utilisableDansMinutes > 1 ? 's' : '') + ' (à partir du ' + quand(t.startDateTime, t.fuseau) + ')'
+    : 'Utilisable immédiatement';
+  const fin = t.expireA ? ', valable jusqu’au ' + quand(t.expireA, t.fuseau) : '';
   box.append(
     el('div', { class: 'msg ok' },
       el('p', { text: 'TAP pour ' + d.nom + ' : à remettre en main propre. Il ne sera plus affiché.' }),
       el('div', { class: 'tap', text: t.temporaryAccessPass }),
-      el('p', { text: 'Valable ' + t.lifetimeInMinutes + ' minutes' + (t.isUsableOnce ? ', usage unique.' : '.') }),
+      el('p', { text: debut + fin + '. Plusieurs connexions possibles pendant sa durée.' }),
       el('button', { type: 'button', text: 'Masquer', onclick: () => box.replaceChildren() })));
 }
-async function load() {
+function etat(d) {
+  const o = d.onboarding;
+  if (!o) return '';
+  if (o.verification) return 'Vérification impossible, réessayez';
+  if (o.termine) return 'Onboarding terminé (finalisation en cours)';
+  return 'Onboarding non terminé (mot de passe : ' + (o.motDePasse ? 'fait' : 'à faire') + ' ; Authenticator : ' + (o.authenticator ? 'fait' : 'à faire') + ')';
+}
+function cellule(d) {
+  if (d.action === 'attendre') return el('td', { text: 'Pas avant la date d’arrivée' });
+  if (d.action === 'activer') return el('td', {}, el('button', { type: 'button', text: 'Activer', onclick: () => activer(d) }));
+  const motif = el('select', { 'aria-label': 'Motif de la régénération' }, ...MOTIFS.map(([v, l]) => el('option', { value: v, text: l })));
+  return el('td', {}, motif, el('button', { type: 'button', text: 'Régénérer le TAP', onclick: () => regenerer(d, motif.value) }));
+}
+async function load(finaliser) {
   const body = $('rows'); body.replaceChildren();
   const r = await api('GET', '/api/activations');
   if (!r.ok) return say(describe(r), 'err');
   if (r.data.tronque) say('Liste tronquée : seuls les 100 premiers comptes par statut sont affichés.');
-  if (r.data.demandes.length === 0) body.append(el('tr', {}, el('td', { colspan: 6, text: 'Aucun compte à activer.' })));
+  if (r.data.demandes.length === 0) body.append(el('tr', {}, el('td', { colspan: 7, text: 'Aucun compte à activer.' })));
   for (const d of r.data.demandes) {
-    const cell = d.action === 'attendre'
-      ? el('td', { text: 'Pas avant la date d\\u2019arrivée' })
-      : el('td', {}, el('button', { type: 'button', text: LABEL[d.action], onclick: () => act(d) }));
     body.append(el('tr', {},
       el('td', { text: d.nom }), el('td', { text: d.poste || '' }), el('td', { text: d.service || '' }),
-      el('td', { text: d.dateArrivee || '' }), el('td', { text: d.statut }), cell));
+      el('td', { text: d.dateArrivee || '' }), el('td', { text: d.statut }), el('td', { text: etat(d) }), cellule(d)));
   }
+  // La liste ne fait que lire : la finalisation est une écriture (POST), revérifiée par le serveur.
+  if (!finaliser) return;
+  const prets = r.data.demandes.filter((d) => d.onboarding && d.onboarding.termine);
+  let faits = 0;
+  for (const d of prets) { const t = await api('POST', '/api/demandes/' + d.id + '/terminer', {}); if (t.ok) faits++; }
+  if (faits > 0) { await load(false); say(faits + ' onboarding' + (faits > 1 ? 's' : '') + ' terminé' + (faits > 1 ? 's' : '') + ' : TAP supprimé.', 'ok'); }
 }
-async function act(d) {
+function refus(r) {
+  const d = r.data || {};
+  if (r.status === 409 && d.raison === 'tap_valide') return 'Un TAP valide existe déjà' + (d.expireA ? ' (jusqu’au ' + quand(d.expireA, d.fuseau) + ')' : '') + ' : utilisez « Régénérer le TAP » avec un motif.';
+  if (r.status === 409 && d.raison === 'onboarding_termine') return 'Onboarding terminé : aucun nouveau TAP.';
+  if (r.status === 409 && d.raison === 'deja_actif') return 'Compte déjà actif : utilisez « Régénérer le TAP ».';
+  if (d.tap === 'aucun') return 'L’ancien TAP a été supprimé mais le nouveau n’a pas pu être créé : le compte n’a plus de TAP. Réessayez « Régénérer le TAP ». ' + describe(r);
+  return describe(r);
+}
+async function activer(d) {
   say(''); $('tap').replaceChildren();
-  const regen = d.action === 'regenerer';
-  if (regen && !confirm('Régénérer le TAP de ' + d.nom + ' ? Le TAP précédent sera supprimé.')) return;
   const r = await api('POST', '/api/demandes/' + d.id + '/activer', {});
-  if (!r.ok) return say(describe(r), 'err');
-  say(regen ? 'TAP régénéré.' : 'Compte activé.', 'ok');
+  if (!r.ok) return say(refus(r), 'err');
+  say('Compte activé.', 'ok');
   showTap(d, r.data);
   r.data.temporaryAccessPass = '';
-  load();
+  load(false);
 }
-load();
+async function regenerer(d, motif) {
+  say(''); $('tap').replaceChildren();
+  if (!confirm('Régénérer le TAP de ' + d.nom + ' ? Le TAP actuel sera supprimé.')) return;
+  const r = await api('POST', '/api/demandes/' + d.id + '/regenerer', { motif });
+  if (!r.ok) return say(refus(r), 'err');
+  say('TAP régénéré.', 'ok');
+  showTap(d, r.data);
+  r.data.temporaryAccessPass = '';
+  load(false);
+}
+load(true);
 `;

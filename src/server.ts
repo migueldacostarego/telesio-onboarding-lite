@@ -7,7 +7,7 @@ import { GraphSharePoint } from './sharepoint';
 
 const config = assertReady(loadConfig());
 const audit = createAudit();
-const graph = createGraphClient();
+const { client: graph, warmUp } = createGraphClient(audit);
 const { siteId, driveId } = config.sharePoint;
 const app = createApp({
   config,
@@ -18,6 +18,7 @@ const app = createApp({
 
 const server = app.listen(config.port, () => {
   console.log(`telesio-onboarding-lite à l'écoute sur le port ${config.port}`);
+  void warmUp();
 });
 
 process.on('SIGTERM', () => {

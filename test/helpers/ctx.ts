@@ -12,6 +12,9 @@ export const NOW = new Date('2026-10-27T10:00:00Z');
 export const RH_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 export const DIR_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
 export const GROUP_ID = 'cccccccc-0000-4000-8000-000000000003';
+export const EXT_ACT = 'extension_0123456789abcdef0123456789abcdef_activationOnboarding';
+/** Groupe des arrivants : ajouté à la validation (rejoué à l'activation), retiré à Terminé. */
+export const ARRIVANTS_GROUP = 'ffffffff-0000-4000-8000-0000000000a1';
 export const EXT_LIC = 'extension_0123456789abcdef0123456789abcdef_licenceOnboarding';
 /** Trois licences proposées : A (5 unités, 1 consommée), B (3 unités libres), ZERO (2 unités, 2 consommées). */
 export const LICENSE_GROUP = 'dddddddd-0000-4000-8000-000000000004';
@@ -58,6 +61,8 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
       SHAREPOINT_DRIVE_ID: DRIVE,
       LICENSES: LICENSES_JSON,
       ENTRA_LICENSE_EXTENSION: EXT_LIC,
+      ARRIVANTS_GROUP_ID: ARRIVANTS_GROUP,
+      ENTRA_ACTIVATION_EXTENSION: EXT_ACT,
       ...env,
     }),
     trustAuthHeaders: opts.trustAuthHeaders ?? true,

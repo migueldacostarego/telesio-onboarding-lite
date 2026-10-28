@@ -26,6 +26,16 @@ output "license_extension" {
   value       = msgraph_resource.license_extension.output.name
 }
 
+output "arrivants_group_id" {
+  description = "Groupe des arrivants (ARRIVANTS_GROUP_ID) : cible des politiques TAP et SSPR."
+  value       = azuread_group.arrivants.object_id
+}
+
+output "activation_extension" {
+  description = "Nom complet de l'attribut d'extension activationOnboarding (ENTRA_ACTIVATION_EXTENSION)."
+  value       = msgraph_resource.activation_extension.output.name
+}
+
 output "auth_app_client_id" {
   description = "Client ID de l'inscription Easy Auth."
   value       = azuread_application_registration.web.client_id

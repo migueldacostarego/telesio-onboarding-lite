@@ -1,4 +1,5 @@
 import type { Client } from '@microsoft/microsoft-graph-client';
+import { latestTokenInfo, tokenAuditProps } from './tokenRoles';
 
 export interface DirectoryUser {
   id: string;
@@ -8,12 +9,42 @@ export interface DirectoryUser {
 
 export type DirectoryErrorKind = 'notFound' | 'conflict' | 'other';
 
-/** Erreur Graph réduite à ce qui est loggable : pas de message brut (il peut contenir des données). */
+/**
+ * Message Graph rendu loggable : les UPN/emails et tout texte entre guillemets (noms, valeurs de propriétés)
+ * sont masqués, la longueur est bornée. Les GUID (objectId) sont conservés.
+ */
+export function sanitizeGraphMessage(message: unknown): string | undefined {
+  if (typeof message !== 'string' || message.trim() === '') return undefined;
+  return message
+    .replace(/[^\s'"<>]+@[^\s'"<>]+/g, '[email]')
+    .replace(/'[^']*'|"[^"]*"|‘[^’]*’|“[^”]*”/g, '[valeur]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+/**
+ * Propriétés d'audit d'un échec Graph : statut, code, message assaini et, pour un 403, les rôles (noms) du dernier
+ * jeton obtenu (rôle absent du jeton ou jeton périmé ?).
+ */
+export function graphFailureProps(err: unknown): Record<string, string | number | undefined> {
+  const e = err instanceof DirectoryError ? err : undefined;
+  return {
+    http: e?.statusCode,
+    code: e?.code,
+    graphMessage: e?.detail,
+    ...(e?.statusCode === 403 ? tokenAuditProps(latestTokenInfo()) : {}),
+  };
+}
+
+/** Erreur Graph réduite à ce qui est loggable : statut, code et message assaini (sans nom ni UPN). */
 export class DirectoryError extends Error {
   constructor(
     public readonly kind: DirectoryErrorKind,
     public readonly statusCode: number | undefined,
     public readonly code: string | undefined,
+    /** error.message de Graph, assaini par sanitizeGraphMessage. */
+    public readonly detail?: string,
   ) {
     super(`Graph ${statusCode ?? '?'} ${code ?? ''}`.trim());
   }
@@ -50,10 +81,32 @@ export interface OnboardingUser {
 
 /** Réponse Graph réduite aux champs utiles ; le secret n'existe que dans cet objet, jamais dans un log. */
 export interface TapResult {
+  /** Identifiant du TAP créé (Graph le renvoie) : permet de ne pas supprimer le nouveau en nettoyant l'ancien. */
+  id?: string;
   temporaryAccessPass: string;
   lifetimeInMinutes: number;
   startDateTime: string | null;
   isUsableOnce: boolean;
+}
+
+/** TAP existant (liste Graph : jamais le secret). Un utilisateur n'en a qu'un. */
+export interface TapInfo {
+  id: string;
+  isUsable: boolean;
+  /** NotYetValid (début dans le futur), Expired, OneTimeUsed, etc. */
+  methodUsabilityReason: string | null;
+  startDateTime: string | null;
+  lifetimeInMinutes: number | null;
+}
+
+/** Données lues pour décider si l'onboarding est terminé. */
+export interface OnboardingProgress {
+  /** lastPasswordChangeDateTime (création du mot de passe, ou dernier changement) ; null si absent. */
+  lastPasswordChange: string | null;
+  /** Date d'activation (extension) ; null pour un compte activé avant l'extension. */
+  activation: string | null;
+  /** Création du compte : repli quand l'extension est absente (le mot de passe initial date de la création). */
+  createdDateTime: string | null;
 }
 
 export interface PendingDemande {
@@ -104,9 +157,14 @@ export interface Directory {
     hiredSince?: string,
   ): Promise<{ demandes: PendingDemande[]; tronque: boolean }>;
   setAccountEnabled(id: string, enabled: boolean): Promise<void>;
-  listTapIds(userId: string): Promise<string[]>;
+  listTaps(userId: string): Promise<TapInfo[]>;
   deleteTap(userId: string, tapId: string): Promise<void>;
-  createTap(userId: string, lifetimeInMinutes: number): Promise<TapResult>;
+  /** TAP multi-usage (isUsableOnce false), utilisable à partir de startDateTime. */
+  createTap(userId: string, opts: { lifetimeInMinutes: number; startDateTime: string }): Promise<TapResult>;
+  /** GET /users/{id}?$select=lastPasswordChangeDateTime,createdDateTime,<extension d'activation>. */
+  getOnboardingProgress(userId: string, activationExt: string): Promise<OnboardingProgress>;
+  /** GET /users/{id}/authentication/microsoftAuthenticatorMethods : au moins une inscription. */
+  hasAuthenticator(userId: string): Promise<boolean>;
   /** licenseExt : nom de l'extension qui porte le skuId choisi (lue en plus du statut). */
   getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null>;
   deleteUser(id: string): Promise<void>;
@@ -114,7 +172,8 @@ export interface Directory {
   search(q: string): Promise<DirectoryUser[]>;
   getUser(id: string): Promise<{ id: string; accountEnabled: boolean } | null>;
   upnTaken(upn: string): Promise<boolean>;
-  createUser(user: NewUser): Promise<string>;
+  /** extensions : attributs d'extension (nom complet -> valeur) posés à la création. */
+  createUser(user: NewUser, extensions?: Record<string, string>): Promise<string>;
   setManager(userId: string, managerId: string): Promise<void>;
   setExtension(userId: string, name: string, value: string): Promise<void>;
 }
@@ -131,7 +190,7 @@ export function wrap(err: unknown): DirectoryError {
   const conflict =
     (status === 409 || status === 400) && /already ?exists|ObjectConflict/i.test(`${e.code ?? ''} ${e.message ?? ''}`);
   const kind: DirectoryErrorKind = status === 404 ? 'notFound' : conflict ? 'conflict' : 'other';
-  return new DirectoryError(kind, status, e.code);
+  return new DirectoryError(kind, status, e.code, sanitizeGraphMessage(e.message));
 }
 
 interface RawPending {
@@ -202,9 +261,10 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async createUser(user: NewUser): Promise<string> {
+  async createUser(user: NewUser, extensions: Record<string, string> = {}): Promise<string> {
     try {
-      const res = await this.client.api('/users').post(user);
+      // Les attributs d'extension sont posés dans le même POST : pas d'état intermédiaire sans statut.
+      const res = await this.client.api('/users').post({ ...user, ...extensions });
       return res.id as string;
     } catch (err) {
       throw wrap(err);
@@ -377,10 +437,35 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async listTapIds(userId: string): Promise<string[]> {
+  async listTaps(userId: string): Promise<TapInfo[]> {
     try {
       const res = await this.client.api(`/users/${userId}/authentication/temporaryAccessPassMethods`).get();
-      return ((res?.value ?? []) as { id: string }[]).map((m) => m.id);
+      return ((res?.value ?? []) as Record<string, unknown>[]).map((m) => ({
+        id: m.id as string,
+        isUsable: m.isUsable === true,
+        methodUsabilityReason: typeof m.methodUsabilityReason === 'string' ? m.methodUsabilityReason : null,
+        startDateTime: typeof m.startDateTime === 'string' ? m.startDateTime : null,
+        lifetimeInMinutes: typeof m.lifetimeInMinutes === 'number' ? m.lifetimeInMinutes : null,
+      }));
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async getOnboardingProgress(userId: string, activationExt: string): Promise<OnboardingProgress> {
+    try {
+      const u = await this.client.api(`/users/${userId}`).select(`id,lastPasswordChangeDateTime,createdDateTime,${activationExt}`).get();
+      const str = (v: unknown) => (typeof v === 'string' ? v : null);
+      return { lastPasswordChange: str(u.lastPasswordChangeDateTime), activation: str(u[activationExt]), createdDateTime: str(u.createdDateTime) };
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async hasAuthenticator(userId: string): Promise<boolean> {
+    try {
+      const res = await this.client.api(`/users/${userId}/authentication/microsoftAuthenticatorMethods`).get();
+      return ((res?.value ?? []) as unknown[]).length > 0;
     } catch (err) {
       throw wrap(err);
     }
@@ -394,13 +479,14 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async createTap(userId: string, lifetimeInMinutes: number): Promise<TapResult> {
+  async createTap(userId: string, opts: { lifetimeInMinutes: number; startDateTime: string }): Promise<TapResult> {
     try {
       const res = await this.client
         .api(`/users/${userId}/authentication/temporaryAccessPassMethods`)
-        .post({ isUsableOnce: true, lifetimeInMinutes });
+        .post({ isUsableOnce: false, lifetimeInMinutes: opts.lifetimeInMinutes, startDateTime: opts.startDateTime });
       // Le TAP n'est lisible qu'à la création ; on ne renvoie que les champs utiles.
       return {
+        id: typeof res.id === 'string' ? res.id : undefined,
         temporaryAccessPass: res.temporaryAccessPass as string,
         lifetimeInMinutes: res.lifetimeInMinutes as number,
         startDateTime: (res.startDateTime ?? null) as string | null,

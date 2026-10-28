@@ -20,6 +20,15 @@ export interface Call {
   body?: unknown;
 }
 
+interface FakeTap {
+  id: string;
+  isUsable: boolean;
+  /** NotYetValid, Expired, OneTimeUsed, EnabledByPolicy... */
+  methodUsabilityReason: string;
+  startDateTime: string;
+  lifetimeInMinutes: number;
+}
+
 /** Valeur du TAP renvoyée par le faux Graph : les tests vérifient qu'elle n'est jamais tracée. */
 export const FAKE_TAP = 'Zx9!TapSecretValue42';
 
@@ -37,15 +46,27 @@ export class FakeGraph {
     folder?: number;
     delete?: number;
     tapPost?: number;
+    /** Échec de la suppression d'un TAP. */
+    tapDelete?: number;
     /** Échec des PATCH qui posent le statut (extension), pas de ceux d'accountEnabled. */
     statusPatch?: number;
     groupAdd?: number;
     groupRemove?: number;
     /** Échec de GET /subscribedSkus. */
     skus?: number;
+    /** Échec de GET /authentication/microsoftAuthenticatorMethods. */
+    authenticator?: number;
   } = {};
+  /** error.message renvoyé par l'échec du POST de TAP (failOn.tapPost). */
+  tapPostMessage = '';
+  /** Par défaut un seul TAP par compte (la création est refusée s'il en existe un) ; true : les TAP s'ajoutent. */
+  allowMultipleTaps = false;
   /** TAP existants par utilisateur : un seul autorisé, comme dans Entra. */
-  taps = new Map<string, { id: string }[]>();
+  taps = new Map<string, FakeTap[]>();
+  /** Corps des POST de TAP, dans l'ordre (isUsableOnce, lifetimeInMinutes, startDateTime). */
+  tapBodies: { isUsableOnce: boolean; lifetimeInMinutes: number; startDateTime?: string }[] = [];
+  /** Comptes qui ont une méthode Microsoft Authenticator inscrite. */
+  authenticators = new Set<string>();
   private tapSeq = 0;
   /** groupId -> membres */
   groups = new Map<string, Set<string>>();
@@ -95,6 +116,15 @@ export class FakeGraph {
   }
 
   /** Compte déjà licencié par le groupe (reprise) : membre, entrée Active, unité déjà comptée par le test. */
+  /** TAP déjà présent (créé hors de l'app, ou par une activation précédente). */
+  addTap(userId: string, t: Partial<FakeTap> = {}): string {
+    const id = t.id ?? `tap-${++this.tapSeq}`;
+    this.taps.set(userId, [
+      { id, isUsable: false, methodUsabilityReason: 'NotYetValid', startDateTime: '2026-10-27T10:05:00Z', lifetimeInMinutes: 720, ...t },
+    ]);
+    return id;
+  }
+
   addLicensed(userId: string, group: string, sku: string) {
     this.groups.set(group, (this.groups.get(group) ?? new Set()).add(userId));
     this.licenses.set(userId, { group, sku, reads: Number.MAX_SAFE_INTEGER, counted: true });
@@ -217,6 +247,8 @@ export class FakeGraph {
         givenName: u.props.givenName,
         surname: u.props.surname,
         employeeHireDate: u.props.employeeHireDate,
+        lastPasswordChangeDateTime: u.props.lastPasswordChangeDateTime,
+        createdDateTime: u.props.createdDateTime,
         licenseAssignmentStates: this.licenseStates(u.id),
         ...ext,
       };
@@ -230,29 +262,53 @@ export class FakeGraph {
     const tapList = /^\/users\/([^/]+)\/authentication\/temporaryAccessPassMethods$/.exec(path);
     if (tapList && method === 'GET') {
       // Comme Graph : la liste ne contient jamais le secret.
-      return { value: (this.taps.get(tapList[1] as string) ?? []).map((t) => ({ id: t.id, isUsableOnce: true })) };
+      return {
+        value: (this.taps.get(tapList[1] as string) ?? []).map((t) => ({
+          id: t.id,
+          isUsable: t.isUsable,
+          methodUsabilityReason: t.methodUsabilityReason,
+          startDateTime: t.startDateTime,
+          lifetimeInMinutes: t.lifetimeInMinutes,
+          isUsableOnce: false,
+          temporaryAccessPass: null,
+        })),
+      };
     }
     if (tapList && method === 'POST') {
       const uid = tapList[1] as string;
-      if (this.failOn.tapPost) throw graphError(this.failOn.tapPost, 'Request_BadRequest');
-      if ((this.taps.get(uid) ?? []).length > 0) {
+      if (this.failOn.tapPost) throw graphError(this.failOn.tapPost, 'Request_BadRequest', this.tapPostMessage);
+      if (!this.allowMultipleTaps && (this.taps.get(uid) ?? []).length > 0) {
         throw graphError(400, 'Request_BadRequest', 'A temporary access pass already exists for this user.');
       }
-      const body = call.body as { isUsableOnce: boolean; lifetimeInMinutes: number };
+      const body = call.body as { isUsableOnce: boolean; lifetimeInMinutes: number; startDateTime?: string };
+      this.tapBodies.push(body);
       const id = `tap-${++this.tapSeq}`;
-      this.taps.set(uid, [{ id }]);
+      const startDateTime = body.startDateTime ?? '2026-10-27T10:00:00Z';
+      // Comme Graph : un TAP qui débute dans le futur est NotYetValid et n'est pas encore utilisable.
+      this.taps.set(uid, [
+        ...(this.allowMultipleTaps ? (this.taps.get(uid) ?? []) : []),
+        { id, isUsable: false, methodUsabilityReason: 'NotYetValid', startDateTime, lifetimeInMinutes: body.lifetimeInMinutes },
+      ]);
       return {
         id,
         temporaryAccessPass: FAKE_TAP,
         isUsableOnce: body.isUsableOnce,
         lifetimeInMinutes: body.lifetimeInMinutes,
-        startDateTime: '2026-11-03T08:00:00Z',
-        createdDateTime: '2026-11-03T07:59:00Z',
-        methodUsabilityReason: 'EnabledByPolicy',
+        startDateTime,
+        createdDateTime: '2026-10-27T10:00:00Z',
+        isUsable: false,
+        methodUsabilityReason: 'NotYetValid',
       };
+    }
+    const authApp = /^\/users\/([^/]+)\/authentication\/microsoftAuthenticatorMethods$/.exec(path);
+    if (authApp && method === 'GET') {
+      if (this.failOn.authenticator) throw graphError(this.failOn.authenticator, 'Authorization_RequestDenied');
+      const has = this.authenticators.has(authApp[1] as string);
+      return { value: has ? [{ id: 'auth-1', displayName: 'Appareil', createdDateTime: '2026-10-27T11:00:00Z' }] : [] };
     }
     const tapOne = /^\/users\/([^/]+)\/authentication\/temporaryAccessPassMethods\/([^/]+)$/.exec(path);
     if (tapOne && method === 'DELETE') {
+      if (this.failOn.tapDelete) throw graphError(this.failOn.tapDelete, 'Authorization_RequestDenied');
       this.taps.set(tapOne[1] as string, (this.taps.get(tapOne[1] as string) ?? []).filter((t) => t.id !== tapOne[2]));
       return undefined;
     }
@@ -279,7 +335,8 @@ export class FakeGraph {
     const drop = /^\/groups\/([^/]+)\/members\/([^/]+)\/\$ref$/.exec(path);
     if (method === 'DELETE' && drop) {
       if (this.failOn.groupRemove) throw graphError(this.failOn.groupRemove, 'Authorization_RequestDenied');
-      if (!this.groups.get(drop[1] as string)?.delete(drop[2] as string)) throw graphError(404, 'Request_ResourceNotFound');
+      // Comme Graph (constaté sur test) : retirer un non-membre échoue en 400, pas en 404.
+      if (!this.groups.get(drop[1] as string)?.delete(drop[2] as string)) throw graphError(400, 'Request_BadRequest');
       this.licenses.delete(drop[2] as string);
       return undefined;
     }
@@ -327,7 +384,8 @@ export class FakeGraph {
       if (this.failOn.patch) throw graphError(this.failOn.patch, 'Request_BadRequest');
       const u = this.users.get(one[1] as string)!;
       const body = { ...(call.body as Record<string, unknown>) };
-      if (Object.keys(body).some((k) => k.startsWith('extension_')) && this.failOn.statusPatch) {
+      // La date d'activation (extension activationOnboarding) n'est pas le statut : seul le statut échoue ici.
+      if (Object.keys(body).some((k) => k.startsWith('extension_') && !k.endsWith('_activationOnboarding')) && this.failOn.statusPatch) {
         throw graphError(this.failOn.statusPatch, 'Request_BadRequest');
       }
       if ('accountEnabled' in body) {

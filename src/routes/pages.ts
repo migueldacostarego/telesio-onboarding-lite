@@ -61,7 +61,7 @@ pages.get('/activation', (_req, res) => {
       'Activation des comptes (RH)',
       `<div id="tap"></div>
 <table>
-  <thead><tr><th>Nom</th><th>Poste</th><th>Service</th><th>Arrivée</th><th>Statut</th><th>Action</th></tr></thead>
+  <thead><tr><th>Nom</th><th>Poste</th><th>Service</th><th>Arrivée</th><th>Statut</th><th>Onboarding</th><th>Action</th></tr></thead>
   <tbody id="rows"></tbody>
 </table>`,
       nonce(res),

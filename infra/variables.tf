@@ -148,9 +148,9 @@ variable "licenses" {
 }
 
 variable "tap_lifetime_minutes" {
-  description = "Durée de vie du TAP en minutes (10 à 43200). La politique TAP du tenant doit l'accepter."
+  description = "Durée de vie du TAP multi-usage en minutes (10 à 43200), comptée à partir de son début. La politique TAP du tenant doit l'accepter (durée maximale, usage unique = Non) : 720 exige un maximum d'au moins 720 (8 h par défaut)."
   type        = number
-  default     = 480
+  default     = 720
 
   validation {
     condition     = var.tap_lifetime_minutes >= 10 && var.tap_lifetime_minutes <= 43200
@@ -158,10 +158,15 @@ variable "tap_lifetime_minutes" {
   }
 }
 
-variable "tap_regen_window_days" {
-  description = "Jours après la date d'arrivée pendant lesquels RH peut régénérer un TAP."
+variable "tap_start_delay_minutes" {
+  description = "Délai (minutes) avant que le TAP soit utilisable : laisse Entra répliquer le TAP et l'appartenance au groupe des arrivants."
   type        = number
-  default     = 7
+  default     = 5
+
+  validation {
+    condition     = var.tap_start_delay_minutes >= 0 && var.tap_start_delay_minutes <= 60
+    error_message = "tap_start_delay_minutes doit être compris entre 0 et 60."
+  }
 }
 
 variable "time_zone" {

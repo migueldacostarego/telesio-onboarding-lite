@@ -11,10 +11,10 @@ export interface Config {
   statusExtension?: string;
   /** Rôle d'application (Easy Auth) qui donne accès aux routes RH. */
   rhRole: string;
-  /** Durée de vie du TAP, en minutes (usage unique). */
+  /** Durée de vie du TAP, en minutes (multi-usage), comptée à partir de son début. La politique TAP du tenant doit l'autoriser (durée maximale). */
   tapLifetimeMinutes: number;
-  /** Après la date d'arrivée, nombre de jours pendant lesquels RH peut régénérer un TAP sur un compte Actif. */
-  tapRegenWindowDays: number;
+  /** Délai avant que le TAP soit utilisable (startDateTime = maintenant + délai) : laisse Entra répliquer le TAP et le groupe. */
+  tapStartDelayMinutes: number;
   /** Fuseau qui définit « aujourd'hui » (jour J, date d'arrivée dans le passé). */
   timeZone: string;
   /** Faire confiance à l'en-tête d'identité Easy Auth (jamais sans Easy Auth, sauf dev local). */
@@ -27,6 +27,10 @@ export interface Config {
   licenses: LicenseOption[];
   /** Nom complet de l'attribut d'extension qui porte le skuId choisi : extension_<appId sans tirets>_licenceOnboarding. */
   licenseExtension?: string;
+  /** Groupe de sécurité des arrivants : ajouté à l'activation, retiré à Terminé. Cible des politiques TAP et SSPR du tenant. Absent : activation fermée (503). */
+  arrivantsGroupId?: string;
+  /** Extension qui porte la date d'activation : extension_<appId sans tirets>_activationOnboarding. Absente : activation fermée (503). */
+  activationExtension?: string;
 }
 
 export interface LicenseOption {
@@ -38,7 +42,7 @@ export interface LicenseOption {
 
 export type ReadyConfig = Config & { upnDomain: string; statusExtension: string };
 
-export const STATUTS = ['EnAttente', 'Validé', 'Refusé', 'Actif'] as const;
+export const STATUTS = ['EnAttente', 'Validé', 'Refusé', 'Actif', 'Terminé'] as const;
 export type StatutOnboarding = (typeof STATUTS)[number];
 
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
@@ -116,8 +120,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const folderPattern = opt(env.SHAREPOINT_FOLDER_PATTERN) ?? DEFAULT_FOLDER_PATTERN;
   const patternError = checkFolderPattern(folderPattern);
   if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
-  const tapLifetimeMinutes = intIn(env.TAP_LIFETIME_MINUTES, 'TAP_LIFETIME_MINUTES', 480, 10, 43200);
-  const tapRegenWindowDays = intIn(env.TAP_REGEN_WINDOW_DAYS, 'TAP_REGEN_WINDOW_DAYS', 7, 0, 90);
+  const tapLifetimeMinutes = intIn(env.TAP_LIFETIME_MINUTES, 'TAP_LIFETIME_MINUTES', 720, 10, 43200);
+  const tapStartDelayMinutes = intIn(env.TAP_START_DELAY_MINUTES, 'TAP_START_DELAY_MINUTES', 5, 0, 60);
+  const arrivantsGroupRaw = opt(env.ARRIVANTS_GROUP_ID);
+  if (arrivantsGroupRaw !== undefined && !GUID_RE.test(arrivantsGroupRaw)) throw new Error('ARRIVANTS_GROUP_ID invalide (attendu : GUID)');
+  const activationExtension = opt(env.ENTRA_ACTIVATION_EXTENSION);
+  if (activationExtension !== undefined && !EXTENSION_RE.test(activationExtension)) {
+    throw new Error('ENTRA_ACTIVATION_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
+  }
   const timeZone = opt(env.TZ_METIER) ?? 'Europe/Paris';
   if (!isValidTimeZone(timeZone)) throw new Error(`TZ_METIER invalide : "${timeZone}"`);
   // Easy Auth pose WEBSITE_AUTH_ENABLED=True. Le contournement de dev est ignoré en production.
@@ -129,13 +139,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     statusExtension,
     rhRole: opt(env.RH_ROLE) ?? 'RH',
     tapLifetimeMinutes,
-    tapRegenWindowDays,
+    tapStartDelayMinutes,
     timeZone,
     trustAuthHeaders: easyAuth || devBypass,
     direction: { type, objectId },
     sharePoint: { siteId, driveId, folderPattern },
     licenses,
     licenseExtension,
+    arrivantsGroupId: arrivantsGroupRaw?.toLowerCase(),
+    activationExtension,
   };
 }
 
