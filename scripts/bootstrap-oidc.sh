@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Identités OIDC de la CI GitHub pour un environnement (dev ou prod), sans secret :
-#   - gh-telesio-onboarding-plan : lecture seule, partagée par tous les environnements (PR) ;
+#   - gh-telesio-onboarding-plan : lecture seule, partagée par tous les environnements (PR) ; en plus de Reader,
+#     un rôle personnalisé limité à Microsoft.Web/sites/config/list/action, sur le seul groupe de ressources de
+#     l'environnement (relire les réglages de la Web App exige cette action, que Reader n'inclut pas) ;
 #   - gh-telesio-onboarding-apply-<env> : droits de déploiement de l'environnement (apply + déploiement).
 # Crée les inscriptions, les principaux de service, les credentials fédérés GitHub et les rôles Azure.
 # Les permissions Graph ne sont attribuées qu'avec GRAPH_CONSENT=true (action d'administrateur) ; sans elle,
@@ -76,6 +78,10 @@ if [[ -z "$STATE_RG" || -z "$STATE_SA" || -z "$STATE_CONTAINER" ]]; then
 fi
 state_scope="$(az storage account show -g "$STATE_RG" -n "$STATE_SA" --query id -o tsv)/blobServices/default/containers/${STATE_CONTAINER}"
 sub_scope="/subscriptions/${AZURE_SUBSCRIPTION_ID}"
+# Groupe de ressources de l'app (créé par Terraform, nom de main.tf), et rôle personnalisé du plan.
+APP_RESOURCE_GROUP="${APP_RESOURCE_GROUP:-rg-telesio-onboarding-${ENVIRONMENT}}"
+CONFIG_READER_ROLE="Telesio Web App Config Reader"
+CONFIG_READER_ACTION="Microsoft.Web/sites/config/list/action"
 
 # Inscription d'application : renvoie son appId. Plusieurs inscriptions de même nom : abandon.
 ensure_app() {
@@ -130,10 +136,42 @@ ensure_role() {
     --query "[?roleDefinitionName=='${role}'] | length(@)" -o tsv)"
   if [[ "$count" == "0" ]]; then
     log "Rôle $role sur $scope : attribution"
-    az role assignment create --assignee-object-id "$sp" --assignee-principal-type ServicePrincipal \
-      --role "$role" --scope "$scope" -o none
+    # Un rôle ou un principal tout juste créé peut mettre quelques dizaines de secondes à se propager.
+    local try
+    for try in 1 2 3 4 5 6; do
+      if az role assignment create --assignee-object-id "$sp" --assignee-principal-type ServicePrincipal \
+        --role "$role" --scope "$scope" -o none 2>/dev/null; then
+        break
+      fi
+      if [[ "$try" == "6" ]]; then
+        echo "Attribution de $role sur $scope impossible après 6 essais." >&2
+        exit 1
+      fi
+      log "Attribution refusée (propagation ?), nouvel essai dans 20 s ($try/6)"
+      sleep 20
+    done
   else
     log "Rôle $role sur $scope : déjà attribué"
+  fi
+}
+
+# Rôle personnalisé : une seule action, définition à l'échelle de l'abonnement, attribution plus bas (par groupe de
+# ressources). Une définition existante qui n'a pas exactement cette action fait échouer le script : pas de dérive muette.
+ensure_custom_role() {
+  local actions body
+  actions="$(az role definition list --name "$CONFIG_READER_ROLE" --custom-role-only true \
+    --query "join(',', [].permissions[].actions[])" -o tsv)"
+  if [[ -z "$actions" ]]; then
+    log "Rôle personnalisé $CONFIG_READER_ROLE : création"
+    printf -v body '{"Name":"%s","IsCustom":true,"Description":"%s","Actions":["%s"],"NotActions":[],"AssignableScopes":["%s"]}' \
+      "$CONFIG_READER_ROLE" "Relit les reglages d'une Web App (config/list) pour le plan Terraform en lecture seule." \
+      "$CONFIG_READER_ACTION" "$sub_scope"
+    az role definition create --role-definition "$body" -o none
+  elif [[ "$actions" != "$CONFIG_READER_ACTION" ]]; then
+    echo "Le rôle $CONFIG_READER_ROLE existe avec d'autres actions ($actions). Abandon." >&2
+    exit 1
+  else
+    log "Rôle personnalisé $CONFIG_READER_ROLE : existant"
   fi
 }
 
@@ -177,6 +215,12 @@ plan_sp="$(ensure_sp "$plan_app_id")"
 ensure_fic "$plan_app_id" "github-pull-request" "${SUB_PREFIX}:pull_request"
 ensure_role "$plan_sp" "Reader" "$sub_scope"
 ensure_role "$plan_sp" "Storage Blob Data Reader" "$state_scope"
+ensure_custom_role
+if [[ "$(az group exists -n "$APP_RESOURCE_GROUP")" == "true" ]]; then
+  ensure_role "$plan_sp" "$CONFIG_READER_ROLE" "${sub_scope}/resourceGroups/${APP_RESOURCE_GROUP}"
+else
+  log "Groupe $APP_RESOURCE_GROUP absent (pas encore appliqué) : relancer ce script après le premier apply pour l'attribution de $CONFIG_READER_ROLE"
+fi
 grant_graph "$plan_sp" "${PLAN_GRAPH_ROLES[@]}"
 
 # Identité d'apply de l'environnement.

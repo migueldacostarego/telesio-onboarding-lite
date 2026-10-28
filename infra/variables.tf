@@ -149,3 +149,9 @@ variable "direction_principal_object_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "manage_app_owner" {
+  description = "Terraform ajoute l'identité d'apply comme propriétaire de l'inscription. false quand cette identité n'a que Application.ReadWrite.OwnedBy (CI) : elle devient propriétaire d'office en créant l'inscription et l'ajout échouerait (« already exists »)."
+  type        = bool
+  default     = true
+}

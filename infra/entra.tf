@@ -23,9 +23,18 @@ resource "azuread_application_registration" "web" {
   implicit_access_token_issuance_enabled = false
 }
 
+# Avec Application.ReadWrite.OwnedBy (identité d'apply de la CI), le créateur d'une inscription en devient
+# propriétaire d'office : manage_app_owner = false évite alors un second ajout (erreur « already exists »).
 resource "azuread_application_owner" "terraform" {
+  count = var.manage_app_owner ? 1 : 0
+
   application_id  = azuread_application_registration.web.id
   owner_object_id = data.azuread_client_config.current.object_id
+}
+
+moved {
+  from = azuread_application_owner.terraform
+  to   = azuread_application_owner.terraform[0]
 }
 
 resource "azuread_application_app_role" "rh" {

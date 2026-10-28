@@ -4,6 +4,9 @@ app_service_sku = "P0v3"
 # À renseigner avant le premier apply : l'app refuse de démarrer sans UPN_DOMAIN.
 upn_domain = ""
 
+# L'identité d'apply de la CI (Application.ReadWrite.OwnedBy) est propriétaire d'office de l'inscription.
+manage_app_owner = false
+
 # Valideur et SharePoint : vides tant que non décidés (routes Direction fermées, pas de grant).
 direction_type      = ""
 direction_object_id = ""
