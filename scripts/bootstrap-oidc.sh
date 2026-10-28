@@ -3,7 +3,8 @@
 #   - gh-telesio-onboarding-plan : lecture seule, partagée par tous les environnements (PR) ;
 #   - gh-telesio-onboarding-apply-<env> : droits de déploiement de l'environnement (apply + déploiement).
 # Crée les inscriptions, les principaux de service, les credentials fédérés GitHub et les rôles Azure.
-# Les permissions Graph ne sont attribuées qu'avec GRAPH_CONSENT=true (action d'administrateur).
+# Les permissions Graph ne sont attribuées qu'avec GRAPH_CONSENT=true (action d'administrateur) ; sans elle,
+# le script lit et affiche l'état réel du consentement.
 # Idempotent : on peut le relancer sans effet si tout existe déjà. N'écrit aucun fichier, ne pose rien
 # dans GitHub : il affiche les commandes `gh` à lancer.
 #
@@ -31,6 +32,15 @@ GRAPH_CONSENT="${GRAPH_CONSENT:-false}"
 GITHUB_REPO="${GITHUB_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)}"
 if [[ ! "$GITHUB_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   echo "GITHUB_REPO invalide ou introuvable (attendu <org>/<repo>)." >&2
+  exit 1
+fi
+
+# Préfixe du sujet OIDC tel que GitHub l'émet pour ce dépôt : « repo:<org>/<repo> », ou avec les
+# identifiants immuables (« repo:<org>@<id>/<repo>@<id> ») quand le dépôt les utilise. On le lit, on ne le devine pas :
+# un préfixe différent donne AADSTS700213 (aucun credential fédéré correspondant).
+SUB_PREFIX="$(gh api "repos/${GITHUB_REPO}/actions/oidc/customization/sub" --jq .sub_claim_prefix 2>/dev/null || true)"
+if [[ ! "$SUB_PREFIX" =~ ^repo:[^[:space:]]+$ ]]; then
+  echo "Préfixe du sujet OIDC introuvable pour ${GITHUB_REPO} (gh api .../actions/oidc/customization/sub)." >&2
   exit 1
 fi
 
@@ -127,7 +137,9 @@ ensure_role() {
   fi
 }
 
-# Permission Graph (application) : équivaut au consentement administrateur.
+# Permission Graph (application) : l'attribution équivaut au consentement administrateur.
+# L'état réel est toujours lu d'abord. Sans GRAPH_CONSENT=true, on ne fait que le constater.
+GRAPH_MISSING=0
 ensure_graph_role() {
   local sp="$1" role="$2" graph_sp role_id count
   graph_sp="$(az ad sp show --id "$GRAPH_APP_ID" --query id -o tsv)"
@@ -140,42 +152,40 @@ ensure_graph_role() {
   count="$(az rest --method GET \
     --url "https://graph.microsoft.com/v1.0/servicePrincipals/${sp}/appRoleAssignments" \
     --query "value[?appRoleId=='${role_id}'] | length(@)" -o tsv)"
-  if [[ "$count" == "0" ]]; then
+  if [[ "$count" != "0" ]]; then
+    log "Permission Graph $role : déjà consentie"
+  elif [[ "$GRAPH_CONSENT" == "true" ]]; then
     log "Permission Graph $role : consentement"
     az rest --method POST \
       --url "https://graph.microsoft.com/v1.0/servicePrincipals/${graph_sp}/appRoleAssignedTo" \
       --body "{\"principalId\":\"${sp}\",\"resourceId\":\"${graph_sp}\",\"appRoleId\":\"${role_id}\"}" -o none
   else
-    log "Permission Graph $role : déjà consentie"
+    log "Permission Graph $role : NON consentie (GRAPH_CONSENT=true pour l'attribuer)"
+    GRAPH_MISSING=$((GRAPH_MISSING + 1))
   fi
 }
 
 grant_graph() {
-  local sp="$1" name="$2"
-  shift 2
-  if [[ "$GRAPH_CONSENT" == "true" ]]; then
-    local role
-    for role in "$@"; do ensure_graph_role "$sp" "$role"; done
-  else
-    log "Permissions Graph de $name non consenties (GRAPH_CONSENT=true pour les attribuer) : $*"
-  fi
+  local sp="$1" role
+  shift
+  for role in "$@"; do ensure_graph_role "$sp" "$role"; done
 }
 
 # Identité de plan (lecture seule, tous environnements) ; rôles ajoutés pour l'abonnement courant.
 plan_app_id="$(ensure_app "$PLAN_APP")"
 plan_sp="$(ensure_sp "$plan_app_id")"
-ensure_fic "$plan_app_id" "github-pull-request" "repo:${GITHUB_REPO}:pull_request"
+ensure_fic "$plan_app_id" "github-pull-request" "${SUB_PREFIX}:pull_request"
 ensure_role "$plan_sp" "Reader" "$sub_scope"
 ensure_role "$plan_sp" "Storage Blob Data Reader" "$state_scope"
-grant_graph "$plan_sp" "$PLAN_APP" "${PLAN_GRAPH_ROLES[@]}"
+grant_graph "$plan_sp" "${PLAN_GRAPH_ROLES[@]}"
 
 # Identité d'apply de l'environnement.
 apply_app_id="$(ensure_app "$APPLY_APP")"
 apply_sp="$(ensure_sp "$apply_app_id")"
-ensure_fic "$apply_app_id" "github-environment-${ENVIRONMENT}" "repo:${GITHUB_REPO}:environment:${ENVIRONMENT}"
+ensure_fic "$apply_app_id" "github-environment-${ENVIRONMENT}" "${SUB_PREFIX}:environment:${ENVIRONMENT}"
 ensure_role "$apply_sp" "Contributor" "$sub_scope"
 ensure_role "$apply_sp" "Storage Blob Data Contributor" "$state_scope"
-grant_graph "$apply_sp" "$APPLY_APP" "${APPLY_GRAPH_ROLES[@]}"
+grant_graph "$apply_sp" "${APPLY_GRAPH_ROLES[@]}"
 
 upper="$(printf '%s' "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')"
 cat <<EOF
@@ -187,15 +197,17 @@ gh variable set AZURE_CLIENT_ID_PLAN --repo ${GITHUB_REPO} --body ${plan_app_id}
 gh variable set AZURE_SUBSCRIPTION_ID_${upper} --repo ${GITHUB_REPO} --body ${AZURE_SUBSCRIPTION_ID}
 
 # Environnement ${ENVIRONMENT} : déploiement limité à la branche main, puis variables.
-gh api -X PUT repos/${GITHUB_REPO}/environments/${ENVIRONMENT} --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
-gh api -X POST repos/${GITHUB_REPO}/environments/${ENVIRONMENT}/deployment-branch-policies -f name=main -f type=branch
+gh api -X PUT repos/${GITHUB_REPO}/environments/${ENVIRONMENT} \\
+  --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+gh api -X POST repos/${GITHUB_REPO}/environments/${ENVIRONMENT}/deployment-branch-policies \\
+  -f name=main -f type=branch
 gh variable set AZURE_CLIENT_ID --repo ${GITHUB_REPO} --env ${ENVIRONMENT} --body ${apply_app_id}
 gh variable set AZURE_SUBSCRIPTION_ID --repo ${GITHUB_REPO} --env ${ENVIRONMENT} --body ${AZURE_SUBSCRIPTION_ID}
 EOF
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   echo "# prod : activer aussi « Required reviewers » dans Settings > Environments > prod."
 fi
-if [[ "$GRAPH_CONSENT" != "true" ]]; then
+if [[ "$GRAPH_MISSING" -gt 0 ]]; then
   echo
-  echo "Permissions Graph à consentir (administrateur) : relancer avec GRAPH_CONSENT=true."
+  echo "$GRAPH_MISSING permission(s) Graph à consentir (administrateur) : relancer avec GRAPH_CONSENT=true."
 fi
