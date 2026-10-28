@@ -23,6 +23,8 @@ export interface Config {
   direction: { type?: DirectionType; objectId?: string };
   /** Dossier SharePoint : site, bibliothèque (drive) et motif de nom ({nom}, {prenom}, {id}). */
   sharePoint: { siteId?: string; driveId?: string; folderPattern: string };
+  /** Licence : groupe Entra (licence par groupe) et SKU attribué à la validation (non configuré = valider répond 503). */
+  license: { groupId?: string; skuId?: string };
 }
 
 export type ReadyConfig = Config & { upnDomain: string; statusExtension: string };
@@ -65,6 +67,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const driveId = opt(env.SHAREPOINT_DRIVE_ID);
   if (siteId !== undefined && !GRAPH_ID_RE.test(siteId)) throw new Error('SHAREPOINT_SITE_ID invalide');
   if (driveId !== undefined && !GRAPH_ID_RE.test(driveId)) throw new Error('SHAREPOINT_DRIVE_ID invalide');
+  const licenseGroupId = opt(env.LICENSE_GROUP_ID);
+  const licenseSkuId = opt(env.LICENSE_SKU_ID);
+  if (licenseGroupId !== undefined && !GUID_RE.test(licenseGroupId)) throw new Error('LICENSE_GROUP_ID invalide (attendu : GUID)');
+  if (licenseSkuId !== undefined && !GUID_RE.test(licenseSkuId)) throw new Error('LICENSE_SKU_ID invalide (attendu : GUID)');
   const folderPattern = opt(env.SHAREPOINT_FOLDER_PATTERN) ?? DEFAULT_FOLDER_PATTERN;
   const patternError = checkFolderPattern(folderPattern);
   if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
@@ -86,6 +92,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustAuthHeaders: easyAuth || devBypass,
     direction: { type, objectId },
     sharePoint: { siteId, driveId, folderPattern },
+    license: { groupId: licenseGroupId, skuId: licenseSkuId },
   };
 }
 

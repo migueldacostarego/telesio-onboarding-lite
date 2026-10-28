@@ -23,6 +23,8 @@ export class ServiceError extends Error {
   }
 }
 
+/** Pays d'usage posé à la création : Entra n'attribue aucune licence (par groupe) sans usageLocation. */
+export const USAGE_LOCATION = 'FR';
 const MAX_UPN_ATTEMPTS = 20;
 const DEFAULT_RETRY_DELAYS = [500, 1500, 3000];
 
@@ -87,6 +89,7 @@ export async function createDemande(
           employeeHireDate: `${input.dateArrivee}T00:00:00Z`,
           jobTitle: input.poste,
           department: input.service,
+          usageLocation: USAGE_LOCATION,
           passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
         });
         upn = candidate;

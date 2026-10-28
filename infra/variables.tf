@@ -113,6 +113,33 @@ variable "sharepoint_folder_pattern" {
   default     = "{nom} {prenom}"
 }
 
+variable "license_sku_id" {
+  description = "skuId (GUID) de la licence attribuée à la validation (GET /subscribedSkus, propriété skuId, pas id). Vide : pas de groupe de licence, valider répond 503."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$", var.license_sku_id))
+    error_message = "license_sku_id doit être un GUID."
+  }
+}
+
+variable "license_group_id" {
+  description = "objectId d'un groupe de sécurité existant porteur de la licence (licence par groupe déjà posée à la main). Vide : Terraform crée le groupe et lui attribue license_sku_id."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$", var.license_group_id))
+    error_message = "license_group_id doit être un GUID."
+  }
+
+  validation {
+    condition     = var.license_group_id == "" || var.license_sku_id != ""
+    error_message = "license_group_id exige license_sku_id."
+  }
+}
+
 variable "tap_lifetime_minutes" {
   description = "Durée de vie du TAP en minutes (10 à 43200). La politique TAP du tenant doit l'accepter."
   type        = number

@@ -15,6 +15,9 @@ sharepoint_site_id        = ""
 sharepoint_drive_id       = ""
 sharepoint_folder_pattern = "{nom} {prenom}"
 
+# Licence par groupe : même SKU que test (même tenant), groupe propre à dev créé par Terraform.
+license_sku_id = "cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46"
+
 # Affectation des rôles d'application (objectIds d'utilisateurs ou de groupes).
 rh_principal_object_ids        = ["1ec27e9b-ae17-43a4-98e6-2be67f1dcaad"]
 direction_principal_object_ids = []

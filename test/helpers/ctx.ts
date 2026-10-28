@@ -12,6 +12,8 @@ export const NOW = new Date('2026-10-27T10:00:00Z');
 export const RH_ID = 'aaaaaaaa-0000-4000-8000-000000000001';
 export const DIR_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
 export const GROUP_ID = 'cccccccc-0000-4000-8000-000000000003';
+export const LICENSE_GROUP = 'dddddddd-0000-4000-8000-000000000004';
+export const LICENSE_SKU = 'eeeeeeee-0000-4000-8000-000000000005';
 export const SITE = 'exemple.sharepoint.test,11111111-2222-4333-8444-555555555555,66666666-7777-4888-8999-000000000000';
 export const DRIVE = 'b!abc_DEF-123';
 
@@ -27,6 +29,8 @@ export const principal = (roles: string[] = [], oid = RH_ID) =>
 
 export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean } = {}) {
   const graph = new FakeGraph();
+  graph.skus.set(LICENSE_SKU, { enabled: 5, consumed: 1 });
+  graph.licenseGroups.set(LICENSE_GROUP, LICENSE_SKU);
   const events: AuditEvent[] = [];
   const audit: Audit = { track: (e) => void events.push(e), flush: async () => {} };
   const config = assertReady({
@@ -37,6 +41,8 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
       DIRECTION_OBJECT_ID: DIR_ID,
       SHAREPOINT_SITE_ID: SITE,
       SHAREPOINT_DRIVE_ID: DRIVE,
+      LICENSE_GROUP_ID: LICENSE_GROUP,
+      LICENSE_SKU_ID: LICENSE_SKU,
       ...env,
     }),
     trustAuthHeaders: opts.trustAuthHeaders ?? true,
@@ -48,6 +54,7 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
     audit,
     now: () => NOW,
     managerRetryDelaysMs: [0, 0],
+    licensePollDelaysMs: [0, 0, 0],
     sleep: async () => {},
   });
   return { graph, events, app };

@@ -16,6 +16,11 @@ output "status_extension" {
   value       = msgraph_resource.status_extension.output.name
 }
 
+output "license_group_id" {
+  description = "objectId du groupe de licence (LICENSE_GROUP_ID) ; vide si la licence n'est pas configurée."
+  value       = local.license_group_id
+}
+
 output "auth_app_client_id" {
   description = "Client ID de l'inscription Easy Auth."
   value       = azuread_application_registration.web.client_id

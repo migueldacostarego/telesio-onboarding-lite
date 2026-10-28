@@ -58,6 +58,7 @@ describe('API', () => {
         employeeHireDate: '2026-11-03T00:00:00Z',
         jobTitle: 'Comptable',
         department: 'Finance',
+        usageLocation: 'FR',
         mailNickname: 'eloise.delacruz',
       });
       const pw = (created.passwordProfile as { password: string }).password;

@@ -6,7 +6,7 @@ MVP d'onboarding : RH saisit une demande, la direction valide, l'app prépare le
 
 1. **Demande (RH).** RH saisit la demande (prénom, nom, poste, département, responsable, date d'arrivée).
 2. **Validation (direction).** La direction voit la liste des demandes `EnAttente` et les valide ou les refuse.
-3. **Préparation.** À la validation, l'app crée le compte Entra **désactivé** (attributs natifs `employeeHireDate`, `manager`, `jobTitle`, `department`) et le dossier SharePoint.
+3. **Préparation.** À la création, le compte Entra est **désactivé** (attributs natifs `employeeHireDate`, `manager`, `jobTitle`, `department`, `usageLocation` = `FR`). À la validation, l'app réserve la licence (voir « Licence »), puis crée le dossier SharePoint.
 4. **Jour J.** RH clique sur « Activer » : le compte est activé, un TAP (Temporary Access Pass, usage unique) est généré et affiché une seule fois, remis en main propre, puis le statut passe à `Actif`.
 
 **Pas de base de données.** L'état vit dans Entra, dans l'attribut d'extension `statutOnboarding` : `EnAttente`, `Validé`, `Refusé` ou `Actif`.
@@ -29,11 +29,28 @@ Traçabilité : événements personnalisés Application Insights (`demande.compt
 Le valideur est défini par `DIRECTION_TYPE` + `DIRECTION_OBJECT_ID` : `user` (cette personne) ou `group` (membre, transitif, du groupe, vérifié par Graph `checkMemberGroups`). L'identité vient d'Easy Auth, comme pour RH. Non configuré ou vérification impossible : les routes répondent 503 (fail closed).
 
 - `GET /api/demandes` : comptes avec `statutOnboarding=EnAttente` (nom, poste, service, manager, date d'arrivée ; 100 max, `tronque` l'indique).
-- `POST /api/demandes/:id/valider` : statut `Validé`, puis dossier SharePoint à la racine de `SHAREPOINT_DRIVE_ID` (site `SHAREPOINT_SITE_ID`), nommé selon `SHAREPOINT_FOLDER_PATTERN` (défaut `{nom} {prenom}`, caractères interdits retirés). Idempotent : un dossier existant est réutilisé (un fichier de même nom donne 502). Si SharePoint échoue, le statut reste `Validé` et la réponse est 502 avec `etape` ; **rappeler `valider` reprend uniquement le dossier** (`reprise: true`).
+- `POST /api/demandes/:id/valider` : licence d'abord (voir « Licence »), puis statut `Validé`, puis dossier SharePoint à la racine de `SHAREPOINT_DRIVE_ID` (site `SHAREPOINT_SITE_ID`), nommé selon `SHAREPOINT_FOLDER_PATTERN` (défaut `{nom} {prenom}`, caractères interdits retirés). Idempotent : un dossier existant est réutilisé (un fichier de même nom donne 502). Si SharePoint échoue, le statut reste `Validé` et la réponse est 502 avec `etape` ; **rappeler `valider` reprend uniquement le dossier** (`reprise: true`).
 - `POST /api/demandes/:id/refuser` : `{ "motif": "…" }` obligatoire (500 car. max) ; le motif n'est tracé que par sa longueur et n'est conservé nulle part ; le compte est supprimé (corbeille Entra, récupérable 30 jours). Un échec de suppression laisse le compte `EnAttente` : on peut réessayer.
 - 409 si le compte n'est pas un compte d'onboarding désactivé au bon statut (`valider` : `EnAttente`, ou `Validé` pour la reprise ; `refuser` : `EnAttente`). C'est le garde-fou qui empêche `refuser` de supprimer un autre compte.
 - Les POST n'acceptent que `application/json` (corps `{}` suffisant pour `valider`).
 - Homonymes : deux personnes au même `{nom} {prenom}` partageraient le dossier ; ajouter `{id}` au motif si le cas se présente.
+
+## Licence (étape 6)
+
+Licence **par groupe** : `LICENSE_GROUP_ID` (groupe de sécurité, appartenance affectée, non assignable à un rôle) porte la licence `LICENSE_SKU_ID` (`skuId` de `GET /subscribedSkus`, pas son `id`). Non configurés : `valider` répond 503 avant toute lecture. Exige Entra ID P1 (ou un SKU qui l'inclut) ; l'attribution aux membres est **asynchrone** côté Entra. `usageLocation = FR` est posé à la création du compte (sans lui Entra n'attribue rien) ; un compte créé avant cette étape doit recevoir `usageLocation` à la main, sinon `valider` répond 502 (`raison` typiquement `ProhibitedInUsageLocationViolation`).
+
+`valider`, après la lecture du compte (404 et 409 de statut inchangés) et **avant toute écriture** :
+
+1. Le compte porte déjà la licence sans erreur (reprise, tentative précédente) : rien à faire, pas de décompte. Sans ce cas, le compte compterait dans `consumedUnits` et la reprise serait refusée à tort.
+2. Sinon `GET /subscribedSkus` : `prepaidUnits.enabled - consumedUnits`. À 0 (ou moins) : **409 « Aucune licence disponible »**, le statut ne change pas, rien n'est écrit. SKU absent du tenant : 503.
+3. Ajout au groupe (un ajout répété n'est pas une erreur), puis lecture de `licenseAssignmentStates` (au plus 8 lectures, environ 30 s). Entrée `Active` : on continue (statut `Validé`, dossier). Entrée en erreur : le compte est **retiré du groupe**, puis 409 pour `CountViolation` (course entre deux validations), 502 avec `raison` pour les autres (`étape : licence_attribution`). Retrait impossible : 502 `licence_retrait_groupe`, à reprendre.
+4. Aucune entrée à l'issue des lectures : 502 `licence_verification`, statut inchangé, le compte **reste dans le groupe** ; rappeler `valider` le retrouve licencié et continue. Choix volontaire : le retirer ferait échouer en boucle un tenant dont le traitement dépasse 30 s.
+
+L'écran direction affiche « Aucune licence disponible… » en évidence (bordure épaisse). Refuser un compte le supprime : la licence est libérée avec lui.
+
+Traçabilité : `licence.groupe_ajout`, `licence.attribuee`, `licence.deja_attribuee`, `licence.indisponible` (avec `enabled` et `consumed`), `licence.refusee` (code d'erreur Entra), `licence.groupe_retrait`, `licence.verification_expiree`, `licence.sku_introuvable`, avec l'objectId du compte et les GUID du groupe et du SKU uniquement.
+
+Terraform ([infra/licence.tf](infra/licence.tf)) : `license_sku_id` crée le groupe `sg-<nom>-licence` (`azuread_group`) et lui attribue le SKU (`azuread_group_license`), tous deux en `prevent_destroy` (les détruire retire la licence de tous les comptes). `license_group_id` désigne à la place un groupe existant : Terraform n'y pose alors aucune licence (à faire dans le portail). Les membres ne sont pas déclarés dans Terraform : c'est l'app qui les ajoute.
 
 ## Activation et TAP (étape 4)
 
@@ -72,7 +89,8 @@ Application permissions accordées par Terraform ([infra/graph.tf](infra/graph.t
 | `User.Read.All` | Résoudre le manager et vérifier la disponibilité de l'email (UPN/mail) avant création. |
 | `UserAuthenticationMethod.ReadWrite.All` | Lister, supprimer et créer le TAP (`/authentication/temporaryAccessPassMethods`) à l'activation et à la régénération. **Sensible** : permet de gérer les méthodes d'authentification de n'importe quel utilisateur, donc de prendre un compte. Garde-fous dans l'app : seulement sur un compte d'onboarding au statut `Validé` ou `Actif` récent, rôle RH, usage unique, chaque action tracée (objectIds, jamais le TAP). |
 | `Sites.Selected` | Accès limité à **un seul** site SharePoint : créer les dossiers dans la bibliothèque `SHAREPOINT_DRIVE_ID`. Le grant explicite (rôle `write`, `POST /sites/{id}/permissions`) est posé par Terraform sur `sharepoint_site_id`, ou à la main si `manage_sharepoint_grant = false` (voir ci-dessous). |
-| `GroupMember.Read.All` | `checkMemberGroups` : vérifier que le valideur appartient (même indirectement) au groupe `DIRECTION_OBJECT_ID`. Nécessaire seulement si `DIRECTION_TYPE=group`. |
+| `GroupMember.ReadWrite.All` | Ajouter le compte au groupe de licence à la validation, et l'en retirer en cas de `CountViolation`. Couvre aussi `checkMemberGroups` (valideur de type `group`), ce qui remplace `GroupMember.Read.All`. **Sensible** : permet d'ajouter n'importe quel compte à n'importe quel groupe de sécurité du tenant qui n'est pas assignable à un rôle (donc d'en hériter les accès). Garde-fous dans l'app : seul `LICENSE_GROUP_ID` est visé, seulement sur un compte d'onboarding désactivé au statut `EnAttente` ou `Validé`, validateur Direction, chaque ajout et retrait tracé. Un groupe assignable à un rôle resterait inaccessible (il exigerait `RoleManagement.ReadWrite.Directory`, volontairement non accordée). |
+| `LicenseAssignment.Read.All` | `GET /subscribedSkus` : lire `prepaidUnits.enabled` et `consumedUnits` pour refuser avant toute écriture. C'est le moindre privilège de cette route ; `Organization.Read.All` (plus large) n'est pas nécessaire. L'état de licence du compte (`licenseAssignmentStates`) se lit avec `User.Read.All`. |
 
 ## Développement
 
@@ -95,6 +113,7 @@ npm run dev     # build + démarre sur le port 3000
 | `main.tf` | Groupe de ressources, identité managée user-assignée, Log Analytics (rétention 365 j) + Application Insights, plan et Web App Node 22 avec les réglages d'application et Easy Auth |
 | `entra.tf` | Inscription d'application, rôles RH et Direction, credential fédéré, URI de redirection |
 | `graph.tf` | Permissions Graph de l'identité managée, extension `statutOnboarding`, grant `write` sur le seul site SharePoint |
+| `licence.tf` | Groupe de licence et attribution du SKU (`LICENSE_GROUP_ID`, `LICENSE_SKU_ID`) |
 | `envs/<env>.tfvars`, `envs/<env>.backend.hcl` | Paramètres et état (clé dédiée par environnement) de `dev`, `test` et `prod` |
 
 `ENTRA_STATUS_EXTENSION` reçoit le nom complet `extension_<appId>_statutOnboarding` renvoyé par Graph. L'extension est protégée par `prevent_destroy` : la supprimer efface le statut de tous les comptes d'onboarding.
@@ -105,9 +124,10 @@ npm run dev     # build + démarre sur le port 3000
    - **apply** : `gh-telesio-onboarding-apply-<env>`, une par environnement, credential fédéré de sujet `repo:<org>/<repo>:environment:<env>`.
      - Azure : `Contributor` sur l'abonnement (création du groupe de ressources), `Storage Blob Data Contributor` sur le conteneur d'état ;
      - Graph (application) : `Application.ReadWrite.OwnedBy` (crée les inscriptions dont elle est propriétaire ; à remplacer par `Application.ReadWrite.All` si le premier apply la refuse ; elle rend l'identité propriétaire d'office des inscriptions qu'elle crée, d'où `manage_app_owner = false` dans `dev` et `prod`, vrai (défaut) pour un apply manuel comme `test`), `AppRoleAssignment.ReadWrite.All` (permissions Graph de l'identité managée et rôles RH/Direction), `Sites.FullControl.All` seulement si `sharepoint_site_id` est renseigné et `manage_sharepoint_grant` vaut `true` (le script ne l'attribue pas ; préférer `false`, comme en test).
+   - Licence : Graph (application) `Group.Create` et `User.Read.All` (minimum documenté du provider `azuread_group`, le créateur devient propriétaire du groupe) et `LicenseAssignment.ReadWrite.All` (`azuread_group_license`, `POST /groups/{id}/assignLicense`). Relancer le script avec `GRAPH_CONSENT=true` **avant** de fusionner : sans cela, l'apply de `dev` échoue en 403 dès que `license_sku_id` est renseigné.
    - **plan** : `gh-telesio-onboarding-plan`, lecture seule, une seule pour tous les environnements, sujet `repo:<org>/<repo>:pull_request`.
      - Azure : `Reader` sur chaque abonnement, `Storage Blob Data Reader` sur le conteneur d'état, et le rôle personnalisé `Telesio Web App Config Reader` (une seule action, `Microsoft.Web/sites/config/list/action`) sur le **seul groupe de ressources de l'environnement** (`rg-telesio-onboarding-<env>`). `Reader` ne relit pas les réglages d'une Web App : sans cette action, le plan échoue en 403 dès que l'app existe. Elle expose les valeurs des réglages (chaîne d'ingestion Application Insights, identifiants de l'identité managée ; aucun secret par conception) au code d'une PR du dépôt. Le groupe est créé par Terraform : avant le premier apply, le script ne peut pas attribuer ce rôle ; le relancer après (ainsi qu'après toute recréation du groupe, qui supprime l'attribution) ;
-     - Graph : `Application.Read.All`. Certaines lectures (dont les permissions de site) peuvent exiger davantage : à ajuster à la première exécution.
+     - Graph : `Application.Read.All`, plus `Group.Read.All` et `LicenseAssignment.Read.All` (relire le groupe de licence et son SKU). Si le plan échoue encore en 403 sur le groupe, la lecture des membres demande `User.Read.All` : à arbitrer, car ce droit lit tous les profils depuis le code d'une PR. Certaines lectures (dont les permissions de site) peuvent exiger davantage : à ajuster à la première exécution.
      - L'état contient les réglages de l'app (dont la chaîne d'ingestion Application Insights) : le code d'une PR du dépôt peut le lire avec cette identité.
 2. **Consentement administrateur** : les permissions Graph exigent un consentement d'administrateur (`Privileged Role Administrator` ou `Global Administrator`). `GRAPH_CONSENT=true scripts/bootstrap-oidc.sh` les attribue avec le compte connecté ; sans cette variable, le script ne les attribue pas et le dit. `UserAuthenticationMethod.ReadWrite.All`, attribuée à l'identité managée par Terraform, suppose que l'identité d'apply ait `AppRoleAssignment.ReadWrite.All` consenti.
 3. **GitHub** (le script affiche les commandes `gh`) : variables de dépôt `AZURE_TENANT_ID`, `AZURE_CLIENT_ID_PLAN`, `AZURE_SUBSCRIPTION_ID_DEV`, `AZURE_SUBSCRIPTION_ID_PROD` ; environnements `dev` et `prod` avec les variables `AZURE_CLIENT_ID` et `AZURE_SUBSCRIPTION_ID`, et un déploiement limité à la branche `main`. Sur `prod`, activer **Required reviewers** : c'est ce qui protège l'apply de prod (décocher « Prevent self-review » s'il n'y a qu'un seul mainteneur). Aucun secret.

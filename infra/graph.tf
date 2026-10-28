@@ -9,7 +9,8 @@ locals {
   graph_app_roles = [
     "User.ReadWrite.All",                     # créer et activer le compte, écrire statutOnboarding, supprimer
     "User.Read.All",                          # manager, disponibilité de l'UPN
-    "GroupMember.Read.All",                   # checkMemberGroups (valideur de type group)
+    "GroupMember.ReadWrite.All",              # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups (valideur group)
+    "LicenseAssignment.Read.All",             # GET /subscribedSkus : licences disponibles
     "UserAuthenticationMethod.ReadWrite.All", # TAP (sensible)
     "Sites.Selected",                         # un seul site, via le grant ci-dessous
   ]

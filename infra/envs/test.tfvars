@@ -17,6 +17,9 @@ sharepoint_folder_pattern = "{nom} {prenom}"
 # Grant write posé à la main via Graph Explorer (le jeton az n'a pas Sites.FullControl.All).
 manage_sharepoint_grant = false
 
+# Licence par groupe : Microsoft 365 Business Premium (SPB) du tenant. Terraform crée le groupe et lui attribue le SKU.
+license_sku_id = "cbdc14ab-d96c-4c30-b9f4-6ada7cdc1d46"
+
 # Utilisateur RH de test (rh@telesiosandbox.onmicrosoft.com).
 rh_principal_object_ids        = ["1ec27e9b-ae17-43a4-98e6-2be67f1dcaad"]
 direction_principal_object_ids = []

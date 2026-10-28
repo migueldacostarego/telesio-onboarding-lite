@@ -83,6 +83,9 @@ locals {
     SHAREPOINT_SITE_ID        = var.sharepoint_site_id
     SHAREPOINT_DRIVE_ID       = var.sharepoint_drive_id
     SHAREPOINT_FOLDER_PATTERN = var.sharepoint_folder_pattern
+
+    LICENSE_GROUP_ID = local.license_group_id
+    LICENSE_SKU_ID   = var.license_sku_id
   }
 
   app_settings = { for k, v in local.app_settings_raw : k => v if v != "" }

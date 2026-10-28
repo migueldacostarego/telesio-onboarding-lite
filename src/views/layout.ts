@@ -11,6 +11,7 @@ label{display:block;margin:.5rem 0}input,select,button{font:inherit;padding:.35r
 input{width:100%;max-width:28rem;box-sizing:border-box}
 table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
 .msg{padding:.6rem;margin:.8rem 0;border:1px solid #888}.err{border-color:#b00020}.ok{border-color:#1b6e2d}
+.msg.err.lic{border-width:3px;font-weight:600}
 .tap{font:1.6rem monospace;letter-spacing:.1em;padding:.6rem;border:2px solid #1a1a1a;display:inline-block;margin:.5rem 0}
 `;
 
@@ -64,9 +65,9 @@ function el(tag, props, ...kids) {
   for (const kid of kids) e.append(kid);
   return e;
 }
-function say(text, kind) {
+function say(text, kind, extra) {
   const m = $('msg'); m.replaceChildren();
-  if (text) m.append(el('div', { class: 'msg ' + (kind || ''), text }));
+  if (text) m.append(el('div', { class: 'msg ' + (kind || '') + (extra ? ' ' + extra : ''), text }));
 }
 async function api(method, path, body) {
   try {
@@ -146,8 +147,11 @@ async function act(d, action, body) {
   say('');
   if (action === 'refuser' && !confirm('Refuser cette demande ? Le compte sera supprimé (récupérable 30 jours).')) return;
   const r = await api('POST', '/api/demandes/' + d.id + '/' + action, body);
+  if (!r.ok && r.data && r.data.code === 'licence_indisponible') {
+    return say('Aucune licence disponible : la demande de ' + d.nom + ' reste en attente. Libérez ou commandez une licence, puis validez à nouveau.', 'err', 'lic');
+  }
   if (!r.ok) return say(describe(r), 'err');
-  say(action === 'valider' ? 'Demande validée, dossier SharePoint prêt.' : 'Demande refusée, compte supprimé.', 'ok');
+  say(action === 'valider' ? 'Demande validée, licence attribuée, dossier SharePoint prêt.' : 'Demande refusée, compte supprimé.', 'ok');
   load();
 }
 load();

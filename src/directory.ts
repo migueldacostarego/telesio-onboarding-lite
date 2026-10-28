@@ -29,6 +29,8 @@ export interface NewUser {
   employeeHireDate: string;
   jobTitle: string;
   department: string;
+  /** Requis pour qu'Entra attribue une licence (licence par groupe). */
+  usageLocation: string;
   passwordProfile: { password: string; forceChangePasswordNextSignIn: boolean };
 }
 
@@ -62,7 +64,30 @@ export interface PendingDemande {
   dateArrivee: string | null;
 }
 
+/** Disponibilité d'un SKU : prepaidUnits.enabled et consumedUnits de GET /subscribedSkus. */
+export interface SkuAvailability {
+  enabled: number;
+  consumed: number;
+}
+
+/** Entrée licenseAssignmentStates de l'utilisateur pour un SKU (null : pas encore traitée par Entra). */
+export interface LicenseState {
+  /** Active, ActiveWithError, Disabled, Error. */
+  state: string;
+  /** CountViolation, MutuallyExclusiveViolation, DependencyViolation, ProhibitedInUsageLocationViolation, UniquenessViolation, Other ; null si aucune. */
+  error: string | null;
+  /** Id du groupe qui porte la licence ; null si attribuée directement. */
+  assignedByGroup: string | null;
+}
+
 export interface Directory {
+  /** null : le SKU n'existe pas dans le tenant. */
+  getSkuAvailability(skuId: string): Promise<SkuAvailability | null>;
+  getLicenseState(userId: string, skuId: string): Promise<LicenseState | null>;
+  /** Idempotent : un utilisateur déjà membre n'est pas une erreur. */
+  addGroupMember(groupId: string, userId: string): Promise<void>;
+  /** Idempotent : un utilisateur absent du groupe n'est pas une erreur. */
+  removeGroupMember(groupId: string, userId: string): Promise<void>;
   /** hiredSince : AAAA-MM-JJ, ne garde que les arrivées à partir de cette date. */
   listByStatut(
     ext: string,
@@ -264,6 +289,61 @@ export class GraphDirectory implements Directory {
       await this.client.api(`/users/${id}`).delete();
     } catch (err) {
       throw wrap(err);
+    }
+  }
+
+  async getSkuAvailability(skuId: string): Promise<SkuAvailability | null> {
+    try {
+      const res = await this.client.api('/subscribedSkus').get();
+      const sku = ((res?.value ?? []) as { skuId?: string; consumedUnits?: number; prepaidUnits?: { enabled?: number } }[]).find(
+        (s) => s.skuId?.toLowerCase() === skuId.toLowerCase(),
+      );
+      if (!sku) return null;
+      return { enabled: sku.prepaidUnits?.enabled ?? 0, consumed: sku.consumedUnits ?? 0 };
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async getLicenseState(userId: string, skuId: string): Promise<LicenseState | null> {
+    try {
+      const u = await this.client.api(`/users/${userId}`).select('id,licenseAssignmentStates').get();
+      const states = (u?.licenseAssignmentStates ?? []) as {
+        skuId?: string;
+        state?: string;
+        error?: string | null;
+        assignedByGroup?: string | null;
+      }[];
+      const own = states.filter((s) => s.skuId?.toLowerCase() === skuId.toLowerCase());
+      if (own.length === 0) return null;
+      // Plusieurs entrées possibles (directe et par groupe) : une entrée sans erreur l'emporte.
+      const s = own.find((x) => x.state === 'Active' && !x.error) ?? own[0]!;
+      return { state: s.state ?? 'Error', error: s.error ?? null, assignedByGroup: s.assignedByGroup ?? null };
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async addGroupMember(groupId: string, userId: string): Promise<void> {
+    try {
+      await this.client
+        .api(`/groups/${groupId}/members/$ref`)
+        .post({ '@odata.id': `https://graph.microsoft.com/v1.0/directoryObjects/${userId}` });
+    } catch (err) {
+      const e = err as { statusCode?: number; message?: string };
+      // Graph répond 400 « One or more added object references already exist » si l'utilisateur est déjà membre.
+      if (e?.statusCode === 400 && /already exist/i.test(e.message ?? '')) return;
+      throw wrap(err);
+    }
+  }
+
+  async removeGroupMember(groupId: string, userId: string): Promise<void> {
+    try {
+      await this.client.api(`/groups/${groupId}/members/${userId}/$ref`).delete();
+    } catch (err) {
+      const e = wrap(err);
+      if (e.kind === 'notFound') return;
+      throw e;
     }
   }
 

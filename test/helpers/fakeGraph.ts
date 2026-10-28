@@ -39,6 +39,8 @@ export class FakeGraph {
     tapPost?: number;
     /** Échec des PATCH qui posent le statut (extension), pas de ceux d'accountEnabled. */
     statusPatch?: number;
+    groupAdd?: number;
+    groupRemove?: number;
   } = {};
   /** TAP existants par utilisateur : un seul autorisé, comme dans Entra. */
   taps = new Map<string, { id: string }[]>();
@@ -48,6 +50,15 @@ export class FakeGraph {
   /** Dossiers SharePoint : nom -> { id, folder? } (folder absent = c'est un fichier). */
   folders = new Map<string, { id: string; folder?: object }>();
   deleted: string[] = [];
+  /** SKU -> unités (GET /subscribedSkus : prepaidUnits.enabled et consumedUnits). */
+  skus = new Map<string, { enabled: number; consumed: number }>();
+  /** Groupes de licence par groupe : groupId -> skuId. */
+  licenseGroups = new Map<string, string>();
+  /** Résultat du traitement par groupe : ok (Active) ou erreur d'attribution (state Error, error = ce code). */
+  licenseOutcome: 'ok' | string = 'ok';
+  /** Lectures de l'utilisateur sans entrée de licence après l'ajout au groupe (traitement asynchrone). */
+  licensePendingReads = 0;
+  private licenses = new Map<string, { group: string; sku: string; reads: number; counted: boolean }>();
   /** Nombre d'échecs PUT restants avant succès (réplication). */
   putFailuresLeft = 0;
   /** UPN existant mais invisible au 1er contrôle de disponibilité (course entre contrôle et création). */
@@ -76,6 +87,36 @@ export class FakeGraph {
     };
     if (p.managerId) u.manager = `https://graph.microsoft.com/v1.0/users/${p.managerId}`;
     return id;
+  }
+
+  /** Compte déjà licencié par le groupe (reprise) : membre, entrée Active, unité déjà comptée par le test. */
+  addLicensed(userId: string, group: string, sku: string) {
+    this.groups.set(group, (this.groups.get(group) ?? new Set()).add(userId));
+    this.licenses.set(userId, { group, sku, reads: Number.MAX_SAFE_INTEGER, counted: true });
+  }
+
+  private licenseStates(userId: string) {
+    if (!this.licenses.has(userId)) {
+      // Membre posé directement dans `groups` : Entra le traite comme un membre ajouté par l'API.
+      for (const [group, sku] of this.licenseGroups) {
+        if (this.groups.get(group)?.has(userId)) this.licenses.set(userId, { group, sku, reads: 0, counted: false });
+      }
+    }
+    const l = this.licenses.get(userId);
+    if (!l || !this.groups.get(l.group)?.has(userId)) return [];
+    if (l.reads < this.licensePendingReads) {
+      l.reads++;
+      return [];
+    }
+    if (this.licenseOutcome !== 'ok') {
+      return [{ skuId: l.sku, assignedByGroup: l.group, state: 'Error', error: this.licenseOutcome }];
+    }
+    if (!l.counted) {
+      l.counted = true;
+      const sku = this.skus.get(l.sku);
+      if (sku) sku.consumed++;
+    }
+    return [{ skuId: l.sku, assignedByGroup: l.group, state: 'Active', error: null }];
   }
 
   private managerOf(ref: string) {
@@ -168,6 +209,7 @@ export class FakeGraph {
         givenName: u.props.givenName,
         surname: u.props.surname,
         employeeHireDate: u.props.employeeHireDate,
+        licenseAssignmentStates: this.licenseStates(u.id),
         ...ext,
       };
     }
@@ -204,6 +246,32 @@ export class FakeGraph {
     const tapOne = /^\/users\/([^/]+)\/authentication\/temporaryAccessPassMethods\/([^/]+)$/.exec(path);
     if (tapOne && method === 'DELETE') {
       this.taps.set(tapOne[1] as string, (this.taps.get(tapOne[1] as string) ?? []).filter((t) => t.id !== tapOne[2]));
+      return undefined;
+    }
+    if (method === 'GET' && path === '/subscribedSkus') {
+      return {
+        value: [...this.skus].map(([skuId, u]) => ({ skuId, consumedUnits: u.consumed, prepaidUnits: { enabled: u.enabled } })),
+      };
+    }
+    const add = /^\/groups\/([^/]+)\/members\/\$ref$/.exec(path);
+    if (method === 'POST' && add) {
+      if (this.failOn.groupAdd) throw graphError(this.failOn.groupAdd, 'Authorization_RequestDenied');
+      const g = add[1] as string;
+      const uid = (call.body as Record<string, string>)['@odata.id']!.split('/').pop() as string;
+      const members = this.groups.get(g) ?? new Set<string>();
+      if (members.has(uid)) {
+        throw graphError(400, 'Request_BadRequest', "One or more added object references already exist for the following modified properties: 'members'.");
+      }
+      this.groups.set(g, members.add(uid));
+      const sku = this.licenseGroups.get(g);
+      if (sku && !this.licenses.has(uid)) this.licenses.set(uid, { group: g, sku, reads: 0, counted: false });
+      return undefined;
+    }
+    const drop = /^\/groups\/([^/]+)\/members\/([^/]+)\/\$ref$/.exec(path);
+    if (method === 'DELETE' && drop) {
+      if (this.failOn.groupRemove) throw graphError(this.failOn.groupRemove, 'Authorization_RequestDenied');
+      if (!this.groups.get(drop[1] as string)?.delete(drop[2] as string)) throw graphError(404, 'Request_ResourceNotFound');
+      this.licenses.delete(drop[2] as string);
       return undefined;
     }
     const check = /^\/users\/([^/]+)\/checkMemberGroups$/.exec(path);

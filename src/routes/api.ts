@@ -18,6 +18,8 @@ export interface ApiDeps {
   library?: Library;
   now?: () => Date;
   managerRetryDelaysMs?: number[];
+  /** Attentes entre deux lectures de l'état de licence après l'ajout au groupe. */
+  licensePollDelaysMs?: number[];
   sleep?: (ms: number) => Promise<void>;
 }
 
