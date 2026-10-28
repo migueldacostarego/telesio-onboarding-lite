@@ -1,0 +1,124 @@
+import type { Audit } from './audit';
+import type { ReadyConfig } from './config';
+import { DirectoryError, type Directory, type OnboardingUser, type PendingDemande } from './directory';
+import { buildFolderName } from './folder';
+import type { Library } from './sharepoint';
+import { ServiceError } from './demandes';
+
+export interface DirectionDeps {
+  config: ReadyConfig;
+  directory: Directory;
+  library?: Library;
+  audit: Audit;
+}
+
+/** Exécute une étape Graph ; toute erreur devient un 502 qui nomme l'étape (jamais de message brut). */
+export async function step<T>(
+  deps: DirectionDeps,
+  actor: string,
+  etape: string,
+  cible: string | undefined,
+  extra: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    const e = err instanceof DirectoryError ? err : undefined;
+    deps.audit.track({ action: 'demande.echec', actor, outcome: 'erreur', etape, cible, http: e?.statusCode, code: e?.code });
+    throw new ServiceError(502, { error: 'Le service a échoué ; l’action n’a pas abouti', etape, ...extra });
+  }
+}
+
+/**
+ * Charge le compte et refuse (409) s'il n'est pas dans un statut autorisé.
+ * Garde-fou central : refuser supprime un compte, il ne doit jamais viser autre chose qu'un compte
+ * d'onboarding encore désactivé.
+ */
+async function loadForAction(
+  deps: DirectionDeps,
+  actor: string,
+  id: string,
+  allowed: readonly string[],
+): Promise<OnboardingUser> {
+  const user = await step(deps, actor, 'lecture', id, {}, () =>
+    deps.directory.getOnboardingUser(id, deps.config.statusExtension),
+  );
+  if (!user) {
+    deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
+    throw new ServiceError(404, { error: 'Demande introuvable' });
+  }
+  if (user.accountEnabled || user.statut === null || !allowed.includes(user.statut)) {
+    const statut = user.accountEnabled || user.statut === null ? 'inconnu' : user.statut;
+    deps.audit.track({ action: 'demande.conflit', actor, outcome: 'refuse', cible: id, statut });
+    throw new ServiceError(409, { error: 'Action impossible dans le statut actuel', statut });
+  }
+  return user;
+}
+
+export async function listDemandes(
+  deps: DirectionDeps,
+  actor: string,
+): Promise<{ demandes: PendingDemande[]; tronque: boolean }> {
+  const res = await step(deps, actor, 'liste', undefined, {}, () =>
+    deps.directory.listByStatut(deps.config.statusExtension, 'EnAttente'),
+  );
+  deps.audit.track({ action: 'demande.liste', actor, outcome: 'ok', resultats: res.demandes.length, tronque: res.tronque });
+  return res;
+}
+
+export interface Validation {
+  id: string;
+  statut: 'Validé';
+  dossier: { id: string; url: string | null; cree: boolean };
+  /** true : demande déjà Validé, seule la création du dossier a été reprise. */
+  reprise: boolean;
+}
+
+/**
+ * EnAttente → Validé, puis dossier SharePoint (idempotent).
+ * Un compte déjà Validé est accepté : c'est la reprise après un échec SharePoint (le statut reste Validé).
+ */
+export async function validerDemande(deps: DirectionDeps, actor: string, id: string): Promise<Validation> {
+  const { config, directory, audit, library } = deps;
+  if (!library) {
+    throw new ServiceError(503, { error: 'SharePoint non configuré (SHAREPOINT_SITE_ID, SHAREPOINT_DRIVE_ID)' });
+  }
+  const user = await loadForAction(deps, actor, id, ['EnAttente', 'Validé']);
+  const reprise = user.statut === 'Validé';
+
+  if (!reprise) {
+    await step(deps, actor, 'statut', id, {}, () => directory.setExtension(id, config.statusExtension, 'Validé'));
+    audit.track({ action: 'demande.validee', actor, outcome: 'ok', cible: id });
+  } else {
+    audit.track({ action: 'demande.reprise', actor, outcome: 'ok', cible: id });
+  }
+
+  const after = { statut: 'Validé' };
+  const name = await step(deps, actor, 'dossier_nom', id, after, async () =>
+    buildFolderName(config.sharePoint.folderPattern, {
+      nom: user.surname ?? '',
+      prenom: user.givenName ?? '',
+      id,
+    }),
+  );
+  const folder = await step(deps, actor, 'dossier_sharepoint', id, after, () => library.ensureFolder(name));
+  // Ni le nom du dossier (contient le nom de la personne) ni l'URL ne sont tracés.
+  audit.track({ action: 'demande.dossier', actor, outcome: 'ok', cible: id, dossier: folder.id, cree: folder.created });
+  return { id, statut: 'Validé', dossier: { id: folder.id, url: folder.webUrl, cree: folder.created }, reprise };
+}
+
+/** Trace le refus (longueur du motif seulement), puis supprime le compte (corbeille Entra, 30 jours). */
+export async function refuserDemande(
+  deps: DirectionDeps,
+  actor: string,
+  id: string,
+  motif: string,
+): Promise<{ id: string; supprime: true; recuperableJours: 30 }> {
+  await loadForAction(deps, actor, id, ['EnAttente']);
+  deps.audit.track({ action: 'demande.refusee', actor, outcome: 'ok', cible: id, motifLongueur: motif.length });
+  await step(deps, actor, 'suppression_compte', id, {}, () => deps.directory.deleteUser(id));
+  deps.audit.track({ action: 'demande.compte_supprime', actor, outcome: 'ok', cible: id });
+  return { id, supprime: true, recuperableJours: 30 };
+}

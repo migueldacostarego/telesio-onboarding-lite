@@ -1,0 +1,145 @@
+import { randomInt } from 'node:crypto';
+import type { Audit } from './audit';
+import type { ReadyConfig } from './config';
+import { DirectoryError, type Directory } from './directory';
+import { upnBase, upnCandidate } from './upn';
+import type { DemandeInput } from './validation';
+
+export interface DemandeDeps {
+  config: ReadyConfig;
+  directory: Directory;
+  audit: Audit;
+  /** Délais entre les tentatives de PUT manager (réplication Entra juste après la création). */
+  managerRetryDelaysMs?: number[];
+  sleep?: (ms: number) => Promise<void>;
+}
+
+export class ServiceError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: Record<string, unknown>,
+  ) {
+    super(String(body.error));
+  }
+}
+
+const MAX_UPN_ATTEMPTS = 20;
+const DEFAULT_RETRY_DELAYS = [500, 1500, 3000];
+
+function randomPassword(length = 32): string {
+  const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!#$%&*+-=?@_'];
+  const all = sets.join('');
+  const chars = sets.map((s) => s[randomInt(s.length)] as string);
+  while (chars.length < length) chars.push(all[randomInt(all.length)] as string);
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j] as string, chars[i] as string];
+  }
+  return chars.join('');
+}
+
+export interface DemandeCreee {
+  id: string;
+  userPrincipalName: string;
+  statut: 'EnAttente';
+}
+
+/**
+ * Crée le compte désactivé, affecte le manager, puis pose statutOnboarding=EnAttente EN DERNIER :
+ * un compte resté sans statut (échec en cours de route) n'apparaît donc jamais comme demande en attente.
+ * Le mot de passe est aléatoire, jamais stocké, jamais loggé.
+ */
+export async function createDemande(
+  deps: DemandeDeps,
+  actor: string,
+  input: DemandeInput,
+): Promise<DemandeCreee> {
+  const { config, directory, audit } = deps;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const delays = deps.managerRetryDelaysMs ?? DEFAULT_RETRY_DELAYS;
+  let step = 'manager_verification';
+  let targetId: string | undefined;
+
+  try {
+    const manager = await directory.getUser(input.managerId);
+    if (!manager || !manager.accountEnabled) {
+      const details = { managerId: manager ? 'compte désactivé' : 'introuvable' };
+      audit.track({ action: 'demande.rejetee', actor, outcome: 'refuse', champs: 'managerId' });
+      throw new ServiceError(400, { error: 'Entrée invalide', details });
+    }
+
+    step = 'upn_attribution';
+    const base = upnBase(input.prenom, input.nom);
+    let upn = '';
+    let attempt = 0;
+    for (let n = 1; n <= MAX_UPN_ATTEMPTS && !targetId; n++) {
+      const candidate = upnCandidate(base, config.upnDomain, n);
+      if (await directory.upnTaken(candidate)) continue;
+      step = 'compte_creation';
+      try {
+        targetId = await directory.createUser({
+          accountEnabled: false,
+          displayName: `${input.prenom} ${input.nom}`,
+          givenName: input.prenom,
+          surname: input.nom,
+          userPrincipalName: candidate,
+          mailNickname: candidate.split('@')[0] as string,
+          employeeHireDate: `${input.dateArrivee}T00:00:00Z`,
+          jobTitle: input.poste,
+          department: input.service,
+          passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
+        });
+        upn = candidate;
+        attempt = n;
+      } catch (err) {
+        // Course : l'UPN a été pris entre la vérification et la création.
+        if (!(err instanceof DirectoryError && err.kind === 'conflict')) throw err;
+      }
+      step = 'upn_attribution';
+    }
+    if (!targetId) {
+      audit.track({ action: 'demande.upn_indisponible', actor, outcome: 'erreur', tentatives: MAX_UPN_ATTEMPTS });
+      throw new ServiceError(409, { error: 'Aucun identifiant disponible pour ce nom' });
+    }
+    audit.track({ action: 'demande.compte_cree', actor, outcome: 'ok', cible: targetId, suffixe: attempt });
+
+    step = 'manager_affectation';
+    for (let i = 0; ; i++) {
+      try {
+        await directory.setManager(targetId, input.managerId);
+        break;
+      } catch (err) {
+        if (err instanceof DirectoryError && err.kind === 'notFound' && i < delays.length) {
+          await sleep(delays[i] as number);
+          continue;
+        }
+        throw err;
+      }
+    }
+    audit.track({ action: 'demande.manager_affecte', actor, outcome: 'ok', cible: targetId });
+
+    step = 'statut';
+    await directory.setExtension(targetId, config.statusExtension, 'EnAttente');
+    audit.track({ action: 'demande.statut_pose', actor, outcome: 'ok', cible: targetId, statut: 'EnAttente' });
+
+    return { id: targetId, userPrincipalName: upn, statut: 'EnAttente' };
+  } catch (err) {
+    if (err instanceof ServiceError) throw err;
+    const e = err instanceof DirectoryError ? err : undefined;
+    audit.track({
+      action: 'demande.echec',
+      actor,
+      outcome: 'erreur',
+      etape: step,
+      cible: targetId,
+      http: e?.statusCode,
+      code: e?.code,
+    });
+    throw new ServiceError(502, {
+      error: 'Le service d’annuaire a échoué ; la demande n’a pas abouti',
+      etape: step,
+      // Compte éventuellement créé mais inactif et sans statut : à nettoyer ou à reprendre.
+      ...(targetId ? { id: targetId } : {}),
+    });
+  }
+}
