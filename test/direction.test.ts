@@ -213,14 +213,18 @@ describe('GET /api/demandes, valider, refuser', () => {
       expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('EnAttente');
     });
 
-    it('traitement trop lent : 502, le compte reste dans le groupe et la reprise aboutit sans recompter', async () => {
+    it('traitement trop lent : 202, le compte reste dans le groupe et la reprise aboutit sans recompter', async () => {
       h.ctx.graph.licensePendingReads = 99;
       const id = pending();
       const res = await h.call('POST', `/api/demandes/${id}/valider`);
-      expect(res.status).toBe(502);
-      expect(await res.json()).toMatchObject({ etape: 'licence_verification' });
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ message: 'Licence en cours d’attribution, revalidez dans une minute', code: 'licence_en_cours', etape: 'licence_verification' });
       expect(members().has(id)).toBe(true);
       expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('EnAttente');
+      // Aucune entrée lue pendant toute la fenêtre : la trace le dit (1 lecture avant l'ajout, 4 après).
+      const expiree = h.ctx.events.find((e) => e.action === 'licence.verification_expiree');
+      expect(expiree).toMatchObject({ cible: id, groupe: LICENSE_GROUP, sku: LICENSE_SKU, lectures: 5, entree: false, entrees: 0 });
+      expect(expiree).toMatchObject({ etat: undefined, erreur: undefined, parGroupe: undefined });
 
       h.ctx.graph.licensePendingReads = 0;
       sku().consumed = sku().enabled; // le pool est plein entre-temps : le compte déjà membre ne doit pas être refusé à tort
@@ -228,6 +232,18 @@ describe('GET /api/demandes, valider, refuser', () => {
       expect(retry.status).toBe(200);
       expect(await retry.json()).toMatchObject({ licence: { deja: true } });
       expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('Validé');
+    });
+
+    it('entrée présente mais jamais Active : la trace donne l’état, l’absence d’erreur et l’origine groupe', async () => {
+      h.ctx.graph.licenseForcedState = 'Disabled';
+      const id = pending();
+      const res = await h.call('POST', `/api/demandes/${id}/valider`);
+      expect(res.status).toBe(202);
+      expect(await res.json()).toMatchObject({ code: 'licence_en_cours', etape: 'licence_verification' });
+      expect(members().has(id)).toBe(true);
+      const expiree = h.ctx.events.find((e) => e.action === 'licence.verification_expiree');
+      expect(expiree).toMatchObject({ lectures: 5, entree: true, entrees: 1, etat: 'Disabled', erreur: undefined, parGroupe: true });
+      expect(JSON.stringify(h.ctx.events)).not.toMatch(/Martin|Anna|exemple\.test/);
     });
 
     it('reprise : un compte déjà licencié passe sans décompte, même avec 0 licence restante', async () => {

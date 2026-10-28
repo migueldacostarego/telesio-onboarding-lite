@@ -1,5 +1,6 @@
 import type { LicenseOption } from './config';
 import { ServiceError } from './demandes';
+import type { LicenseRead, SkuAvailability } from './directory';
 import { step, type DirectionDeps } from './direction';
 
 /** Attentes entre deux lectures de l'état de licence : le traitement par groupe est asynchrone (quelques secondes à une minute). */
@@ -10,6 +11,8 @@ export interface LicenseDeps extends DirectionDeps {
   sleep?: (ms: number) => Promise<void>;
 }
 
+export const PENDING_MESSAGE = 'Licence en cours d’attribution, revalidez dans une minute';
+
 const NO_LICENSE = { error: 'Aucune licence disponible', code: 'licence_indisponible' } as const;
 
 export interface LicenceDisponible {
@@ -18,9 +21,46 @@ export interface LicenceDisponible {
   disponibles: number;
 }
 
+export const SKU_CACHE_TTL_MS = 60_000;
+
+/**
+ * Cache mémoire de GET /subscribedSkus, réservé à l'affichage du formulaire RH (listLicences).
+ * La création de demande et la validation direction relisent toujours en direct : ne jamais les brancher ici.
+ * Une lecture en échec n'est pas conservée (la suivante réessaie).
+ */
+export class SkuAvailabilityCache {
+  private entry?: { at: number; value: Promise<Map<string, SkuAvailability>> };
+
+  constructor(
+    private readonly now: () => number,
+    private readonly ttlMs = SKU_CACHE_TTL_MS,
+  ) {}
+
+  get(load: () => Promise<Map<string, SkuAvailability>>): Promise<Map<string, SkuAvailability>> {
+    if (this.entry && this.now() - this.entry.at < this.ttlMs) return this.entry.value;
+    const value = load();
+    const entry = { at: this.now(), value };
+    this.entry = entry;
+    value.catch(() => {
+      if (this.entry === entry) this.entry = undefined;
+    });
+    return value;
+  }
+
+  /** Après une écriture qui change les unités libres (validation) ou un refus pour manque de licence. */
+  invalidate(): void {
+    this.entry = undefined;
+  }
+}
+
 /** Licences proposées à RH avec le nombre d'unités libres (enabled - consumedUnits, jamais négatif). */
-export async function listLicences(deps: DirectionDeps, actor: string): Promise<{ licences: LicenceDisponible[] }> {
-  const units = await step(deps, actor, 'licence_disponibilite', undefined, {}, () => deps.directory.listSkuAvailability());
+export async function listLicences(
+  deps: DirectionDeps,
+  actor: string,
+  cache?: SkuAvailabilityCache,
+): Promise<{ licences: LicenceDisponible[] }> {
+  const load = () => deps.directory.listSkuAvailability();
+  const units = await step(deps, actor, 'licence_disponibilite', undefined, {}, () => (cache ? cache.get(load) : load()));
   const licences = deps.config.licenses.map((l) => {
     const u = units.get(l.skuId);
     return { skuId: l.skuId, libelle: l.libelle, disponibles: u ? Math.max(0, u.enabled - u.consumed) : 0 };
@@ -37,7 +77,7 @@ export async function listLicences(deps: DirectionDeps, actor: string): Promise<
  * 2. Sinon : enabled - consumedUnits ; 0 ou moins : 409, aucune écriture.
  * 3. Ajout au groupe de licence, puis lecture de l'état jusqu'à une entrée Active ou en erreur.
  *    Erreur (dont CountViolation) : retrait du groupe ; CountViolation donne 409, le reste 502.
- *    Aucune entrée à l'issue des lectures : 502, le compte reste dans le groupe (la reprise le retrouve licencié).
+ *    Pas d'entrée Active à l'issue des lectures : 202 `licence_en_cours`, le compte reste dans le groupe (la reprise le retrouve licencié).
  * Les identifiants tracés sont des objectIds et les GUID du groupe et du SKU.
  */
 export async function ensureLicense(
@@ -52,7 +92,14 @@ export async function ensureLicense(
   const delays = deps.licensePollDelaysMs ?? DEFAULT_POLL_DELAYS_MS;
   const ctx = { cible: id, groupe: groupId, sku: skuId };
 
-  const read = () => step(deps, actor, 'licence_etat', id, {}, () => directory.getLicenseState(id, skuId));
+  // Dernière lecture, pour diagnostiquer une vérification expirée (états et compteurs seulement, aucun nom).
+  let last: LicenseRead = { entry: null, total: 0 };
+  let lectures = 0;
+  const read = async () => {
+    last = await step(deps, actor, 'licence_etat', id, {}, () => directory.readLicenseStates(id, skuId));
+    lectures++;
+    return last.entry;
+  };
 
   /** Une erreur d'attribution : on sort le compte du groupe, puis 409 (CountViolation) ou 502. */
   const reject = async (code: string): Promise<never> => {
@@ -99,9 +146,23 @@ export async function ensureLicense(
     if (i >= delays.length) break;
     await sleep(delays[i] as number);
   }
-  audit.track({ action: 'licence.verification_expiree', actor, outcome: 'erreur', ...ctx });
-  throw new ServiceError(502, {
-    error: 'Attribution de la licence en cours : réessayez dans quelques instants',
+  audit.track({
+    action: 'licence.verification_expiree',
+    actor,
+    outcome: 'erreur',
+    ...ctx,
+    lectures,
+    entree: last.entry !== null,
+    entrees: last.total,
+    etat: last.entry?.state,
+    erreur: last.entry?.error ?? undefined,
+    // false : attribution directe (assignedByGroup null) ou par un autre groupe.
+    parGroupe: last.entry ? last.entry.assignedByGroup?.toLowerCase() === groupId.toLowerCase() : undefined,
+  });
+  // Pas une erreur : Entra traite encore l'attribution. Le compte reste dans le groupe, la reprise le retrouve licencié.
+  throw new ServiceError(202, {
+    message: PENDING_MESSAGE,
+    code: 'licence_en_cours',
     etape: 'licence_verification',
   });
 }

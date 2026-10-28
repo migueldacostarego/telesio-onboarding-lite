@@ -12,6 +12,7 @@ input{width:100%;max-width:28rem;box-sizing:border-box}
 table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;padding:.4rem;text-align:left;vertical-align:top}
 .msg{padding:.6rem;margin:.8rem 0;border:1px solid #888}.err{border-color:#b00020}.ok{border-color:#1b6e2d}
 .msg.err.lic{border-width:3px;font-weight:600}
+.warn{border-color:#b26a00}.msg.warn{border-width:3px;font-weight:600}
 .tap{font:1.6rem monospace;letter-spacing:.1em;padding:.6rem;border:2px solid #1a1a1a;display:inline-block;margin:.5rem 0}
 `;
 
@@ -164,6 +165,9 @@ async function act(d, action, body) {
   const r = await api('POST', '/api/demandes/' + d.id + '/' + action, body);
   if (!r.ok && r.data && r.data.code === 'licence_indisponible') {
     return say('Aucune licence disponible : la demande de ' + d.nom + ' reste en attente. Libérez ou commandez une licence, puis validez à nouveau.', 'err', 'lic');
+  }
+  if (r.status === 202 && r.data && r.data.code === 'licence_en_cours') {
+    return say(r.data.message + ' (demande de ' + d.nom + ', toujours en attente).', 'warn');
   }
   if (!r.ok) return say(describe(r), 'err');
   say(action === 'valider' ? 'Demande validée, licence attribuée, dossier SharePoint prêt.' : 'Demande refusée, compte supprimé.', 'ok');

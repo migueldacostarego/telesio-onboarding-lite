@@ -19,7 +19,7 @@ export class ServiceError extends Error {
     public readonly status: number,
     public readonly body: Record<string, unknown>,
   ) {
-    super(String(body.error));
+    super(String(body.error ?? body.message));
   }
 }
 

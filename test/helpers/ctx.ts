@@ -38,7 +38,7 @@ export const principal = (roles: string[] = [], oid = RH_ID) =>
     }),
   ).toString('base64');
 
-export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean } = {}) {
+export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean; now?: () => Date } = {}) {
   const graph = new FakeGraph();
   graph.skus.set(LICENSE_SKU, { enabled: 5, consumed: 1 });
   graph.skus.set(LICENSE_SKU_B, { enabled: 3, consumed: 0 });
@@ -67,7 +67,7 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
     directory: new GraphDirectory(graph.asClient()),
     library: opts.withLibrary === false ? undefined : new GraphSharePoint(graph.asClient(), SITE, DRIVE),
     audit,
-    now: () => NOW,
+    now: opts.now ?? (() => NOW),
     managerRetryDelaysMs: [0, 0],
     licensePollDelaysMs: [0, 0, 0],
     sleep: async () => {},

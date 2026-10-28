@@ -82,10 +82,17 @@ export interface LicenseState {
   assignedByGroup: string | null;
 }
 
+/** Lecture de licenseAssignmentStates : l'entrée du SKU (null si absente) et le nombre total d'entrées de l'utilisateur. */
+export interface LicenseRead {
+  entry: LicenseState | null;
+  total: number;
+}
+
 export interface Directory {
   /** GET /subscribedSkus : unités par skuId (en minuscules). Un SKU absent du tenant n'y figure pas. */
   listSkuAvailability(): Promise<Map<string, SkuAvailability>>;
-  getLicenseState(userId: string, skuId: string): Promise<LicenseState | null>;
+  /** GET /users/{id}?$select=id,licenseAssignmentStates ; l'entrée est retrouvée par skuId (sans tenir compte de la casse). */
+  readLicenseStates(userId: string, skuId: string): Promise<LicenseRead>;
   /** Idempotent : un utilisateur déjà membre n'est pas une erreur. */
   addGroupMember(groupId: string, userId: string): Promise<void>;
   /** Idempotent : un utilisateur absent du groupe n'est pas une erreur. */
@@ -309,7 +316,7 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async getLicenseState(userId: string, skuId: string): Promise<LicenseState | null> {
+  async readLicenseStates(userId: string, skuId: string): Promise<LicenseRead> {
     try {
       const u = await this.client.api(`/users/${userId}`).select('id,licenseAssignmentStates').get();
       const states = (u?.licenseAssignmentStates ?? []) as {
@@ -319,10 +326,12 @@ export class GraphDirectory implements Directory {
         assignedByGroup?: string | null;
       }[];
       const own = states.filter((s) => s.skuId?.toLowerCase() === skuId.toLowerCase());
-      if (own.length === 0) return null;
+      if (own.length === 0) return { entry: null, total: states.length };
+      // Graph renvoie error = "None" (et non null) pour une entrée sans erreur.
+      const erreur = (x: { error?: string | null }) => (x.error && x.error !== 'None' ? x.error : null);
       // Plusieurs entrées possibles (directe et par groupe) : une entrée sans erreur l'emporte.
-      const s = own.find((x) => x.state === 'Active' && !x.error) ?? own[0]!;
-      return { state: s.state ?? 'Error', error: s.error ?? null, assignedByGroup: s.assignedByGroup ?? null };
+      const s = own.find((x) => x.state === 'Active' && !erreur(x)) ?? own[0]!;
+      return { entry: { state: s.state ?? 'Error', error: erreur(s), assignedByGroup: s.assignedByGroup ?? null }, total: states.length };
     } catch (err) {
       throw wrap(err);
     }

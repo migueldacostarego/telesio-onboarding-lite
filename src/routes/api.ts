@@ -6,7 +6,7 @@ import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations } from '../activation';
 import { listDemandes, refuserDemande, validerDemande } from '../direction';
-import { listLicences } from '../licence';
+import { listLicences, SkuAvailabilityCache } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
 import type { Library } from '../sharepoint';
 import { GUID_RE, validateDemande, validateMotif } from '../validation';
@@ -49,6 +49,8 @@ const json = express.json({ limit: '16kb', inflate: false });
 export function createApiRouter(deps: ApiDeps): Router {
   const { config, directory, audit } = deps;
   const now = deps.now ?? (() => new Date());
+  // Affichage du formulaire RH uniquement : création de demande et validation direction relisent /subscribedSkus en direct.
+  const skuCache = new SkuAvailabilityCache(() => now().getTime());
   const api = Router();
   // Aucune réponse de l'API n'est mise en cache (TAP, listes nominatives), erreurs comprises.
   api.use((_req, res, next) => {
@@ -88,7 +90,7 @@ export function createApiRouter(deps: ApiDeps): Router {
   api.get('/licences', rh, async (_req, res) => {
     if (noLicenses(res)) return;
     try {
-      res.json(await listLicences(deps, actor(res)));
+      res.json(await listLicences(deps, actor(res), skuCache));
     } catch (err) {
       fail(res, err);
     }
@@ -107,6 +109,8 @@ export function createApiRouter(deps: ApiDeps): Router {
       const created = await createDemande(deps, actor(res), v.value);
       res.status(201).json(created);
     } catch (err) {
+      // Le formulaire recharge la liste après ce refus : elle doit refléter l'état réel.
+      if (err instanceof ServiceError && err.body.code === 'licence_indisponible') skuCache.invalidate();
       fail(res, err);
     }
   });
@@ -134,6 +138,9 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.json(await validerDemande(deps, actor(res), String(req.params.id)));
     } catch (err) {
       fail(res, err);
+    } finally {
+      // Une validation consomme (ou constate l'absence de) une unité : la liste RH ne doit plus servir l'ancien compte.
+      skuCache.invalidate();
     }
   });
 

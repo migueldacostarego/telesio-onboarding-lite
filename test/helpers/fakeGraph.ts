@@ -41,6 +41,8 @@ export class FakeGraph {
     statusPatch?: number;
     groupAdd?: number;
     groupRemove?: number;
+    /** Échec de GET /subscribedSkus. */
+    skus?: number;
   } = {};
   /** TAP existants par utilisateur : un seul autorisé, comme dans Entra. */
   taps = new Map<string, { id: string }[]>();
@@ -58,6 +60,8 @@ export class FakeGraph {
   licenseOutcome: 'ok' | string = 'ok';
   /** Lectures de l'utilisateur sans entrée de licence après l'ajout au groupe (traitement asynchrone). */
   licensePendingReads = 0;
+  /** Entrée de licence dans un état autre qu'Active (error « None », comme Graph) : ex. 'Disabled'. */
+  licenseForcedState?: string;
   private licenses = new Map<string, { group: string; sku: string; reads: number; counted: boolean }>();
   /** Nombre d'échecs PUT restants avant succès (réplication). */
   putFailuresLeft = 0;
@@ -109,6 +113,9 @@ export class FakeGraph {
       l.reads++;
       return [];
     }
+    if (this.licenseForcedState) {
+      return [{ skuId: l.sku, assignedByGroup: l.group, state: this.licenseForcedState, error: 'None' }];
+    }
     if (this.licenseOutcome !== 'ok') {
       return [{ skuId: l.sku, assignedByGroup: l.group, state: 'Error', error: this.licenseOutcome }];
     }
@@ -117,7 +124,7 @@ export class FakeGraph {
       const sku = this.skus.get(l.sku);
       if (sku) sku.consumed++;
     }
-    return [{ skuId: l.sku, assignedByGroup: l.group, state: 'Active', error: null }];
+    return [{ skuId: l.sku, assignedByGroup: l.group, state: 'Active', error: 'None' }];
   }
 
   private managerOf(ref: string) {
@@ -250,6 +257,7 @@ export class FakeGraph {
       return undefined;
     }
     if (method === 'GET' && path === '/subscribedSkus') {
+      if (this.failOn.skus) throw graphError(this.failOn.skus, 'Authorization_RequestDenied');
       return {
         value: [...this.skus].map(([skuId, u]) => ({ skuId, consumedUnits: u.consumed, prepaidUnits: { enabled: u.enabled } })),
       };
