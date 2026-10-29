@@ -75,9 +75,9 @@ describe('tableau (bureau)', () => {
   it('colonnes, date en français, badge de statut et progression « n sur 4 »', async () => {
     rendre();
     await screen.findByText('Anna Martin');
-    expect(screen.getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Nom', 'Poste', 'Service', 'Arrivée', 'Statut', 'Progression']);
+    expect(screen.getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Nom', 'Poste', 'Service', 'Arrivée', 'Statut', 'Progression', 'Actions']);
     const eloise = within(screen.getByRole('row', { name: /Éloïse Dupont/ }));
-    expect(eloise.getAllByRole('cell').map((c) => c.textContent)).toEqual(['Éloïse Dupont', 'Comptable', 'Finance', '3 nov. 2026', 'En attente', 'Étape 1 sur 4']);
+    expect(eloise.getAllByRole('cell').map((c) => c.textContent)).toEqual(['Éloïse Dupont', 'Comptable', 'Finance', '3 nov. 2026', 'En attente', 'Étape 1 sur 4', 'ValiderRefuser']);
   });
 
   it('les quatre statuts : libellés et progression', async () => {
@@ -101,11 +101,13 @@ describe('tableau (bureau)', () => {
     expect(sarah.getByText('Non renseignée')).toBeInTheDocument();
   });
 
-  it('lecture seule : aucun bouton d’action, aucun formulaire, aucun lien de détail', async () => {
+  it('boutons seulement selon `actions` de l’API : Valider et Refuser pour approuver et refuser, rien pour le reste, pas de lien', async () => {
     rendre();
     await screen.findByText('Anna Martin');
-    // Les actions calculées par le serveur ne sont pas encore proposées.
-    expect(screen.queryByRole('button', { name: /valider|refuser|approuver|activer(?!e)|détail/i })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^(Valider|Refuser) la demande/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Valider la demande de Éloïse Dupont',
+      'Refuser la demande de Éloïse Dupont',
+    ]);
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(document.querySelector('form')).toBeNull();
   });

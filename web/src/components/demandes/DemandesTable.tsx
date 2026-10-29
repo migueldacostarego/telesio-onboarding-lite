@@ -1,8 +1,13 @@
+import { Fragment } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
-import { formatArrivee, type Demande, type Tri } from '@/lib/suivi';
+import { actionsDe, aUnMessage, type PropsLignes } from '@/components/demandes/lignes';
+import { formatArrivee, type Tri } from '@/lib/suivi';
+
+const COLONNES = 7;
 
 const ABSENT = <span className="text-muted-foreground">Non renseigné</span>;
 
@@ -16,13 +21,15 @@ function Entete({ tri }: { tri: Tri }) {
         <TableHead aria-sort={tri === 'recentes' ? 'descending' : tri === 'anciennes' ? 'ascending' : 'other'}>Arrivée</TableHead>
         <TableHead>Statut</TableHead>
         <TableHead>Progression</TableHead>
+        <TableHead>Actions</TableHead>
       </TableRow>
     </TableHeader>
   );
 }
 
-/** Bureau : tableau (lecture seule). Sur mobile, DemandesCartes prend le relais. */
-export function DemandesTable({ demandes, tri }: { demandes: readonly Demande[]; tri: Tri }) {
+/** Bureau : tableau, avec les actions que l'API propose. Sur mobile, DemandesCartes prend le relais. */
+export function DemandesTable({ tri, ...lignes }: PropsLignes & { tri: Tri }) {
+  const { demandes } = lignes;
   return (
     <div className="rounded-lg border">
       <Table>
@@ -30,18 +37,30 @@ export function DemandesTable({ demandes, tri }: { demandes: readonly Demande[];
         <Entete tri={tri} />
         <TableBody>
           {demandes.map((d) => (
-            <TableRow key={d.id}>
-              <TableCell className="font-medium">{d.nom}</TableCell>
-              <TableCell>{d.poste ?? ABSENT}</TableCell>
-              <TableCell>{d.service ?? ABSENT}</TableCell>
-              <TableCell className="whitespace-nowrap">{formatArrivee(d.dateArrivee)}</TableCell>
-              <TableCell>
-                <StatutBadge statut={d.statut} />
-              </TableCell>
-              <TableCell>
-                <Progression etape={d.etape} />
-              </TableCell>
-            </TableRow>
+            <Fragment key={d.id}>
+              <TableRow>
+                <TableCell className="font-medium">{d.nom}</TableCell>
+                <TableCell>{d.poste ?? ABSENT}</TableCell>
+                <TableCell>{d.service ?? ABSENT}</TableCell>
+                <TableCell className="whitespace-nowrap">{formatArrivee(d.dateArrivee)}</TableCell>
+                <TableCell>
+                  <StatutBadge statut={d.statut} />
+                </TableCell>
+                <TableCell>
+                  <Progression etape={d.etape} />
+                </TableCell>
+                <TableCell>
+                  <ActionsLigne {...actionsDe(d, lignes)} />
+                </TableCell>
+              </TableRow>
+              {aUnMessage(lignes, d) && (
+                <TableRow>
+                  <TableCell colSpan={COLONNES}>
+                    <MessageLigne etat={lignes.etats[d.id]} onFermer={() => lignes.onFermer(d)} />
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
           ))}
         </TableBody>
       </Table>
@@ -65,6 +84,7 @@ export function DemandesTableSquelette({ tri }: { tri: Tri }) {
               <TableCell><Skeleton className="h-5 w-24 bg-foreground/10" /></TableCell>
               <TableCell><Skeleton className="h-5 w-20 rounded-full bg-foreground/10" /></TableCell>
               <TableCell><Skeleton className="h-5 w-28 bg-foreground/10" /></TableCell>
+              <TableCell><Skeleton className="h-8 w-32 bg-foreground/10" /></TableCell>
             </TableRow>
           ))}
         </TableBody>

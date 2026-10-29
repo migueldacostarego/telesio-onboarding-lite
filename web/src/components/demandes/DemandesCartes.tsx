@@ -1,10 +1,13 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
+import { actionsDe, type PropsLignes } from '@/components/demandes/lignes';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
-import { formatArrivee, type Demande } from '@/lib/suivi';
+import { formatArrivee } from '@/lib/suivi';
 
-/** Mobile : une carte compacte par demande (lecture seule). */
-export function DemandesCartes({ demandes }: { demandes: readonly Demande[] }) {
+/** Mobile : une carte compacte par demande, avec les actions que l'API propose. */
+export function DemandesCartes(lignes: PropsLignes) {
+  const { demandes } = lignes;
   return (
     <ul aria-label="Demandes d’onboarding en cours" className="space-y-2">
       {demandes.map((d) => {
@@ -18,6 +21,8 @@ export function DemandesCartes({ demandes }: { demandes: readonly Demande[] }) {
             <p className="text-sm text-muted-foreground">{poste || 'Poste non renseigné'}</p>
             <p className="text-sm">Arrivée : {formatArrivee(d.dateArrivee)}</p>
             <Progression etape={d.etape} />
+            <ActionsLigne {...actionsDe(d, lignes)} />
+            <MessageLigne etat={lignes.etats[d.id]} onFermer={() => lignes.onFermer(d)} />
           </li>
         );
       })}

@@ -2,13 +2,15 @@ import { useMemo, useState } from 'react';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Actualisation } from '@/components/demandes/Actualisation';
 import { Barre } from '@/components/demandes/Barre';
+import { DialogueRefus } from '@/components/demandes/DialogueRefus';
 import { DemandesCartes, DemandesCartesSquelette } from '@/components/demandes/DemandesCartes';
 import { DemandesTable, DemandesTableSquelette } from '@/components/demandes/DemandesTable';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { useActionsDemandes } from '@/hooks/useActionsDemandes';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { useNow } from '@/hooks/useNow';
-import { aujourdhui, filtrerDemandes, useSuivi, type FiltreStatut, type Tri } from '@/lib/suivi';
+import { aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
 const PLAFOND = 100;
@@ -24,6 +26,19 @@ export function Demandes() {
   const jour = aujourdhui(new Date(useNow(60_000)));
 
   const donnees = suivi.data;
+  const actions = useActionsDemandes(donnees?.demandes);
+  // La boîte de dialogue de refus vise une demande par son id (état de la page : elle survit aux filtres et au tri).
+  const [refusId, setRefusId] = useState<string | null>(null);
+  const cible = refusId === null ? undefined : donnees?.demandes.find((d) => d.id === refusId);
+  const refusEnCours = refusId !== null && actions.etats[refusId]?.phase === 'en_cours';
+  // La demande ne se refuse plus (traitée ailleurs, ou disparue) : la boîte se ferme, sauf si le refus est déjà parti.
+  const refusOuvert = cible !== undefined && (cible.actions.includes('refuser') || refusEnCours) ? cible : undefined;
+  const lignes = {
+    etats: actions.etats,
+    onValider: (d: Demande) => actions.valider(d.id),
+    onRefuser: (d: Demande) => setRefusId(d.id),
+    onFermer: (d: Demande) => actions.fermer(d.id),
+  };
   const visibles = useMemo(() => (donnees ? filtrerDemandes(donnees.demandes, { terme, statut, tri, aujourdhui: jour }) : []), [donnees, terme, statut, tri, jour]);
   const filtre = terme.trim() !== '' || statut !== 'tous';
   const reessayer = (
@@ -104,14 +119,23 @@ export function Demandes() {
                   </Button>
                 </div>
               ) : bureau ? (
-                <DemandesTable demandes={visibles} tri={tri} />
+                <DemandesTable demandes={visibles} tri={tri} {...lignes} />
               ) : (
-                <DemandesCartes demandes={visibles} />
+                <DemandesCartes demandes={visibles} {...lignes} />
               )}
             </>
           )}
         </>
       )}
+
+      <DialogueRefus
+        demande={refusOuvert}
+        enCours={refusEnCours}
+        onFermer={() => setRefusId(null)}
+        onConfirmer={(motif) => {
+          if (refusId !== null) void actions.refuser(refusId, motif).then(() => setRefusId(null));
+        }}
+      />
     </section>
   );
 }
