@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config';
 import { buildFolderName } from '../src/folder';
-import { DIR_ID, EXT, EXT_LIC, GROUP_ID, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
+import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_LIC, GROUP_ID, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
 import { harness } from './helpers/harness';
 
 describe('Direction : personne', () => {
@@ -99,7 +99,9 @@ describe('GET /api/demandes, valider, refuser', () => {
     expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('Validé');
     expect([...h.ctx.graph.folders.keys()]).toEqual(['Martin Anna']);
     const logged = JSON.stringify(h.ctx.events);
-    expect(h.ctx.events.map((e) => e.action)).toEqual(['licence.groupe_ajout', 'licence.attribuee', 'demande.validee', 'demande.dossier']);
+    expect(h.ctx.events.map((e) => e.action)).toEqual(['licence.groupe_ajout', 'licence.attribuee', 'demande.arrivants_ajout', 'demande.validee', 'demande.dossier']);
+    // Groupe des arrivants (cible de l’accès conditionnel Authenticator) dès la validation : réplication acquise avant le jour J.
+    expect(h.ctx.graph.groups.get(ARRIVANTS_GROUP)?.has(id)).toBe(true);
     expect(h.ctx.events.every((e) => e.actor === DIR_ID)).toBe(true);
     for (const pii of ['Martin', 'Anna', 'sp.test']) expect(logged).not.toContain(pii);
   });
@@ -116,11 +118,12 @@ describe('GET /api/demandes, valider, refuser', () => {
       expect(members().has(id)).toBe(true);
       expect(sku().consumed).toBe(2);
       expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('Validé');
-      // Le décompte précède toute écriture : lecture des SKU, puis ajout au groupe, puis PATCH du statut.
+      // Le décompte précède toute écriture : lecture des SKU, ajout au groupe de licence, puis à celui des arrivants, puis PATCH du statut.
       const order = h.ctx.graph.calls.filter((c) => c.method !== 'GET' || c.path === '/subscribedSkus').map((c) => `${c.method} ${c.path}`);
-      expect(order.slice(0, 3)).toEqual([
+      expect(order.slice(0, 4)).toEqual([
         'GET /subscribedSkus',
         `POST /groups/${LICENSE_GROUP}/members/$ref`,
+        `POST /groups/${ARRIVANTS_GROUP}/members/$ref`,
         expect.stringMatching(/^PATCH \/users\//),
       ]);
       const events = JSON.stringify(h.ctx.events);

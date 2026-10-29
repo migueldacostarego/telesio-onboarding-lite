@@ -74,9 +74,10 @@ locals {
     UPN_DOMAIN             = var.upn_domain
     ENTRA_STATUS_EXTENSION = msgraph_resource.status_extension.output.name
     RH_ROLE                = var.rh_role
-    TAP_LIFETIME_MINUTES   = tostring(var.tap_lifetime_minutes)
-    TAP_REGEN_WINDOW_DAYS  = tostring(var.tap_regen_window_days)
     TZ_METIER              = var.time_zone
+
+    ARRIVANTS_GROUP_ID         = lower(azuread_group.arrivants.object_id)
+    ENTRA_ACTIVATION_EXTENSION = msgraph_resource.activation_extension.output.name
 
     DIRECTION_TYPE            = var.direction_type
     DIRECTION_OBJECT_ID       = var.direction_object_id

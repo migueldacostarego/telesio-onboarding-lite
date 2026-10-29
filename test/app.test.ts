@@ -43,7 +43,7 @@ describe('API', () => {
   });
 
   describe('POST /api/demandes', () => {
-    it('crée le compte désactivé, manager, puis statut en dernier', async () => {
+    it('crée le compte désactivé avec statut et licence dans le même POST, puis le manager', async () => {
       ctx.graph.calls.length = 0;
       ctx.events.length = 0;
       const res = await post(valid());
@@ -68,14 +68,13 @@ describe('API', () => {
       expect(u.manager).toBe(`https://graph.microsoft.com/v1.0/users/${managerId}`);
       expect(u.props[EXT]).toBe('EnAttente');
       expect(u.props[EXT_LIC]).toBe(LICENSE_SKU);
+      // Statut et licence font partie du POST : aucun état intermédiaire sans statut, aucun PATCH.
+      expect(created).toMatchObject({ [EXT]: 'EnAttente', [EXT_LIC]: LICENSE_SKU });
       const writes = ctx.graph.calls.filter((c) => c.method !== 'GET').map((c) => c.method);
-      expect(writes).toEqual(['POST', 'PUT', 'PATCH', 'PATCH']);
-      // Le statut reste la dernière écriture, après le choix de licence.
-      const patches = ctx.graph.calls.filter((c) => c.method === 'PATCH').map((c) => Object.keys(c.body as object)[0]);
-      expect(patches).toEqual([EXT_LIC, EXT]);
+      expect(writes).toEqual(['POST', 'PUT']);
 
       // Traces : qui/quoi, sans nom, UPN, mot de passe ni identité de l'embauché.
-      expect(ctx.events.map((e) => e.action)).toEqual(['demande.compte_cree', 'demande.manager_affecte', 'demande.licence_posee', 'demande.statut_pose']);
+      expect(ctx.events.map((e) => e.action)).toEqual(['demande.compte_cree', 'demande.manager_affecte']);
       expect(ctx.events.every((e) => e.actor === RH_ID)).toBe(true);
       const logged = JSON.stringify(ctx.events);
       for (const secret of [pw, 'eloise', 'Éloïse', 'cruz', 'exemple.test']) expect(logged.toLowerCase()).not.toContain(secret.toLowerCase());
@@ -130,18 +129,29 @@ describe('API', () => {
       expect(res.status).toBe(201);
     });
 
-    it('502 sans statut si le manager ne peut pas être affecté', async () => {
+    it('manager impossible à affecter : 201 avec avertissement, la demande reste EnAttente (pas de doublon)', async () => {
       ctx.graph.failOn.put = 403;
       ctx.events.length = 0;
       const res = await post({ ...valid(), prenom: 'Paul', nom: 'Panne' });
       ctx.graph.failOn.put = undefined;
-      expect(res.status).toBe(502);
-      const body = (await res.json()) as { id: string; etape: string };
-      expect(body.etape).toBe('manager_affectation');
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; statut: string; avertissement: string };
+      expect(body).toMatchObject({ statut: 'EnAttente', avertissement: 'manager_non_affecte' });
       const u = ctx.graph.users.get(body.id)!;
       expect(u.accountEnabled).toBe(false);
-      expect(u.props[EXT]).toBeUndefined();
-      expect(ctx.events.at(-1)).toMatchObject({ action: 'demande.echec', etape: 'manager_affectation', cible: body.id });
+      expect(u.props[EXT]).toBe('EnAttente');
+      expect(u.manager).toBeUndefined();
+      expect(ctx.events.at(-1)).toMatchObject({ action: 'demande.echec', etape: 'manager_affectation', cible: body.id, http: 403 });
+    });
+
+    it('échec de la création du compte : 502, aucun compte', async () => {
+      ctx.graph.failOn.post = 403;
+      const before = ctx.graph.users.size;
+      const res = await post({ ...valid(), prenom: 'Nina', nom: 'Nulle' });
+      ctx.graph.failOn.post = undefined;
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ etape: 'compte_creation' });
+      expect(ctx.graph.users.size).toBe(before);
     });
 
     it('400 : champs manquants', async () => {

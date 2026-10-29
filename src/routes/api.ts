@@ -4,12 +4,13 @@ import { todayIn } from '../dates';
 import { requireDirection, requireRole, type Principal } from '../auth';
 import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
-import { activerDemande, listActivations } from '../activation';
+import { activerDemande, listActivations, regenererMotDePasse, terminerOnboarding } from '../activation';
 import { listDemandes, refuserDemande, validerDemande } from '../direction';
 import { listLicences, SkuAvailabilityCache } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
+import { KeyedLock } from '../lock';
 import type { Library } from '../sharepoint';
-import { GUID_RE, validateDemande, validateMotif } from '../validation';
+import { GUID_RE, validateDemande, validateMotif, validateRegeneration } from '../validation';
 
 export interface ApiDeps {
   config: ReadyConfig;
@@ -52,7 +53,7 @@ export function createApiRouter(deps: ApiDeps): Router {
   // Affichage du formulaire RH uniquement : création de demande et validation direction relisent /subscribedSkus en direct.
   const skuCache = new SkuAvailabilityCache(() => now().getTime());
   const api = Router();
-  // Aucune réponse de l'API n'est mise en cache (TAP, listes nominatives), erreurs comprises.
+  // Aucune réponse de l'API n'est mise en cache (mot de passe temporaire, listes nominatives), erreurs comprises.
   api.use((_req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' });
     next();
@@ -60,6 +61,9 @@ export function createApiRouter(deps: ApiDeps): Router {
   const rh = requireRole(config.rhRole, { trustHeaders: config.trustAuthHeaders, audit });
   const direction = requireDirection(config.direction, directory, { trustHeaders: config.trustAuthHeaders, audit });
   const actor = (res: express.Response) => (res.locals.principal as Principal).id;
+  // Double clic : une action à la fois par compte (et une création à la fois par personne RH).
+  const lock = new KeyedLock();
+  const key = (req: express.Request) => String(req.params.id).toLowerCase();
 
   // GET /api/annuaire?q= : recherche du manager (Entra, $search sur displayName/mail)
   api.get('/annuaire', rh, async (req, res) => {
@@ -106,7 +110,7 @@ export function createApiRouter(deps: ApiDeps): Router {
       return;
     }
     try {
-      const created = await createDemande(deps, actor(res), v.value);
+      const created = await lock.run(`creation:${actor(res)}`, () => createDemande(deps, actor(res), v.value));
       res.status(201).json(created);
     } catch (err) {
       // Le formulaire recharge la liste après ce refus : elle doit refléter l'état réel.
@@ -135,7 +139,7 @@ export function createApiRouter(deps: ApiDeps): Router {
 
   api.post('/demandes/:id/valider', direction, badId, jsonOnly, json, async (req, res) => {
     try {
-      res.json(await validerDemande(deps, actor(res), String(req.params.id)));
+      res.json(await lock.run(key(req), () => validerDemande(deps, actor(res), String(req.params.id))));
     } catch (err) {
       fail(res, err);
     } finally {
@@ -152,13 +156,13 @@ export function createApiRouter(deps: ApiDeps): Router {
       return;
     }
     try {
-      res.json(await refuserDemande(deps, actor(res), String(req.params.id), m.motif));
+      res.json(await lock.run(key(req), () => refuserDemande(deps, actor(res), String(req.params.id), m.motif)));
     } catch (err) {
       fail(res, err);
     }
   });
 
-  // RH : comptes Validé à activer (+ Actif récents pour « Régénérer »)
+  // RH : comptes Validé à activer, et comptes Actif avec l'état de leur onboarding (lecture seule)
   api.get('/activations', rh, async (_req, res) => {
     try {
       res.json(await listActivations(deps, actor(res), now()));
@@ -167,10 +171,33 @@ export function createApiRouter(deps: ApiDeps): Router {
     }
   });
 
-  // RH, jour J : active le compte et renvoie le TAP, visible une seule fois (jamais tracé).
+  // RH, jour J : active le compte et renvoie le mot de passe temporaire, visible une seule fois (jamais tracé).
   api.post('/demandes/:id/activer', rh, badId, jsonOnly, json, async (req, res) => {
     try {
-      res.json(await activerDemande(deps, actor(res), String(req.params.id), now()));
+      res.json(await lock.run(key(req), () => activerDemande(deps, actor(res), String(req.params.id), now())));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // RH : nouveau mot de passe temporaire, avec un motif parmi des codes fixes ; interdit une fois l'onboarding Terminé.
+  api.post('/demandes/:id/regenerer', rh, badId, jsonOnly, json, async (req, res) => {
+    const m = validateRegeneration(req.body);
+    if (!m.ok) {
+      res.status(400).json({ error: 'Entrée invalide', details: m.details });
+      return;
+    }
+    try {
+      res.json(await lock.run(key(req), () => regenererMotDePasse(deps, actor(res), String(req.params.id), m.motif, now())));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // RH : finalise l'onboarding (retrait du groupe des arrivants, statut Terminé) si les conditions sont réunies.
+  api.post('/demandes/:id/terminer', rh, badId, jsonOnly, json, async (req, res) => {
+    try {
+      res.json(await lock.run(key(req), () => terminerOnboarding(deps, actor(res), String(req.params.id))));
     } catch (err) {
       fail(res, err);
     }

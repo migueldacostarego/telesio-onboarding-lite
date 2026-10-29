@@ -7,12 +7,13 @@ data "azuread_service_principal" "msgraph" {
 
 locals {
   graph_app_roles = [
-    "User.ReadWrite.All",                     # créer et activer le compte, écrire statutOnboarding, supprimer
-    "User.Read.All",                          # manager, disponibilité de l'UPN
-    "GroupMember.ReadWrite.All",              # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups (valideur group)
-    "LicenseAssignment.Read.All",             # GET /subscribedSkus : licences disponibles
-    "UserAuthenticationMethod.ReadWrite.All", # TAP (sensible)
-    "Sites.Selected",                         # un seul site, via le grant ci-dessous
+    "User.ReadWrite.All",                       # créer et activer le compte, écrire statutOnboarding, supprimer
+    "User.Read.All",                            # manager, disponibilité de l'UPN
+    "GroupMember.ReadWrite.All",                # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups (valideur group)
+    "LicenseAssignment.Read.All",               # GET /subscribedSkus : licences disponibles
+    "User-PasswordProfile.ReadWrite.All",       # mot de passe temporaire le jour J (passwordProfile, changement imposé à la 1re connexion)
+    "UserAuthMethod-MicrosoftAuthApp.Read.All", # onboarding Terminé : Authenticator inscrit (GET /authentication/microsoftAuthenticatorMethods)
+    "Sites.Selected",                           # un seul site, via le grant ci-dessous
   ]
 }
 
@@ -51,6 +52,26 @@ resource "msgraph_resource" "status_extension" {
 
 # Attribut d'extension licenceOnboarding : skuId choisi par RH, lu à la validation pour viser le bon groupe.
 # Même mécanique que statutOnboarding (nom complet extension_<appId>_licenceOnboarding renvoyé par Graph).
+# Date d'activation du compte (ISO 8601 UTC), écrite à l'activation : référence de « mot de passe changé après l'activation ».
+resource "msgraph_resource" "activation_extension" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "activationOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
 resource "msgraph_resource" "license_extension" {
   url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
 

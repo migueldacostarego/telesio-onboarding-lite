@@ -1,6 +1,6 @@
 import type { Audit } from './audit';
 import type { ReadyConfig } from './config';
-import { DirectoryError, type Directory, type OnboardingUser, type PendingDemande } from './directory';
+import { graphFailureProps, type Directory, type OnboardingUser, type PendingDemande } from './directory';
 import { buildFolderName } from './folder';
 import type { Library } from './sharepoint';
 import { ServiceError } from './demandes';
@@ -29,8 +29,7 @@ export async function step<T>(
     return await fn();
   } catch (err) {
     if (err instanceof ServiceError) throw err;
-    const e = err instanceof DirectoryError ? err : undefined;
-    deps.audit.track({ action: 'demande.echec', actor, outcome: 'erreur', etape, cible, http: e?.statusCode, code: e?.code });
+    deps.audit.track({ action: 'demande.echec', actor, outcome: 'erreur', etape, cible, ...graphFailureProps(err) });
     throw new ServiceError(502, { error: 'Le service a échoué ; l’action n’a pas abouti', etape, ...extra });
   }
 }
@@ -83,7 +82,7 @@ export interface Validation {
 }
 
 /**
- * Licence (avant toute écriture de statut), puis EnAttente → Validé, puis dossier SharePoint (idempotent).
+ * Licence et groupe des arrivants (avant toute écriture de statut), puis EnAttente → Validé, puis dossier SharePoint (idempotent).
  * Aucune licence disponible : 409 et le statut ne change pas.
  * Un compte déjà Validé est accepté : c'est la reprise après un échec SharePoint (le statut reste Validé) ;
  * un compte déjà licencié ne repasse pas par le décompte.
@@ -104,6 +103,15 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
     throw new ServiceError(409, { error: 'Licence non définie ou non proposée pour cette demande', code: 'licence_inconnue' });
   }
   const licence = await ensureLicense(deps, actor, id, option);
+
+  // Groupe des arrivants (cible de l'accès conditionnel qui impose Authenticator) dès la validation, et non à
+  // l'activation : l'appartenance a le temps de se répliquer avant le jour J. Sans risque, le compte reste désactivé jusqu'à l'activation.
+  // Avant le statut : un échec laisse la demande EnAttente, visible et revalidable par la direction.
+  if (config.arrivantsGroupId) {
+    const groupId = config.arrivantsGroupId;
+    await step(deps, actor, 'groupe_arrivants', id, {}, () => directory.addGroupMember(groupId, id));
+    audit.track({ action: 'demande.arrivants_ajout', actor, outcome: 'ok', cible: id, groupe: groupId });
+  }
 
   if (!reprise) {
     await step(deps, actor, 'statut', id, {}, () => directory.setExtension(id, config.statusExtension, 'Validé'));

@@ -13,7 +13,7 @@ table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #ddd;pad
 .msg{padding:.6rem;margin:.8rem 0;border:1px solid #888}.err{border-color:#b00020}.ok{border-color:#1b6e2d}
 .msg.err.lic{border-width:3px;font-weight:600}
 .warn{border-color:#b26a00}.msg.warn{border-width:3px;font-weight:600}
-.tap{font:1.6rem monospace;letter-spacing:.1em;padding:.6rem;border:2px solid #1a1a1a;display:inline-block;margin:.5rem 0}
+.mdp{font:1.6rem monospace;letter-spacing:.1em;padding:.6rem;border:2px solid #1a1a1a;display:inline-block;margin:.5rem 0}
 `;
 
 /** CSP stricte : un seul script inline autorisé (nonce), aucune ressource externe, pas de formulaire natif. */
@@ -30,7 +30,7 @@ export const withNonce: RequestHandler = (_req, res, next) => {
       "base-uri 'none'",
       "frame-ancestors 'none'",
     ].join('; '),
-    // Les pages d'activation affichent un TAP : rien ne doit être mis en cache.
+    // Les pages d'activation affichent un mot de passe temporaire : rien ne doit être mis en cache.
     'Cache-Control': 'no-store',
     Pragma: 'no-cache',
   });
@@ -54,7 +54,7 @@ ${body}
 
 /**
  * Helpers côté navigateur. Les données Entra sont toujours insérées avec textContent
- * (jamais innerHTML). Le TAP reste dans le DOM : ni URL, ni stockage navigateur.
+ * (jamais innerHTML). Le mot de passe temporaire reste dans le DOM : ni URL, ni stockage navigateur.
  */
 const COMMON = `
 const $ = (id) => document.getElementById(id);
@@ -71,6 +71,9 @@ function say(text, kind, extra) {
   if (text) m.append(el('div', { class: 'msg ' + (kind || '') + (extra ? ' ' + extra : ''), text }));
 }
 async function api(method, path, body) {
+  // Écriture en cours : boutons désactivés (double clic), réactivés à la réponse.
+  const locked = method === 'GET' ? [] : [...document.querySelectorAll('button:not([disabled])')];
+  locked.forEach((b) => { b.disabled = true; });
   try {
     const res = await fetch(path, {
       method, credentials: 'same-origin',
@@ -82,6 +85,8 @@ async function api(method, path, body) {
     return { ok: res.ok, status: res.status, data: await res.json() };
   } catch {
     return { ok: false, status: 0, data: { error: 'Réseau indisponible.' } };
+  } finally {
+    locked.forEach((b) => { b.disabled = false; });
   }
 }
 function describe(r) {
@@ -136,7 +141,11 @@ $('form').addEventListener('submit', async (ev) => {
   const r = await api('POST', '/api/demandes', body);
   if (!r.ok && r.data && r.data.code === 'licence_indisponible') { loadLicences(); return say('Aucune licence disponible pour ce choix : choisissez une autre licence.', 'err', 'lic'); }
   if (!r.ok) return say(describe(r), 'err');
-  say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + '. Elle attend la validation de la direction.', 'ok');
+  if (r.data.avertissement === 'manager_non_affecte') {
+    say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + ', mais le manager n’a pas pu être affecté : posez-le dans Entra. Ne renvoyez pas la demande.', 'warn');
+  } else {
+    say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + '. Elle attend la validation de la direction (visible chez elle d’ici une minute).', 'ok');
+  }
   $('form').reset(); $('manager').textContent = 'aucun';
   loadLicences();
 });
@@ -177,41 +186,75 @@ load();
 `;
 
 export const ACTIVATION_SCRIPT = `
-const LABEL = { activer: 'Activer', regenerer: 'Régénérer le TAP' };
-function showTap(d, t) {
-  const box = $('tap'); box.replaceChildren();
+const MOTIFS = [
+  ['code_perdu', 'Mot de passe perdu'],
+  ['code_refuse', 'Mot de passe refusé'],
+  ['autre', 'Autre'],
+];
+function showPassword(d, t) {
+  const box = $('mdp'); box.replaceChildren();
   box.append(
     el('div', { class: 'msg ok' },
-      el('p', { text: 'TAP pour ' + d.nom + ' : à remettre en main propre. Il ne sera plus affiché.' }),
-      el('div', { class: 'tap', text: t.temporaryAccessPass }),
-      el('p', { text: 'Valable ' + t.lifetimeInMinutes + ' minutes' + (t.isUsableOnce ? ', usage unique.' : '.') }),
+      el('p', { text: 'Mot de passe temporaire pour ' + d.nom + ' : à remettre en main propre. Il ne sera plus affiché.' }),
+      el('div', { class: 'mdp', text: t.motDePasseTemporaire }),
+      el('p', { text: 'À la première connexion (PC ou n’importe quel service Microsoft), la personne doit inscrire Microsoft Authenticator, puis changer ce mot de passe. S’il est refusé, réessayer dans une à deux minutes.' }),
       el('button', { type: 'button', text: 'Masquer', onclick: () => box.replaceChildren() })));
 }
-async function load() {
+function etat(d) {
+  const o = d.onboarding;
+  if (!o) return '';
+  if (o.verification) return 'Vérification impossible, réessayez';
+  if (o.termine) return 'Onboarding terminé (finalisation en cours)';
+  return 'Onboarding non terminé (mot de passe : ' + (o.motDePasse ? 'fait' : 'à faire') + ' ; Authenticator : ' + (o.authenticator ? 'fait' : 'à faire') + ')';
+}
+function cellule(d) {
+  if (d.action === 'attendre') return el('td', { text: 'Pas avant la date d’arrivée' });
+  if (d.action === 'activer') return el('td', {}, el('button', { type: 'button', text: 'Activer', onclick: () => activer(d) }));
+  const motif = el('select', { 'aria-label': 'Motif de la régénération' }, ...MOTIFS.map(([v, l]) => el('option', { value: v, text: l })));
+  return el('td', {}, motif, el('button', { type: 'button', text: 'Nouveau mot de passe', onclick: () => regenerer(d, motif.value) }));
+}
+async function load(finaliser) {
   const body = $('rows'); body.replaceChildren();
   const r = await api('GET', '/api/activations');
   if (!r.ok) return say(describe(r), 'err');
   if (r.data.tronque) say('Liste tronquée : seuls les 100 premiers comptes par statut sont affichés.');
-  if (r.data.demandes.length === 0) body.append(el('tr', {}, el('td', { colspan: 6, text: 'Aucun compte à activer.' })));
+  if (r.data.demandes.length === 0) body.append(el('tr', {}, el('td', { colspan: 7, text: 'Aucun compte à activer.' })));
   for (const d of r.data.demandes) {
-    const cell = d.action === 'attendre'
-      ? el('td', { text: 'Pas avant la date d\\u2019arrivée' })
-      : el('td', {}, el('button', { type: 'button', text: LABEL[d.action], onclick: () => act(d) }));
     body.append(el('tr', {},
       el('td', { text: d.nom }), el('td', { text: d.poste || '' }), el('td', { text: d.service || '' }),
-      el('td', { text: d.dateArrivee || '' }), el('td', { text: d.statut }), cell));
+      el('td', { text: d.dateArrivee || '' }), el('td', { text: d.statut }), el('td', { text: etat(d) }), cellule(d)));
   }
+  // La liste ne fait que lire : la finalisation est une écriture (POST), revérifiée par le serveur.
+  if (!finaliser) return;
+  const prets = r.data.demandes.filter((d) => d.onboarding && d.onboarding.termine);
+  let faits = 0;
+  for (const d of prets) { const t = await api('POST', '/api/demandes/' + d.id + '/terminer', {}); if (t.ok) faits++; }
+  if (faits > 0) { await load(false); say(faits + ' onboarding' + (faits > 1 ? 's' : '') + ' terminé' + (faits > 1 ? 's' : '') + '.', 'ok'); }
 }
-async function act(d) {
-  say(''); $('tap').replaceChildren();
-  const regen = d.action === 'regenerer';
-  if (regen && !confirm('Régénérer le TAP de ' + d.nom + ' ? Le TAP précédent sera supprimé.')) return;
+function refus(r) {
+  const d = r.data || {};
+  if (r.status === 409 && d.raison === 'onboarding_termine') return 'Onboarding terminé : aucun nouveau mot de passe.';
+  if (r.status === 409 && d.raison === 'deja_actif') return 'Compte déjà actif : utilisez « Nouveau mot de passe ».';
+  return describe(r);
+}
+async function activer(d) {
+  say(''); $('mdp').replaceChildren();
   const r = await api('POST', '/api/demandes/' + d.id + '/activer', {});
-  if (!r.ok) return say(describe(r), 'err');
-  say(regen ? 'TAP régénéré.' : 'Compte activé.', 'ok');
-  showTap(d, r.data);
-  r.data.temporaryAccessPass = '';
-  load();
+  if (!r.ok) return say(refus(r), 'err');
+  say('Compte activé.', 'ok');
+  showPassword(d, r.data);
+  r.data.motDePasseTemporaire = '';
+  load(false);
 }
-load();
+async function regenerer(d, motif) {
+  say(''); $('mdp').replaceChildren();
+  if (!confirm('Donner un nouveau mot de passe temporaire à ' + d.nom + ' ? Le mot de passe actuel ne fonctionnera plus.')) return;
+  const r = await api('POST', '/api/demandes/' + d.id + '/regenerer', { motif });
+  if (!r.ok) return say(refus(r), 'err');
+  say('Nouveau mot de passe temporaire créé.', 'ok');
+  showPassword(d, r.data);
+  r.data.motDePasseTemporaire = '';
+  load(false);
+}
+load(true);
 `;

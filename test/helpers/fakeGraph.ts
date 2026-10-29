@@ -20,9 +20,6 @@ export interface Call {
   body?: unknown;
 }
 
-/** Valeur du TAP renvoyée par le faux Graph : les tests vérifient qu'elle n'est jamais tracée. */
-export const FAKE_TAP = 'Zx9!TapSecretValue42';
-
 const graphError = (statusCode: number, code: string, message = '') => Object.assign(new Error(message), { statusCode, code });
 
 /** Graph en mémoire : implémente juste ce que GraphDirectory appelle. */
@@ -36,17 +33,21 @@ export class FakeGraph {
     post?: number;
     folder?: number;
     delete?: number;
-    tapPost?: number;
+    /** Échec du PATCH qui pose le mot de passe temporaire (passwordProfile). */
+    passwordPatch?: number;
     /** Échec des PATCH qui posent le statut (extension), pas de ceux d'accountEnabled. */
     statusPatch?: number;
     groupAdd?: number;
     groupRemove?: number;
     /** Échec de GET /subscribedSkus. */
     skus?: number;
+    /** Échec de GET /authentication/microsoftAuthenticatorMethods. */
+    authenticator?: number;
   } = {};
-  /** TAP existants par utilisateur : un seul autorisé, comme dans Entra. */
-  taps = new Map<string, { id: string }[]>();
-  private tapSeq = 0;
+  /** Mots de passe posés par PATCH passwordProfile, par compte, dans l'ordre (avec forceChangePasswordNextSignIn). */
+  passwords = new Map<string, { password: string; forceChangePasswordNextSignIn: boolean }[]>();
+  /** Comptes qui ont une méthode Microsoft Authenticator inscrite. */
+  authenticators = new Set<string>();
   /** groupId -> membres */
   groups = new Map<string, Set<string>>();
   /** Dossiers SharePoint : nom -> { id, folder? } (folder absent = c'est un fichier). */
@@ -217,6 +218,8 @@ export class FakeGraph {
         givenName: u.props.givenName,
         surname: u.props.surname,
         employeeHireDate: u.props.employeeHireDate,
+        lastPasswordChangeDateTime: u.props.lastPasswordChangeDateTime,
+        createdDateTime: u.props.createdDateTime,
         licenseAssignmentStates: this.licenseStates(u.id),
         ...ext,
       };
@@ -227,34 +230,11 @@ export class FakeGraph {
       this.deleted.push(one[1] as string);
       return undefined;
     }
-    const tapList = /^\/users\/([^/]+)\/authentication\/temporaryAccessPassMethods$/.exec(path);
-    if (tapList && method === 'GET') {
-      // Comme Graph : la liste ne contient jamais le secret.
-      return { value: (this.taps.get(tapList[1] as string) ?? []).map((t) => ({ id: t.id, isUsableOnce: true })) };
-    }
-    if (tapList && method === 'POST') {
-      const uid = tapList[1] as string;
-      if (this.failOn.tapPost) throw graphError(this.failOn.tapPost, 'Request_BadRequest');
-      if ((this.taps.get(uid) ?? []).length > 0) {
-        throw graphError(400, 'Request_BadRequest', 'A temporary access pass already exists for this user.');
-      }
-      const body = call.body as { isUsableOnce: boolean; lifetimeInMinutes: number };
-      const id = `tap-${++this.tapSeq}`;
-      this.taps.set(uid, [{ id }]);
-      return {
-        id,
-        temporaryAccessPass: FAKE_TAP,
-        isUsableOnce: body.isUsableOnce,
-        lifetimeInMinutes: body.lifetimeInMinutes,
-        startDateTime: '2026-11-03T08:00:00Z',
-        createdDateTime: '2026-11-03T07:59:00Z',
-        methodUsabilityReason: 'EnabledByPolicy',
-      };
-    }
-    const tapOne = /^\/users\/([^/]+)\/authentication\/temporaryAccessPassMethods\/([^/]+)$/.exec(path);
-    if (tapOne && method === 'DELETE') {
-      this.taps.set(tapOne[1] as string, (this.taps.get(tapOne[1] as string) ?? []).filter((t) => t.id !== tapOne[2]));
-      return undefined;
+    const authApp = /^\/users\/([^/]+)\/authentication\/microsoftAuthenticatorMethods$/.exec(path);
+    if (authApp && method === 'GET') {
+      if (this.failOn.authenticator) throw graphError(this.failOn.authenticator, 'Authorization_RequestDenied');
+      const has = this.authenticators.has(authApp[1] as string);
+      return { value: has ? [{ id: 'auth-1', displayName: 'Appareil', createdDateTime: '2026-10-27T11:00:00Z' }] : [] };
     }
     if (method === 'GET' && path === '/subscribedSkus') {
       if (this.failOn.skus) throw graphError(this.failOn.skus, 'Authorization_RequestDenied');
@@ -279,7 +259,8 @@ export class FakeGraph {
     const drop = /^\/groups\/([^/]+)\/members\/([^/]+)\/\$ref$/.exec(path);
     if (method === 'DELETE' && drop) {
       if (this.failOn.groupRemove) throw graphError(this.failOn.groupRemove, 'Authorization_RequestDenied');
-      if (!this.groups.get(drop[1] as string)?.delete(drop[2] as string)) throw graphError(404, 'Request_ResourceNotFound');
+      // Comme Graph (constaté sur test) : retirer un non-membre échoue en 400, pas en 404.
+      if (!this.groups.get(drop[1] as string)?.delete(drop[2] as string)) throw graphError(400, 'Request_BadRequest');
       this.licenses.delete(drop[2] as string);
       return undefined;
     }
@@ -327,7 +308,14 @@ export class FakeGraph {
       if (this.failOn.patch) throw graphError(this.failOn.patch, 'Request_BadRequest');
       const u = this.users.get(one[1] as string)!;
       const body = { ...(call.body as Record<string, unknown>) };
-      if (Object.keys(body).some((k) => k.startsWith('extension_')) && this.failOn.statusPatch) {
+      if ('passwordProfile' in body) {
+        if (this.failOn.passwordPatch) throw graphError(this.failOn.passwordPatch, 'Authorization_RequestDenied');
+        const profile = body.passwordProfile as { password: string; forceChangePasswordNextSignIn: boolean };
+        this.passwords.set(u.id, [...(this.passwords.get(u.id) ?? []), profile]);
+        delete body.passwordProfile;
+      }
+      // La date d'activation (extension activationOnboarding) n'est pas le statut : seul le statut échoue ici.
+      if (Object.keys(body).some((k) => k.startsWith('extension_') && !k.endsWith('_activationOnboarding')) && this.failOn.statusPatch) {
         throw graphError(this.failOn.statusPatch, 'Request_BadRequest');
       }
       if ('accountEnabled' in body) {

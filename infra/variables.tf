@@ -147,23 +147,6 @@ variable "licenses" {
   }
 }
 
-variable "tap_lifetime_minutes" {
-  description = "Durée de vie du TAP en minutes (10 à 43200). La politique TAP du tenant doit l'accepter."
-  type        = number
-  default     = 480
-
-  validation {
-    condition     = var.tap_lifetime_minutes >= 10 && var.tap_lifetime_minutes <= 43200
-    error_message = "tap_lifetime_minutes doit être compris entre 10 et 43200."
-  }
-}
-
-variable "tap_regen_window_days" {
-  description = "Jours après la date d'arrivée pendant lesquels RH peut régénérer un TAP."
-  type        = number
-  default     = 7
-}
-
 variable "time_zone" {
   description = "Fuseau qui définit le jour J."
   type        = string
