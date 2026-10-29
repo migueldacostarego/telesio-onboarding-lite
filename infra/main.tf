@@ -71,10 +71,10 @@ locals {
     # Chaîne d'ingestion (pas un secret d'accès).
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
 
-    UPN_DOMAIN              = var.upn_domain
-    ENTRA_STATUS_EXTENSION  = msgraph_resource.status_extension.output.name
-    RH_ROLE                 = var.rh_role
-    TZ_METIER               = var.time_zone
+    UPN_DOMAIN             = var.upn_domain
+    ENTRA_STATUS_EXTENSION = msgraph_resource.status_extension.output.name
+    RH_ROLE                = var.rh_role
+    TZ_METIER              = var.time_zone
 
     ARRIVANTS_GROUP_ID         = lower(azuread_group.arrivants.object_id)
     ENTRA_ACTIVATION_EXTENSION = msgraph_resource.activation_extension.output.name
