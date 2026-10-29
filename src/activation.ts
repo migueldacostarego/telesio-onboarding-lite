@@ -43,7 +43,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 }
 
 /** Groupe des arrivants et extension de la date d'activation : sans eux, les routes d'activation répondent 503. */
-function activationConfig(deps: ActivationDeps): { groupId: string; activationExt: string } {
+export function activationConfig(deps: ActivationDeps): { groupId: string; activationExt: string } {
   const { arrivantsGroupId, activationExtension } = deps.config;
   if (!arrivantsGroupId || !activationExtension) {
     throw new ServiceError(503, { error: 'Activation non configurée (ARRIVANTS_GROUP_ID, ENTRA_ACTIVATION_EXTENSION)' });
@@ -56,6 +56,21 @@ function activationConfig(deps: ActivationDeps): { groupId: string; activationEx
  * d'activation écrite juste avant. Seul un changement postérieur à cette marge compte comme le changement de l'arrivant.
  */
 export const MARGE_REMISE_MS = 60_000;
+
+/**
+ * Ajoute l'état d'onboarding à chaque compte Actif. Un échec de lecture pour un compte (déjà tracé par step)
+ * donne { verification: 'echec' } pour ce compte seulement : il ne fait pas échouer toute la liste.
+ */
+export async function inspectActifs<T extends { id: string }>(
+  deps: ActivationDeps,
+  actor: string,
+  demandes: T[],
+): Promise<Array<T & { onboarding: OnboardingState | { verification: 'echec' } }>> {
+  return mapLimit(demandes, INSPECT_CONCURRENCY, async (d) => ({
+    ...d,
+    onboarding: await inspectOnboarding(deps, actor, d.id).catch(() => ({ verification: 'echec' as const })),
+  }));
+}
 
 /**
  * Comptes Validé, et tous les Actif tant que l'onboarding n'est pas Terminé (avec l'état du mot de passe et d'Authenticator).
@@ -72,12 +87,10 @@ export async function listActivations(
   const [valides, actifs] = await step(deps, actor, 'liste', undefined, {}, () =>
     Promise.all([directory.listByStatut(config.statusExtension, 'Validé'), directory.listByStatut(config.statusExtension, 'Actif')]),
   );
-  // Un échec de lecture pour un compte (déjà tracé par step) ne fait pas échouer toute la liste.
-  const suivis = await mapLimit(actifs.demandes, INSPECT_CONCURRENCY, async (d) => ({
+  const suivis = (await inspectActifs(deps, actor, actifs.demandes)).map((d) => ({
     ...d,
     statut: 'Actif' as const,
     action: 'regenerer' as const,
-    onboarding: await inspectOnboarding(deps, actor, d.id).catch(() => ({ verification: 'echec' as const })),
   }));
   const demandes: ActivationItem[] = [
     ...valides.demandes.map((d) => ({

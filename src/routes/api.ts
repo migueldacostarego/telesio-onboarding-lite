@@ -5,6 +5,7 @@ import { requireDirection, requireRole, type Principal } from '../auth';
 import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations, regenererMotDePasse, terminerOnboarding } from '../activation';
+import { listSuivi } from '../suivi';
 import { listDemandes, refuserDemande, validerDemande } from '../direction';
 import { listLicences, SkuAvailabilityCache } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
@@ -166,6 +167,15 @@ export function createApiRouter(deps: ApiDeps): Router {
   api.get('/activations', rh, async (_req, res) => {
     try {
       res.json(await listActivations(deps, actor(res), now()));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // RH : suivi de toutes les demandes (EnAttente, Validé, Actif, Terminé récents), lecture seule
+  api.get('/suivi', rh, async (_req, res) => {
+    try {
+      res.json(await listSuivi(deps, actor(res), now()));
     } catch (err) {
       fail(res, err);
     }

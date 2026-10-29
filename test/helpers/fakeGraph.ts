@@ -43,6 +43,10 @@ export class FakeGraph {
     skus?: number;
     /** Échec de GET /authentication/microsoftAuthenticatorMethods. */
     authenticator?: number;
+    /** Échec de GET /users filtré par statut (listByStatut). */
+    list?: number;
+    /** Échec de GET /users/{id} (lecture de l'avancement d'onboarding, de la date d'activation). */
+    read?: number;
   } = {};
   /** Mots de passe posés par PATCH passwordProfile, par compte, dans l'ordre (avec forceChangePasswordNextSignIn). */
   passwords = new Map<string, { password: string; forceChangePasswordNextSignIn: boolean }[]>();
@@ -181,6 +185,7 @@ export class FakeGraph {
         return { value };
       }
       const ext = /(extension_\w+) eq '([^']+)'/.exec(call.filter ?? '');
+      if (ext && this.failOn.list) throw graphError(this.failOn.list, 'Authorization_RequestDenied');
       if (ext) {
         const since = /employeeHireDate ge (\d{4}-\d{2}-\d{2})/.exec(call.filter ?? '')?.[1];
         // Comportement mesuré sur le vrai Graph : statut + employeeHireDate + $expand => 400.
@@ -208,6 +213,7 @@ export class FakeGraph {
     }
     const one = /^\/users\/([^/]+)$/.exec(path);
     if (method === 'GET' && one) {
+      if (this.failOn.read) throw graphError(this.failOn.read, 'Authorization_RequestDenied');
       const u = this.users.get(one[1] as string);
       if (!u) throw graphError(404, 'Request_ResourceNotFound');
       const ext = Object.fromEntries(Object.entries(u.props).filter(([k]) => k.startsWith('extension_')));
