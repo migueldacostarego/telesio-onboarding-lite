@@ -1,7 +1,7 @@
 import express, { Router, type RequestHandler } from 'express';
 import type { Audit } from '../audit';
 import { todayIn } from '../dates';
-import { requireDirection, requireRole, type Principal } from '../auth';
+import { droitsDe, requireAuthenticated, requireDirection, requireRole, type Principal } from '../auth';
 import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations, regenererMotDePasse, terminerOnboarding } from '../activation';
@@ -59,12 +59,20 @@ export function createApiRouter(deps: ApiDeps): Router {
     res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache' });
     next();
   });
+  const authenticated = requireAuthenticated({ trustHeaders: config.trustAuthHeaders, audit });
   const rh = requireRole(config.rhRole, { trustHeaders: config.trustAuthHeaders, audit });
   const direction = requireDirection(config.direction, directory, { trustHeaders: config.trustAuthHeaders, audit });
   const actor = (res: express.Response) => (res.locals.principal as Principal).id;
   // Double clic : une action à la fois par compte (et une création à la fois par personne RH).
   const lock = new KeyedLock();
   const key = (req: express.Request) => String(req.params.id).toLowerCase();
+
+  // GET /api/moi : qui est connecté, ses rôles et ses droits (calculés ici d'après RH_ROLE et DIRECTION_ROLE), lu dans l'identité Easy Auth (aucun appel Graph, jamais mis en cache).
+  api.get('/moi', authenticated, (_req, res) => {
+    const { name, email, roles } = res.locals.principal as Principal;
+    const uniques = [...new Set(roles)];
+    res.json({ nom: name ?? email ?? '', email: email ?? null, roles: uniques, droits: droitsDe(uniques, config) });
+  });
 
   // GET /api/annuaire?q= : recherche du manager (Entra, $search sur displayName/mail)
   api.get('/annuaire', rh, async (req, res) => {

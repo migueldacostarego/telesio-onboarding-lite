@@ -57,7 +57,7 @@ variable "rh_role" {
 }
 
 variable "direction_role" {
-  description = "Valeur du rôle d'application Direction (défini sur l'inscription ; non exigé par l'API)."
+  description = "Valeur du rôle d'application Direction (défini sur l'inscription). L'API s'en sert pour calculer les droits de GET /api/moi ; le valideur reste direction_type + direction_object_id."
   type        = string
   default     = "Direction"
 }

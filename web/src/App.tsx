@@ -1,26 +1,86 @@
-import { Link, Route, Routes } from 'react-router';
-import logo from '@/assets/telesio.svg';
-import { ComingSoon } from '@/pages/ComingSoon';
-import { Home } from '@/pages/Home';
+import type { ReactNode } from 'react';
+import { Navigate, Route, Routes } from 'react-router';
+import { ApiErrorAlert } from '@/components/ApiErrorAlert';
+import { AppHeader } from '@/components/AppHeader';
+import { UserMenu, UserMenuSkeleton } from '@/components/UserMenu';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useMoi } from '@/lib/moi';
+import { useSessionExpired } from '@/lib/session';
+import { Demandes } from '@/pages/Demandes';
+import { SessionExpired } from '@/pages/SessionExpired';
+import { Unauthorized } from '@/pages/Unauthorized';
 
-export function App() {
+function Frame({ menu, children }: { menu?: ReactNode; children: ReactNode }) {
   return (
-    <div className="min-h-svh">
-      {/* Fond sombre : le logo (couleurs d'origine, texte #F0F5FF) n'est lisible que sur fond foncé. */}
-      <header className="bg-primary text-primary-foreground">
-        <div className="mx-auto flex max-w-5xl items-center px-4 py-3">
-          <Link to="/" className="flex items-center gap-3">
-            <img src={logo} alt="Telesio" width={120} height={47} className="h-10 w-auto" />{' '}
-            <span className="text-lg font-semibold tracking-tight">Onboarding</span>
-          </Link>
-        </div>
-      </header>
-      <main className="mx-auto max-w-5xl px-4 py-8">
-        <Routes>
-          <Route index element={<Home />} />
-          <Route path=":screen" element={<ComingSoon />} />
-        </Routes>
+    <div className="flex min-h-svh flex-col">
+      <a
+        href="#contenu"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-foreground focus:outline-2 focus:outline-offset-2 focus:outline-ring"
+      >
+        Aller au contenu
+      </a>
+      <AppHeader>{menu}</AppHeader>
+      <main id="contenu" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 focus:outline-none">
+        {children}
       </main>
     </div>
+  );
+}
+
+/** Même hauteur que le titre de page : le contenu ne saute pas quand il remplace le squelette. */
+function PageSkeleton() {
+  return (
+    <div role="status">
+      <span className="sr-only">Chargement…</span>
+      <Skeleton className="h-8 w-48 bg-foreground/10" />
+    </div>
+  );
+}
+
+export function App() {
+  const expired = useSessionExpired();
+  const moi = useMoi(!expired);
+
+  if (expired) {
+    return (
+      <Frame>
+        <SessionExpired />
+      </Frame>
+    );
+  }
+  if (moi.isPending) {
+    return (
+      <Frame menu={<UserMenuSkeleton />}>
+        <PageSkeleton />
+      </Frame>
+    );
+  }
+  if (moi.isError) {
+    return (
+      <Frame>
+        <div className="mx-auto max-w-lg space-y-4">
+          <ApiErrorAlert error={moi.error} />
+          <Button variant="outline" onClick={() => void moi.refetch()} disabled={moi.isFetching}>
+            Réessayer
+          </Button>
+        </div>
+      </Frame>
+    );
+  }
+  if (!moi.data.droits.acces) {
+    return (
+      <Frame menu={<UserMenu user={moi.data} />}>
+        <Unauthorized />
+      </Frame>
+    );
+  }
+  return (
+    <Frame menu={<UserMenu user={moi.data} />}>
+      <Routes>
+        <Route index element={<Demandes />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Frame>
   );
 }

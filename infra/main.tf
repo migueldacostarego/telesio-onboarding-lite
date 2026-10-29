@@ -74,6 +74,7 @@ locals {
     UPN_DOMAIN             = var.upn_domain
     ENTRA_STATUS_EXTENSION = msgraph_resource.status_extension.output.name
     RH_ROLE                = var.rh_role
+    DIRECTION_ROLE         = var.direction_role
     TZ_METIER              = var.time_zone
 
     ARRIVANTS_GROUP_ID         = lower(azuread_group.arrivants.object_id)

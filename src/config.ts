@@ -11,6 +11,8 @@ export interface Config {
   statusExtension?: string;
   /** Rôle d'application (Easy Auth) qui donne accès aux routes RH. */
   rhRole: string;
+  /** Rôle d'application Direction. Sert à calculer les droits de GET /api/moi ; le valideur reste DIRECTION_TYPE + DIRECTION_OBJECT_ID. */
+  directionRole: string;
   /** Fuseau qui définit « aujourd'hui » (jour J, date d'arrivée dans le passé). */
   timeZone: string;
   /** Faire confiance à l'en-tête d'identité Easy Auth (jamais sans Easy Auth, sauf dev local). */
@@ -124,6 +126,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     upnDomain,
     statusExtension,
     rhRole: opt(env.RH_ROLE) ?? 'RH',
+    directionRole: opt(env.DIRECTION_ROLE) ?? 'Direction',
     timeZone,
     trustAuthHeaders: easyAuth || devBypass,
     direction: { type, objectId },

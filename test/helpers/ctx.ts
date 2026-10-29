@@ -31,12 +31,13 @@ export const LICENSES_JSON = JSON.stringify([
 export const SITE = 'exemple.sharepoint.test,11111111-2222-4333-8444-555555555555,66666666-7777-4888-8999-000000000000';
 export const DRIVE = 'b!abc_DEF-123';
 
-export const principal = (roles: string[] = [], oid = RH_ID) =>
+export const principal = (roles: string[] = [], oid = RH_ID, extra: { typ: string; val: string }[] = []) =>
   Buffer.from(
     JSON.stringify({
       claims: [
         { typ: 'http://schemas.microsoft.com/identity/claims/objectidentifier', val: oid },
         ...roles.map((r) => ({ typ: 'roles', val: r })),
+        ...extra,
       ],
     }),
   ).toString('base64');
