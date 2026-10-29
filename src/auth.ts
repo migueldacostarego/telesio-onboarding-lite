@@ -1,7 +1,5 @@
 import type { RequestHandler } from 'express';
 import type { Audit } from './audit';
-import type { Config } from './config';
-import type { Directory } from './directory';
 
 export interface Principal {
   /** objectId Entra de l'appelant. */
@@ -59,6 +57,10 @@ interface Denial {
   status: number;
   error: string;
   reason: string;
+  /** Code d'erreur renvoyé à l'interface (corps de la réponse). */
+  code?: string;
+  /** Propriétés d'audit en plus (jamais de nom ni d'UPN). */
+  extra?: Record<string, string>;
 }
 
 /** Authentifie via Easy Auth, puis applique `check` ; pose le principal dans res.locals. */
@@ -66,8 +68,8 @@ function guard(opts: GuardOpts, check: (p: Principal) => Promise<Denial | null>)
   return async (req, res, next) => {
     const route = `${req.method} ${req.baseUrl}${req.path}`;
     const deny = (d: Denial, actor?: string) => {
-      opts.audit.track({ action: 'acces.refuse', outcome: 'refuse', route, actor, reason: d.reason });
-      res.status(d.status).json({ error: d.error });
+      opts.audit.track({ action: 'acces.refuse', outcome: 'refuse', route, actor, reason: d.reason, ...d.extra });
+      res.status(d.status).json({ error: d.error, ...(d.code ? { code: d.code } : {}) });
     };
     if (!opts.trustHeaders) {
       // Sans Easy Auth, l'en-tête serait falsifiable : on refuse tout.
@@ -116,30 +118,14 @@ export function requireAuthenticated(opts: GuardOpts): RequestHandler {
   return guard(opts, async () => null);
 }
 
-export function requireRole(role: string, opts: GuardOpts): RequestHandler {
+/**
+ * Exige un droit de droitsDe (celui que GET /api/moi annonce à l'interface), calculé d'après les rôles du jeton.
+ * Un refus est tracé (acces.refuse : route, objectId, droit manquant) et répond 403 { code: droit_manquant }.
+ */
+export function requireDroit(droit: keyof Droits, names: { rhRole: string; directionRole: string }, opts: GuardOpts): RequestHandler {
   return guard(opts, async (p) =>
-    p.roles.includes(role) ? null : { status: 403, error: 'Accès refusé', reason: 'role_manquant' },
+    droitsDe(p.roles, names)[droit]
+      ? null
+      : { status: 403, error: 'Accès refusé', reason: 'droit_manquant', code: 'droit_manquant', extra: { droit } },
   );
-}
-
-/** Valideur : la personne DIRECTION_OBJECT_ID, ou un membre (transitif) du groupe DIRECTION_OBJECT_ID. */
-export function requireDirection(
-  direction: Config['direction'],
-  directory: Pick<Directory, 'isMemberOfGroup'>,
-  opts: GuardOpts,
-): RequestHandler {
-  return guard(opts, async (p) => {
-    const { type, objectId } = direction;
-    if (!type || !objectId) {
-      return { status: 503, error: 'Direction non configurée', reason: 'direction_non_configuree' };
-    }
-    const denied: Denial = { status: 403, error: 'Accès refusé', reason: 'direction_non_valideur' };
-    if (type === 'user') return p.id.toLowerCase() === objectId.toLowerCase() ? null : denied;
-    try {
-      return (await directory.isMemberOfGroup(p.id, objectId)) ? null : denied;
-    } catch {
-      // Fail closed : impossible de vérifier l'appartenance.
-      return { status: 503, error: 'Vérification d’appartenance impossible', reason: 'direction_verification_echec' };
-    }
-  });
 }

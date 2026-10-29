@@ -34,6 +34,17 @@ export async function step<T>(
   }
 }
 
+/** Extension du créateur : sans elle, impossible de contrôler l'auto-approbation (fail closed, 503). */
+export function creatorExtensionOf(deps: Pick<DirectionDeps, 'config'>): string {
+  const ext = deps.config.creatorExtension;
+  if (!ext) throw new ServiceError(503, { error: 'Créateur de la demande non configuré (ENTRA_CREATOR_EXTENSION)' });
+  return ext;
+}
+
+/** Vrai si la demande a été créée par cette personne (comparaison d'objectId sans tenir compte de la casse). */
+export const isCreator = (createur: string | null | undefined, actor: string): boolean =>
+  createur != null && createur.toLowerCase() === actor.toLowerCase();
+
 /**
  * Charge le compte et refuse (409) s'il n'est pas dans un statut autorisé.
  * Garde-fou central : refuser supprime un compte, il ne doit jamais viser autre chose qu'un compte
@@ -44,13 +55,20 @@ async function loadForAction(
   actor: string,
   id: string,
   allowed: readonly string[],
+  action: 'valider' | 'refuser',
 ): Promise<OnboardingUser> {
+  const creatorExt = creatorExtensionOf(deps);
   const user = await step(deps, actor, 'lecture', id, {}, () =>
-    deps.directory.getOnboardingUser(id, deps.config.statusExtension, deps.config.licenseExtension),
+    deps.directory.getOnboardingUser(id, deps.config.statusExtension, deps.config.licenseExtension, creatorExt),
   );
   if (!user) {
     deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
     throw new ServiceError(404, { error: 'Demande introuvable' });
+  }
+  // Personne ne valide ni ne refuse sa propre demande. Une demande sans créateur (antérieure à l'extension) n'est pas contrôlable.
+  if (isCreator(user.createur, actor)) {
+    deps.audit.track({ action: 'demande.auto_approbation', actor, outcome: 'refuse', cible: id, operation: action });
+    throw new ServiceError(403, { error: 'Vous ne pouvez pas valider ni refuser une demande que vous avez créée', code: 'auto_approbation' });
   }
   if (user.accountEnabled || user.statut === null || !allowed.includes(user.statut)) {
     const statut = user.accountEnabled || user.statut === null ? 'inconnu' : user.statut;
@@ -93,7 +111,7 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
     throw new ServiceError(503, { error: 'SharePoint non configuré (SHAREPOINT_SITE_ID, SHAREPOINT_DRIVE_ID)' });
   }
   if (config.licenses.length === 0) throw new ServiceError(503, { error: 'Licences non configurées (LICENSES)' });
-  const user = await loadForAction(deps, actor, id, ['EnAttente', 'Validé']);
+  const user = await loadForAction(deps, actor, id, ['EnAttente', 'Validé'], 'valider');
   const reprise = user.statut === 'Validé';
 
   // Le SKU est celui choisi par RH (extension licenceOnboarding) ; absent ou retiré de la liste : 409, rien n'est écrit.
@@ -141,7 +159,7 @@ export async function refuserDemande(
   id: string,
   motif: string,
 ): Promise<{ id: string; supprime: true; recuperableJours: 30 }> {
-  await loadForAction(deps, actor, id, ['EnAttente']);
+  await loadForAction(deps, actor, id, ['EnAttente'], 'refuser');
   deps.audit.track({ action: 'demande.refusee', actor, outcome: 'ok', cible: id, motifLongueur: motif.length });
   await step(deps, actor, 'suppression_compte', id, {}, () => deps.directory.deleteUser(id));
   deps.audit.track({ action: 'demande.compte_supprime', actor, outcome: 'ok', cible: id });

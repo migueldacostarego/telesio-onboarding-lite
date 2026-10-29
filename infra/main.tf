@@ -79,9 +79,8 @@ locals {
 
     ARRIVANTS_GROUP_ID         = lower(azuread_group.arrivants.object_id)
     ENTRA_ACTIVATION_EXTENSION = msgraph_resource.activation_extension.output.name
+    ENTRA_CREATOR_EXTENSION    = msgraph_resource.creator_extension.output.name
 
-    DIRECTION_TYPE            = var.direction_type
-    DIRECTION_OBJECT_ID       = var.direction_object_id
     SHAREPOINT_SITE_ID        = var.sharepoint_site_id
     SHAREPOINT_DRIVE_ID       = var.sharepoint_drive_id
     SHAREPOINT_FOLDER_PATTERN = var.sharepoint_folder_pattern

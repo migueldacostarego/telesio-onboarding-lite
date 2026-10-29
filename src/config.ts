@@ -1,7 +1,6 @@
 import { isValidTimeZone } from './dates';
 import { checkFolderPattern, DEFAULT_FOLDER_PATTERN } from './folder';
 
-export type DirectionType = 'user' | 'group';
 
 export interface Config {
   port: number;
@@ -11,14 +10,12 @@ export interface Config {
   statusExtension?: string;
   /** Rôle d'application (Easy Auth) qui donne accès aux routes RH. */
   rhRole: string;
-  /** Rôle d'application Direction. Sert à calculer les droits de GET /api/moi ; le valideur reste DIRECTION_TYPE + DIRECTION_OBJECT_ID. */
+  /** Rôle d'application Direction : donne les droits `creer` et `approuver` (valider ou refuser, hors ses propres demandes). */
   directionRole: string;
   /** Fuseau qui définit « aujourd'hui » (jour J, date d'arrivée dans le passé). */
   timeZone: string;
   /** Faire confiance à l'en-tête d'identité Easy Auth (jamais sans Easy Auth, sauf dev local). */
   trustAuthHeaders: boolean;
-  /** Valideur : une personne ou un groupe Entra (non configuré = routes Direction fermées, 503). */
-  direction: { type?: DirectionType; objectId?: string };
   /** Dossier SharePoint : site, bibliothèque (drive) et motif de nom ({nom}, {prenom}, {id}). */
   sharePoint: { siteId?: string; driveId?: string; folderPattern: string };
   /** Licences proposées à RH : un SKU et son groupe Entra (licence par groupe). Vide = demandes et validation répondent 503. */
@@ -29,6 +26,8 @@ export interface Config {
   arrivantsGroupId?: string;
   /** Extension qui porte la date d'activation : extension_<appId sans tirets>_activationOnboarding. Absente : activation fermée (503). */
   activationExtension?: string;
+  /** Extension qui porte l'objectId du créateur de la demande (extension_<appId>_createurOnboarding) : refus d'auto-approbation. */
+  creatorExtension?: string;
 }
 
 export interface LicenseOption {
@@ -81,10 +80,6 @@ function parseLicenses(raw: string | undefined): LicenseOption[] {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const type = opt(env.DIRECTION_TYPE);
-  if (type !== undefined && type !== 'user' && type !== 'group') {
-    throw new Error(`DIRECTION_TYPE invalide : "${type}" (attendu : user ou group)`);
-  }
   const upnDomain = opt(env.UPN_DOMAIN)?.toLowerCase();
   if (upnDomain !== undefined && !DOMAIN_RE.test(upnDomain)) {
     throw new Error('UPN_DOMAIN invalide (attendu : un nom de domaine, ex. contoso.com)');
@@ -93,8 +88,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (statusExtension !== undefined && !EXTENSION_RE.test(statusExtension)) {
     throw new Error('ENTRA_STATUS_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
   }
-  const objectId = opt(env.DIRECTION_OBJECT_ID);
-  if (objectId !== undefined && !GUID_RE.test(objectId)) throw new Error('DIRECTION_OBJECT_ID invalide (attendu : GUID)');
   const siteId = opt(env.SHAREPOINT_SITE_ID);
   const driveId = opt(env.SHAREPOINT_DRIVE_ID);
   if (siteId !== undefined && !GRAPH_ID_RE.test(siteId)) throw new Error('SHAREPOINT_SITE_ID invalide');
@@ -116,6 +109,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (activationExtension !== undefined && !EXTENSION_RE.test(activationExtension)) {
     throw new Error('ENTRA_ACTIVATION_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
   }
+  const creatorExtension = opt(env.ENTRA_CREATOR_EXTENSION);
+  if (creatorExtension !== undefined && !EXTENSION_RE.test(creatorExtension)) {
+    throw new Error('ENTRA_CREATOR_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
+  }
   const timeZone = opt(env.TZ_METIER) ?? 'Europe/Paris';
   if (!isValidTimeZone(timeZone)) throw new Error(`TZ_METIER invalide : "${timeZone}"`);
   // Easy Auth pose WEBSITE_AUTH_ENABLED=True. Le contournement de dev est ignoré en production.
@@ -129,12 +126,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     directionRole: opt(env.DIRECTION_ROLE) ?? 'Direction',
     timeZone,
     trustAuthHeaders: easyAuth || devBypass,
-    direction: { type, objectId },
     sharePoint: { siteId, driveId, folderPattern },
     licenses,
     licenseExtension,
     arrivantsGroupId: arrivantsGroupRaw?.toLowerCase(),
     activationExtension,
+    creatorExtension,
   };
 }
 

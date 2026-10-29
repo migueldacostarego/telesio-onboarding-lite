@@ -91,6 +91,27 @@ resource "msgraph_resource" "license_extension" {
   }
 }
 
+# objectId de la personne qui a saisi la demande (créateur), écrit à la création du compte, dans le même POST que le statut :
+# elle ne peut ni valider ni refuser sa propre demande (403 auto_approbation). Même mécanique que statutOnboarding.
+resource "msgraph_resource" "creator_extension" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "createurOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
 # Sites.Selected n'ouvre aucun site tant qu'un grant explicite n'existe pas : rôle write sur le seul
 # site SHAREPOINT_SITE_ID, pour l'identité managée (identifiée par son client ID).
 # L'appelant (Terraform) doit pouvoir gérer les permissions du site (voir README), sinon

@@ -1,5 +1,6 @@
+import type { Droits } from './auth';
 import { addDays, todayIn } from './dates';
-import { step } from './direction';
+import { creatorExtensionOf, isCreator, step } from './direction';
 import type { PendingDemande } from './directory';
 import { activationConfig, inspectActifs, type ActivationDeps, type OnboardingState } from './activation';
 
@@ -17,6 +18,9 @@ export const DELAI_ACTIVATION_MAX_JOURS = 60;
 const STATUTS = ['EnAttente', 'Validé', 'Actif', 'Terminé'] as const;
 type Statut = (typeof STATUTS)[number];
 
+/** Actions proposées à la personne connectée pour une demande (calculées côté serveur, jamais déduites par l'interface). */
+export type SuiviAction = 'approuver' | 'refuser' | 'activer';
+
 export interface SuiviItem {
   id: string;
   nom: string;
@@ -29,9 +33,20 @@ export interface SuiviItem {
   etape: 1 | 2 | 3 | 4;
   /** Comptes Actif seulement ; { verification: 'echec' } si la lecture Graph a échoué pour ce compte. */
   onboarding?: OnboardingState | { verification: 'echec' };
+  /**
+   * Actions disponibles pour la personne connectée : approuver et refuser (droit approuver, EnAttente, jamais sur sa propre
+   * demande), activer (droit activer, Validé). Vide sinon : l'interface ne propose que ce qui figure ici.
+   */
+  actions: SuiviAction[];
 }
 
-const item = (d: PendingDemande, statut: Statut, onboarding?: SuiviItem['onboarding']): SuiviItem => ({
+function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, actor: string): SuiviAction[] {
+  if (statut === 'EnAttente') return droits.approuver && !isCreator(d.createur, actor) ? ['approuver', 'refuser'] : [];
+  if (statut === 'Validé') return droits.activer ? ['activer'] : [];
+  return [];
+}
+
+const item = (d: PendingDemande, statut: Statut, droits: Droits, actor: string, onboarding?: SuiviItem['onboarding']): SuiviItem => ({
   id: d.id,
   nom: d.nom,
   poste: d.poste,
@@ -40,16 +55,24 @@ const item = (d: PendingDemande, statut: Statut, onboarding?: SuiviItem['onboard
   statut,
   etape: (STATUTS.indexOf(statut) + 1) as SuiviItem['etape'],
   ...(onboarding ? { onboarding } : {}),
+  actions: actionsFor(d, statut, droits, actor),
 });
 
 /**
  * Suivi RH : demandes EnAttente, Validé, Actif (avec l'état d'onboarding, comme /activations) et Terminé activées
  * depuis moins de 30 jours. Lecture seule, aucune permission Graph de plus (listByStatut, getOnboardingProgress,
- * inspectOnboarding). Les Terminé sont triés de l'activation la plus récente à la plus ancienne.
+ * inspectOnboarding). Les Terminé sont triés de l'activation la plus récente à la plus ancienne. `actions` est calculé pour
+ * `actor` d'après ses `droits`. L'objectId du créateur sert à ce calcul et n'est jamais renvoyé.
  */
-export async function listSuivi(deps: ActivationDeps, actor: string, now: Date): Promise<{ demandes: SuiviItem[]; tronque: boolean }> {
+export async function listSuivi(
+  deps: ActivationDeps,
+  actor: string,
+  now: Date,
+  droits: Droits,
+): Promise<{ demandes: SuiviItem[]; tronque: boolean }> {
   const { config, directory, audit } = deps;
   const { activationExt } = activationConfig(deps);
+  const creatorExt = creatorExtensionOf(deps);
   const ext = config.statusExtension;
   const aujourdhui = todayIn(config.timeZone, now);
   const arriveeMin = addDays(aujourdhui, -(FENETRE_TERMINE_JOURS + DELAI_ACTIVATION_MAX_JOURS));
@@ -57,7 +80,7 @@ export async function listSuivi(deps: ActivationDeps, actor: string, now: Date):
 
   const [attente, valides, actifs, termines] = await step(deps, actor, 'liste', undefined, {}, () =>
     Promise.all([
-      directory.listByStatut(ext, 'EnAttente'),
+      directory.listByStatut(ext, 'EnAttente', undefined, creatorExt),
       directory.listByStatut(ext, 'Validé'),
       directory.listByStatut(ext, 'Actif'),
       directory.listByStatut(ext, 'Terminé', arriveeMin),
@@ -90,10 +113,10 @@ export async function listSuivi(deps: ActivationDeps, actor: string, now: Date):
     actifs.demandes.length > MAX_PAR_STATUT || recents.length > MAX_PAR_STATUT;
 
   const demandes: SuiviItem[] = [
-    ...gardes.attente.map((d) => item(d, 'EnAttente')),
-    ...gardes.valides.map((d) => item(d, 'Validé')),
-    ...(await inspectActifs(deps, actor, gardes.actifs)).map((d) => item(d, 'Actif', d.onboarding)),
-    ...gardes.termines.map((d) => item(d, 'Terminé')),
+    ...gardes.attente.map((d) => item(d, 'EnAttente', droits, actor)),
+    ...gardes.valides.map((d) => item(d, 'Validé', droits, actor)),
+    ...(await inspectActifs(deps, actor, gardes.actifs)).map((d) => item(d, 'Actif', droits, actor, d.onboarding)),
+    ...gardes.termines.map((d) => item(d, 'Terminé', droits, actor)),
   ];
   audit.track({ action: 'suivi.liste', actor, outcome: 'ok', resultats: demandes.length, tronque });
   return { demandes, tronque };

@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertReady, loadConfig } from '../src/config';
 import { normalizePart, upnBase } from '../src/upn';
-import { EXT, EXT_LIC, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID, principal, setup } from './helpers/ctx';
+import { EXT, EXT_CREATOR, EXT_LIC, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID, principal, setup } from './helpers/ctx';
 
 describe('API', () => {
   let ctx: ReturnType<typeof setup>;
@@ -69,7 +69,7 @@ describe('API', () => {
       expect(u.props[EXT]).toBe('EnAttente');
       expect(u.props[EXT_LIC]).toBe(LICENSE_SKU);
       // Statut et licence font partie du POST : aucun état intermédiaire sans statut, aucun PATCH.
-      expect(created).toMatchObject({ [EXT]: 'EnAttente', [EXT_LIC]: LICENSE_SKU });
+      expect(created).toMatchObject({ [EXT]: 'EnAttente', [EXT_LIC]: LICENSE_SKU, [EXT_CREATOR]: RH_ID });
       const writes = ctx.graph.calls.filter((c) => c.method !== 'GET').map((c) => c.method);
       expect(writes).toEqual(['POST', 'PUT']);
 
@@ -251,12 +251,16 @@ describe('API', () => {
 });
 
 describe('config', () => {
-  it('laisse direction et SharePoint non tranchés, exige domaine et extension', () => {
+  it('laisse SharePoint non tranché, exige domaine et extension', () => {
     const c = loadConfig({});
-    expect(c.direction.objectId).toBeUndefined();
     expect(c.sharePoint.siteId).toBeUndefined();
     expect(() => assertReady(c)).toThrow(/UPN_DOMAIN, ENTRA_STATUS_EXTENSION/);
     expect(() => loadConfig({ ENTRA_STATUS_EXTENSION: 'statutOnboarding' })).toThrow();
+  });
+
+  it('ne connaît plus de valideur désigné : DIRECTION_TYPE et DIRECTION_OBJECT_ID sont ignorés, même invalides (réglages d’avant)', () => {
+    expect(() => loadConfig({ DIRECTION_TYPE: 'n-importe-quoi', DIRECTION_OBJECT_ID: 'pas-un-guid' })).not.toThrow();
+    expect(loadConfig({ DIRECTION_TYPE: 'user', DIRECTION_OBJECT_ID: '3f972282-b072-4c41-9fd5-5bace4f6e059' })).not.toHaveProperty('direction');
   });
 
   it('valide LICENSES : JSON, GUID, libellé, doublons, extension associée', () => {

@@ -101,7 +101,7 @@ describe('GET /api/moi : droits calculés côté serveur', () => {
     expect(await droits(['Autre', 'rh', 'DIRECTION'])).toEqual(AUCUN);
   });
 
-  it('les droits ne dépendent que des rôles du jeton, pas de DIRECTION_OBJECT_ID : le valideur désigné sans rôle n’a aucun droit ici', async () => {
+  it('les droits ne dépendent que des rôles du jeton : une identité sans rôle n’a aucun droit', async () => {
     const res = await fetch(`${h.base}/api/moi`, { headers: { 'x-ms-client-principal': principal([], 'bbbbbbbb-0000-4000-8000-000000000002') } });
     expect(((await res.json()) as { droits: object }).droits).toEqual(AUCUN);
   });

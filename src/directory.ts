@@ -77,6 +77,8 @@ export interface OnboardingUser {
   dateArrivee: string | null;
   /** skuId choisi par RH (extension licenceOnboarding) ; null si absent (demande antérieure au choix de licence). */
   licence: string | null;
+  /** objectId du créateur de la demande (extension createurOnboarding) ; null si absent (demande antérieure ou extension non lue). */
+  createur: string | null;
 }
 
 /** Données lues pour décider si l'onboarding est terminé. */
@@ -97,6 +99,8 @@ export interface PendingDemande {
   manager: { id: string; displayName: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
+  /** objectId du créateur, présent seulement si la liste a été demandée avec l'extension du créateur ; null si la demande n'en porte pas. */
+  createur?: string | null;
 }
 
 /** Disponibilité d'un SKU : prepaidUnits.enabled et consumedUnits de GET /subscribedSkus. */
@@ -130,11 +134,12 @@ export interface Directory {
   addGroupMember(groupId: string, userId: string): Promise<void>;
   /** Idempotent : un utilisateur absent du groupe n'est pas une erreur. */
   removeGroupMember(groupId: string, userId: string): Promise<void>;
-  /** hiredSince : AAAA-MM-JJ, ne garde que les arrivées à partir de cette date. */
+  /** hiredSince : AAAA-MM-JJ, ne garde que les arrivées à partir de cette date. creatorExt : lit aussi l'objectId du créateur (champ `createur`). */
   listByStatut(
     ext: string,
     statut: string,
     hiredSince?: string,
+    creatorExt?: string,
   ): Promise<{ demandes: PendingDemande[]; tronque: boolean }>;
   setAccountEnabled(id: string, enabled: boolean): Promise<void>;
   /** Mot de passe temporaire : Entra impose son changement à la première connexion (forceChangePasswordNextSignIn). */
@@ -143,8 +148,8 @@ export interface Directory {
   getOnboardingProgress(userId: string, activationExt: string): Promise<OnboardingProgress>;
   /** GET /users/{id}/authentication/microsoftAuthenticatorMethods : au moins une inscription. */
   hasAuthenticator(userId: string): Promise<boolean>;
-  /** licenseExt : nom de l'extension qui porte le skuId choisi (lue en plus du statut). */
-  getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null>;
+  /** licenseExt : extension qui porte le skuId choisi ; creatorExt : extension qui porte l'objectId du créateur (lues en plus du statut). */
+  getOnboardingUser(id: string, ext: string, licenseExt?: string, creatorExt?: string): Promise<OnboardingUser | null>;
   deleteUser(id: string): Promise<void>;
   isMemberOfGroup(userId: string, groupId: string): Promise<boolean>;
   search(q: string): Promise<DirectoryUser[]>;
@@ -172,6 +177,8 @@ export function wrap(err: unknown): DirectoryError {
 }
 
 interface RawPending {
+  /** Attributs d'extension demandés par $select (clé = nom complet). */
+  [extension: string]: unknown;
   id: string;
   displayName: string;
   jobTitle?: string | null;
@@ -267,7 +274,7 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async listByStatut(ext: string, statut: string, hiredSince?: string) {
+  async listByStatut(ext: string, statut: string, hiredSince?: string, creatorExt?: string) {
     // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
     // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
     // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
@@ -276,7 +283,7 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`${ext} eq '${statut}'`)
-        .select('id,displayName,jobTitle,department,employeeHireDate')
+        .select(`id,displayName,jobTitle,department,employeeHireDate${creatorExt ? `,${creatorExt}` : ''}`)
         .expand('manager($select=id,displayName)')
         .top(100)
         .count(true);
@@ -301,6 +308,7 @@ export class GraphDirectory implements Directory {
           service: u.department ?? null,
           manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
           dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
+          ...(creatorExt ? { createur: typeof u[creatorExt] === 'string' ? (u[creatorExt] as string) : null } : {}),
         }))
         .filter((d) => !hiredSince || (d.dateArrivee !== null && d.dateArrivee >= hiredSince));
       return { demandes, tronque };
@@ -309,11 +317,11 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async getOnboardingUser(id: string, ext: string, licenseExt?: string): Promise<OnboardingUser | null> {
+  async getOnboardingUser(id: string, ext: string, licenseExt?: string, creatorExt?: string): Promise<OnboardingUser | null> {
     try {
       const u = await this.client
         .api(`/users/${id}`)
-        .select(`id,displayName,givenName,surname,accountEnabled,employeeHireDate,${ext}${licenseExt ? `,${licenseExt}` : ''}`)
+        .select(`id,displayName,givenName,surname,accountEnabled,employeeHireDate,${ext}${licenseExt ? `,${licenseExt}` : ''}${creatorExt ? `,${creatorExt}` : ''}`)
         .get();
       return {
         id: u.id as string,
@@ -324,6 +332,7 @@ export class GraphDirectory implements Directory {
         statut: typeof u[ext] === 'string' ? (u[ext] as string) : null,
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
         licence: licenseExt && typeof u[licenseExt] === 'string' ? (u[licenseExt] as string).toLowerCase() : null,
+        createur: creatorExt && typeof u[creatorExt] === 'string' ? (u[creatorExt] as string) : null,
       };
     } catch (err) {
       const e = wrap(err);

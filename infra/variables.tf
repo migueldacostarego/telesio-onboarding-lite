@@ -57,26 +57,9 @@ variable "rh_role" {
 }
 
 variable "direction_role" {
-  description = "Valeur du rôle d'application Direction (défini sur l'inscription). L'API s'en sert pour calculer les droits de GET /api/moi ; le valideur reste direction_type + direction_object_id."
+  description = "Valeur du rôle d'application Direction (défini sur l'inscription). L'API s'en sert pour les droits : creer, et approuver (valider ou refuser, hors ses propres demandes)."
   type        = string
   default     = "Direction"
-}
-
-variable "direction_type" {
-  description = "Valideur : user ou group. Vide : routes Direction fermées (503)."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = contains(["", "user", "group"], var.direction_type)
-    error_message = "direction_type doit être vide, user ou group."
-  }
-}
-
-variable "direction_object_id" {
-  description = "objectId Entra de la personne ou du groupe valideur."
-  type        = string
-  default     = ""
 }
 
 variable "sharepoint_site_id" {
@@ -162,7 +145,7 @@ variable "rh_principal_object_ids" {
 }
 
 variable "direction_principal_object_ids" {
-  description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle Direction."
+  description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle Direction : tout porteur peut créer, valider et refuser des demandes (sauf les siennes)."
   type        = list(string)
   default     = []
 }

@@ -103,7 +103,7 @@ describe('POST /api/demandes/:id/activer', () => {
     expect(g().passwords.size).toBe(0);
   });
 
-  it('401 sans identité, 403 sans rôle RH (le valideur seul ne peut pas activer)', async () => {
+  it('401 sans identité, 403 sans rôle RH (la direction seule ne peut pas activer)', async () => {
     const id = account();
     expect((await fetch(`${h.base}/api/demandes/${id}/activer`, { method: 'POST' })).status).toBe(401);
     expect((await h.call('POST', `/api/demandes/${id}/activer`, DIR_ID)).status).toBe(403);

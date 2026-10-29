@@ -40,7 +40,7 @@ function suite(env: Record<string, string | undefined> = {}) {
 describe('GET /api/suivi', () => {
   const { h, g, compte, termine, suivi, nbLecturesDe } = suite();
 
-  it('liste les quatre statuts avec leur étape, réservée au rôle RH', async () => {
+  it('liste les quatre statuts avec leur étape, réservée aux porteurs d’un rôle (RH ou Direction)', async () => {
     compte('Attente', 'EnAttente');
     compte('Valide', 'Validé');
     compte('Actif', 'Actif', { extras: { [EXT_ACT]: '2026-10-26T10:00:00Z', lastPasswordChangeDateTime: '2026-10-26T12:00:00Z' }, authenticator: true });
@@ -58,16 +58,18 @@ describe('GET /api/suivi', () => {
       ['Actif Test', 'Actif', 3],
       ['Fini Test', 'Terminé', 4],
     ]);
-    expect((await h.call('GET', '/api/suivi', DIR_ID)).status).toBe(403);
+    expect((await h.call('GET', '/api/suivi', DIR_ID)).status).toBe(200);
+    expect((await h.callAs([], DIR_ID, 'GET', '/api/suivi')).status).toBe(403);
+    expect((await h.callAs(['Autre'], DIR_ID, 'GET', '/api/suivi')).status).toBe(403);
     expect((await fetch(`${h.base}/api/suivi`)).status).toBe(401);
   });
 
-  it('chaque demande ne porte que id, nom, poste, service, date d’arrivée, statut, étape (et onboarding pour Actif)', async () => {
+  it('chaque demande ne porte que id, nom, poste, service, date d’arrivée, statut, étape, actions (et onboarding pour Actif)', async () => {
     const manager = g().addUser('chef@exemple.test', 'Chef Secret');
     const id = g().addPending(EXT, { givenName: 'Anna', surname: 'Martin', statut: 'Validé', hireDate: '2026-11-03', managerId: manager });
     const out = await suivi();
     expect(out.demandes).toEqual([
-      { id, nom: 'Anna Martin', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-11-03', statut: 'Validé', etape: 2 },
+      { id, nom: 'Anna Martin', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-11-03', statut: 'Validé', etape: 2, actions: ['activer'] },
     ]);
     expect(JSON.stringify(out)).not.toContain('Chef Secret');
   });

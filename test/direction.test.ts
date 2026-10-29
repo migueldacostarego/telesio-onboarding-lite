@@ -1,57 +1,68 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config';
 import { buildFolderName } from '../src/folder';
-import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_LIC, GROUP_ID, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
+import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_LIC, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
 import { harness } from './helpers/harness';
 
-describe('Direction : personne', () => {
+const AUTRE_DIRECTION_ID = 'dddddddd-0000-4000-8000-0000000000d2';
+
+describe('Direction : droit approuver, porté par le rôle Direction', () => {
   const h = harness();
+  let managerId: string;
   beforeEach(async () => {
     if (h.ctx) await h.stop();
     await h.start();
+    managerId = h.ctx.graph.addUser('chef@exemple.test', 'Camille Responsable');
   });
   afterAll(() => h.stop());
+  const pending = (given = 'Anna') => h.ctx.graph.addPending(EXT, { givenName: given, surname: 'Martin', managerId, extras: { [EXT_LIC]: LICENSE_SKU } });
 
-  it('accepte le valideur désigné, refuse les autres', async () => {
-    expect((await h.call('GET', '/api/demandes', DIR_ID)).status).toBe(200);
-    const other = await h.call('GET', '/api/demandes', RH_ID);
-    expect(other.status).toBe(403);
-    expect(h.ctx.events.at(-1)).toMatchObject({ action: 'acces.refuse', reason: 'direction_non_valideur', actor: RH_ID });
+  it('tout porteur du rôle Direction accède à la liste, pas seulement une personne désignée', async () => {
+    for (const oid of [DIR_ID, AUTRE_DIRECTION_ID]) {
+      expect((await h.callAs(['Direction'], oid, 'GET', '/api/demandes')).status).toBe(200);
+    }
+    expect((await h.callAs(['RH', 'Direction'], RH_ID, 'GET', '/api/demandes')).status).toBe(200);
+  });
+
+  it('refuse RH seul, un rôle étranger et l’absence de rôle : 403 droit_manquant, refus tracé avec le droit', async () => {
+    for (const roles of [['RH'], ['Autre'], []]) {
+      const res = await h.callAs(roles, RH_ID, 'GET', '/api/demandes');
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: 'Accès refusé', code: 'droit_manquant' });
+    }
+    expect(h.ctx.events.filter((e) => e.action === 'acces.refuse')).toEqual(
+      Array.from({ length: 3 }, () => ({ action: 'acces.refuse', outcome: 'refuse', route: 'GET /api/demandes', actor: RH_ID, reason: 'droit_manquant', droit: 'approuver' })),
+    );
+  });
+
+  it('valider et refuser : n’importe quelle personne Direction, une autre que celle des tests habituels comprise', async () => {
+    const aValider = pending('Valide');
+    expect((await h.callAs(['Direction'], AUTRE_DIRECTION_ID, 'POST', `/api/demandes/${aValider}/valider`)).status).toBe(200);
+    const aRefuser = pending('Refus');
+    expect((await h.callAs(['Direction'], AUTRE_DIRECTION_ID, 'POST', `/api/demandes/${aRefuser}/refuser`, { motif: 'Dossier incomplet' })).status).toBe(200);
+    expect(h.ctx.graph.deleted).toEqual([aRefuser]);
+  });
+
+  it('valider et refuser sans le rôle Direction : 403, rien n’est écrit, même pour RH ou pour l’ancien valideur désigné sans rôle', async () => {
+    const id = pending();
+    for (const [roles, oid] of [[['RH'], RH_ID], [[], DIR_ID], [['Autre'], DIR_ID]] as const) {
+      const v = await h.callAs([...roles], oid, 'POST', `/api/demandes/${id}/valider`);
+      const r = await h.callAs([...roles], oid, 'POST', `/api/demandes/${id}/refuser`, { motif: 'x' });
+      expect([v.status, r.status]).toEqual([403, 403]);
+      expect(await v.json()).toEqual({ error: 'Accès refusé', code: 'droit_manquant' });
+    }
+    expect(h.ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('EnAttente');
+  });
+
+  it('aucune vérification d’appartenance à un groupe de valideurs : plus d’appel checkMemberGroups', async () => {
+    await h.call('GET', '/api/demandes');
+    await h.call('POST', `/api/demandes/${pending()}/valider`);
+    expect(h.ctx.graph.calls.some((c) => c.path.endsWith('/checkMemberGroups'))).toBe(false);
   });
 
   it('401 sans identité', async () => {
     expect((await h.call('GET', '/api/demandes', DIR_ID, {}, { 'x-ms-client-principal': '' })).status).toBe(401);
-  });
-});
-
-describe('Direction : groupe', () => {
-  const h = harness({ DIRECTION_TYPE: 'group', DIRECTION_OBJECT_ID: GROUP_ID });
-  beforeEach(async () => {
-    if (h.ctx) await h.stop();
-    await h.start();
-  });
-  afterAll(() => h.stop());
-
-  it('vérifie l’appartenance via checkMemberGroups', async () => {
-    h.ctx.graph.groups.set(GROUP_ID, new Set([DIR_ID]));
-    expect((await h.call('GET', '/api/demandes', DIR_ID)).status).toBe(200);
-    expect((await h.call('GET', '/api/demandes', RH_ID)).status).toBe(403);
-    const check = h.ctx.graph.calls.filter((c) => c.path.endsWith('/checkMemberGroups'));
-    expect(check).toHaveLength(2);
-    expect(check[0]?.body).toEqual({ groupIds: [GROUP_ID] });
-  });
-});
-
-describe('Direction : non configurée', () => {
-  const h = harness({ DIRECTION_TYPE: undefined, DIRECTION_OBJECT_ID: undefined });
-  beforeEach(async () => {
-    if (h.ctx) await h.stop();
-    await h.start();
-  });
-  afterAll(() => h.stop());
-
-  it('ferme les routes (503) tant que la direction n’est pas décidée', async () => {
-    expect((await h.call('GET', '/api/demandes')).status).toBe(503);
   });
 });
 
@@ -415,6 +426,5 @@ describe('dossier et config', () => {
     expect(() => loadConfig({ SHAREPOINT_FOLDER_PATTERN: 'Dossier' })).toThrow();
     expect(() => loadConfig({ SHAREPOINT_FOLDER_PATTERN: '{nom} {upn}' })).toThrow();
     expect(() => loadConfig({ SHAREPOINT_DRIVE_ID: '../x' })).toThrow();
-    expect(() => loadConfig({ DIRECTION_OBJECT_ID: 'pas-un-guid' })).toThrow();
   });
 });

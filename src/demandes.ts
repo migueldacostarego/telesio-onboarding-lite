@@ -37,7 +37,7 @@ export interface DemandeCreee {
 }
 
 /**
- * Crée le compte désactivé avec statutOnboarding=EnAttente et le choix de licence dans le même POST (aucun compte
+ * Crée le compte désactivé avec statutOnboarding=EnAttente, le choix de licence et l'objectId du créateur dans le même POST (aucun compte
  * fantôme sans statut), puis affecte le manager. Un manager impossible à poser n'annule pas la demande, déjà visible
  * par la direction : la réponse le signale (avertissement) plutôt qu'un 502 qui pousserait RH à recréer un doublon.
  * Le mot de passe est aléatoire, jamais stocké, jamais loggé.
@@ -52,6 +52,9 @@ export async function createDemande(
   const delays = deps.managerRetryDelaysMs ?? DEFAULT_RETRY_DELAYS;
   let step = 'manager_verification';
   let targetId: string | undefined;
+  // Avant toute écriture : sans l'extension du créateur, l'auto-approbation ne serait pas contrôlable.
+  const creatorExt = config.creatorExtension;
+  if (!creatorExt) throw new ServiceError(503, { error: 'Créateur de la demande non configuré (ENTRA_CREATOR_EXTENSION)' });
 
   try {
     // Avant toute écriture : la licence choisie doit encore avoir une unité libre (la réservation se fait à la validation).
@@ -93,6 +96,8 @@ export async function createDemande(
           passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
         }, {
           [config.licenseExtension as string]: input.licence,
+          // objectId de la personne qui saisit la demande : elle ne pourra ni la valider ni la refuser.
+          [creatorExt]: actor,
           [config.statusExtension]: 'EnAttente',
         });
         upn = candidate;

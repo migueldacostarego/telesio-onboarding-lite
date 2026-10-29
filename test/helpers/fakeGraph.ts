@@ -15,6 +15,7 @@ export interface Call {
   path: string;
   headers: Record<string, string>;
   filter?: string;
+  select?: string;
   expand?: string;
   search?: string;
   body?: unknown;
@@ -147,7 +148,7 @@ export class FakeGraph {
       header: (k: string, v: string) => ((call.headers[k] = v), req),
       filter: (f: string) => ((call.filter = f), req),
       search: (s: string) => ((call.search = s), req),
-      select: () => req,
+      select: (s: string) => ((call.select = s), req),
       expand: (e: string) => ((call.expand = e), req),
       top: () => req,
       count: () => req,
@@ -200,6 +201,8 @@ export class FakeGraph {
             department: u.props.department,
             employeeHireDate: u.props.employeeHireDate,
             manager: u.manager ? this.managerOf(u.manager) : undefined,
+            // Attributs d'extension (créateur) : Graph les renvoie quand $select les nomme.
+            ...Object.fromEntries(Object.entries(u.props).filter(([k]) => k.startsWith('extension_') && k !== ext[1])),
           }));
         if (!this.pageSize) return { value: all };
         const value = all.slice(skip, skip + this.pageSize);
