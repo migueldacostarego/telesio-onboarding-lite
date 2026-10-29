@@ -8,7 +8,7 @@ MVP d'onboarding : RH saisit une demande → la direction valide → compte Entr
 - Testé à la main sur test (2026-10-29) : à la 1re connexion, Authenticator puis changement du mot de passe imposés, passage à Terminé ; `User-PasswordProfile.ReadWrite.All` suffit. Réglages du tenant (à refaire à la main par tenant) : docs/reglages-tenant-onboarding.md.
 - Envs test et dev déployés (tenant telesiosandbox, abonnement telesio-test). test s'applique à la main (`terraform apply` hors CI) ; dev par la CI à chaque fusion sur main. Dev n'a pas de site SharePoint dédié (validation en 503) : tester le parcours complet sur test. Prod inactive tant qu'il n'y a pas de vrai tenant.
 - Stack : Node/TypeScript, App Service, Terraform (infra/), déploiement GitHub Actions en OIDC. Front : `web/` (Vite, React, TypeScript, Tailwind, shadcn/ui, React Router, TanStack Query), build dans `dist/web`, servi par Express sous `/app`.
-- Front, étape 2 faite : socle posé, un seul écran (« Demandes », vide) avec en-tête, menu utilisateur (`GET /api/moi`) et gestion de session expirée / accès non autorisé. Choix, commandes et limites : README, section « Front React (/app) ».
+- Front, étape 2 faite : socle posé, un seul écran (« Demandes », en lecture seule d'après `GET /api/suivi` : tableau, recherche, filtre, tri, actualisation 30 s ; pas encore d'actions) avec en-tête, menu utilisateur (`GET /api/moi`) et gestion de session expirée / accès non autorisé. Choix, commandes et limites : README, section « Front React (/app) ».
 - Avant la prod : le statut est une extension que tout administrateur d'utilisateurs peut écrire ; restreindre l'app (unité administrative à gestion restreinte) avant le vrai tenant.
 
 ## Prochaine étape : migrer les écrans

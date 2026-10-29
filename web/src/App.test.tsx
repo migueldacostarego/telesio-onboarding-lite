@@ -4,16 +4,16 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { api } from '@/lib/api';
 import { LOGOUT_URL } from '@/lib/auth';
-import { AUCUN_DROIT, CAMILLE, DROITS_DIRECTION, DROITS_RH, mockFetch, renderApp, reply } from '@/test/helpers';
+import { AUCUN_DROIT, CAMILLE, DROITS_DIRECTION, DROITS_RH, lecturesSuivi, mockApi, mockFetch, renderApp, reply } from '@/test/helpers';
 
 /** Plus aucune donnée en cache (une requête désactivée, sans données, peut être recréée par son observateur). */
 const sansDonnees = (client: QueryClient) => client.getQueryCache().getAll().every((q) => q.state.data === undefined);
-const connecte = (moi: object = CAMILLE) => mockFetch(() => reply(200, moi));
+const connecte = (moi: object = CAMILLE) => mockApi({ moi });
 
 describe('chargement de /api/moi', () => {
   it('affiche des squelettes (en-tête et page), jamais un écran vide, puis les remplace sans texte intermédiaire', async () => {
     let finir!: (r: Response) => void;
-    mockFetch(() => new Promise<Response>((resolve) => (finir = resolve)));
+    mockApi({ moi: () => new Promise<Response>((resolve) => (finir = resolve)) });
     renderApp();
 
     expect(screen.getByText('Chargement de votre profil…')).toBeInTheDocument();
@@ -24,26 +24,29 @@ describe('chargement de /api/moi', () => {
 
     await act(async () => finir(reply(200, CAMILLE)));
     expect(await screen.findByRole('heading', { level: 1, name: 'Demandes' })).toBeInTheDocument();
+    await screen.findByText('Aucune demande en cours');
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('interroge /api/moi une seule fois, en lecture', async () => {
+  it('interroge /api/moi une seule fois, en lecture, puis /api/suivi pour la page', async () => {
     const fetchMock = connecte();
     renderApp();
     await screen.findByRole('heading', { name: 'Demandes' });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/moi');
+    await screen.findByText('Aucune demande en cours');
+    expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/moi')).toHaveLength(1);
+    expect(lecturesSuivi(fetchMock)).toBe(1);
+    expect(fetchMock.mock.calls.map((c) => [c[0], c[1]?.method])).toEqual([['/api/moi', 'GET'], ['/api/suivi', 'GET']]);
   });
 });
 
 describe('page Demandes', () => {
-  it('est vide avec son titre, sans les cartes d’accueil', async () => {
+  it('affiche son titre et l’état vide, sans les cartes d’accueil', async () => {
     connecte();
     renderApp();
     expect(await screen.findByRole('heading', { level: 1, name: 'Demandes' })).toBeInTheDocument();
-    expect(screen.getByRole('main').children).toHaveLength(1);
+    expect(await screen.findByText('Aucune demande en cours')).toBeInTheDocument();
     expect(screen.queryByText(/Ouvrir/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/à venir/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^À venir$/)).not.toBeInTheDocument();
   });
 
   it('une adresse inconnue ramène sur Demandes', async () => {
@@ -186,12 +189,19 @@ describe('session expirée', () => {
     expect(assign).toHaveBeenCalledWith('/app/');
   });
 
+  it('401 sur /api/suivi : même écran de reconnexion, données vidées', async () => {
+    mockApi({ suivi: () => reply(401, { error: 'Authentification requise' }) });
+    const { client } = renderApp();
+    expect(await screen.findByRole('heading', { name: 'Votre session a expiré' })).toBeInTheDocument();
+    await waitFor(() => expect(sansDonnees(client)).toBe(true));
+  });
+
   it('401 sur n’importe quel autre appel, session pourtant ouverte : bascule sur l’écran et vide le cache', async () => {
-    mockFetch((url) => (url === '/api/moi' ? reply(200, CAMILLE) : reply(401, { error: 'Authentification requise' })));
+    mockFetch((url) => (url === '/api/moi' ? reply(200, CAMILLE) : url === '/api/suivi' ? reply(200, { demandes: [], tronque: false }) : reply(401, { error: 'Authentification requise' })));
     const { client } = renderApp();
     await screen.findByRole('heading', { name: 'Demandes' });
     await client.prefetchQuery({ queryKey: ['donnees', 'nominatives'], queryFn: () => Promise.resolve({ nom: 'Camille' }) });
-    expect(client.getQueryCache().getAll()).toHaveLength(2);
+    expect(client.getQueryCache().getAll()).toHaveLength(3); // moi, suivi, données ci-dessus
 
     await act(async () => {
       await client.fetchQuery({ queryKey: ['autre'], queryFn: () => api.get('/api/demandes') }).catch(() => undefined);
@@ -202,6 +212,7 @@ describe('session expirée', () => {
     await waitFor(() => expect(sansDonnees(client)).toBe(true));
     expect(client.getQueryData(['donnees', 'nominatives'])).toBeUndefined();
     expect(client.getQueryData(['moi'])).toBeUndefined();
+    expect(client.getQueryData(['suivi'])).toBeUndefined();
   });
 
   it('une réponse hors JSON (redirection vers la connexion) expire aussi la session', async () => {
@@ -221,11 +232,11 @@ describe('session expirée', () => {
 describe('erreur de chargement de /api/moi', () => {
   it('message dans l’écran et bouton Réessayer qui relit /api/moi', async () => {
     let appels = 0;
-    const fetchMock = mockFetch(() => (++appels === 1 ? reply(500, { error: 'Erreur interne' }) : reply(200, CAMILLE)));
+    const fetchMock = mockApi({ moi: () => (++appels === 1 ? reply(500, { error: 'Erreur interne' }) : reply(200, CAMILLE)) });
     renderApp();
     expect(await screen.findByRole('alert')).toHaveTextContent('Erreur interne');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Réessayer' }));
     expect(await screen.findByRole('heading', { name: 'Demandes' })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/moi')).toHaveLength(2);
   });
 });
