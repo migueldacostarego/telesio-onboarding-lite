@@ -9,6 +9,8 @@ export interface PropsLignes {
   /** Un bouton de ligne a été cliqué (valider part tout de suite ; les autres ouvrent d'abord une boîte de dialogue). */
   onAction: (d: Demande, action: ActionNom) => void;
   onFermer: (d: Demande) => void;
+  /** Demande qui vient d'être créée : mise en évidence. */
+  surlignee?: string | null;
 }
 
 export const actionsDe = (d: Demande, p: PropsLignes): PropsActions => ({

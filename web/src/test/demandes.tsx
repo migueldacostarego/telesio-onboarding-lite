@@ -35,9 +35,9 @@ export const actif = (p: { id: string; nom: string }, o: Partial<Demande> = {}):
   enAttente(p, { statut: 'Actif', etape: 3, actions: ['regenerer'], onboarding: { motDePasse: false, authenticator: false, termine: false }, ...o });
 
 /** Fausse API avec une liste que les tests modifient : `suivi` relit toujours `etat.demandes`. */
-export function monter(o: { demandes?: Demande[]; ecrire: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>; surSession?: () => void }) {
+export function monter(o: { demandes?: Demande[]; moi?: object; lire?: (url: string) => Response | Promise<Response> | undefined; ecrire: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>; surSession?: () => void }) {
   const etat = { demandes: o.demandes ?? [enAttente(ELOISE), enAttente(HUGO)] };
-  const fetchMock = mockApi({ suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), ecrire: o.ecrire });
+  const fetchMock = mockApi({ moi: o.moi, suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), lire: o.lire, ecrire: o.ecrire });
   const client = createQueryClient(o.surSession);
   const vue = render(
     <QueryClientProvider client={client}>

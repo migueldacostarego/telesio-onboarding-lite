@@ -23,6 +23,8 @@ export function mockApi(
   o: {
     moi?: object | (() => Response | Promise<Response>);
     suivi?: object | (() => Response | Promise<Response>);
+    /** Autres lectures (GET) : annuaire, licences… Sans réponse, 404. */
+    lire?: (url: string) => Response | Promise<Response> | undefined;
     /** Écritures (POST) : l'adresse et le corps JSON ; sans elle, 404. */
     ecrire?: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>;
   } = {},
@@ -32,6 +34,8 @@ export function mockApi(
     if (init?.method === 'POST' && o.ecrire) return o.ecrire(url, JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>);
     if (url === '/api/moi') return reponse(o.moi, CAMILLE);
     if (url === '/api/suivi') return reponse(o.suivi, { demandes: [], tronque: false });
+    const autre = init?.method === 'POST' ? undefined : o.lire?.(url);
+    if (autre) return autre;
     return reply(404, { error: 'Introuvable' });
   });
 }

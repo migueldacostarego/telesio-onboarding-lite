@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Actualisation } from '@/components/demandes/Actualisation';
 import { Barre } from '@/components/demandes/Barre';
 import { DialogueActivation } from '@/components/demandes/DialogueActivation';
 import { DialogueMotDePasse } from '@/components/demandes/DialogueMotDePasse';
+import { NouvelleDemande } from '@/components/demandes/NouvelleDemande';
 import { DialogueRefus } from '@/components/demandes/DialogueRefus';
 import { DialogueRegeneration } from '@/components/demandes/DialogueRegeneration';
 import { DemandesCartes, DemandesCartesSquelette } from '@/components/demandes/DemandesCartes';
@@ -15,10 +17,15 @@ import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { useTerminaisonAuto } from '@/hooks/useTerminaisonAuto';
 import { useNow } from '@/hooks/useNow';
 import type { ActionNom } from '@/lib/actions';
-import { aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
+import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
+import { useMoi } from '@/lib/moi';
+import { SUIVI_KEY, aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
 const PLAFOND = 100;
+/** La ligne créée reste en évidence ce temps-là ; tant qu'elle n'est pas dans la liste (réplication), la liste est relue toutes les 5 s, 6 fois au plus. */
+const SURLIGNAGE_MS = 30_000;
+const RELECTURES_NOUVELLE = 6;
 
 export function Demandes() {
   const suivi = useSuivi();
@@ -31,6 +38,12 @@ export function Demandes() {
   const jour = aujourdhui(new Date(useNow(60_000)));
 
   const donnees = suivi.data;
+  const queryClient = useQueryClient();
+  const peutCreer = useMoi().data?.droits.creer === true;
+  // Demande qui vient d'être créée : son id (ligne en évidence) et l'éventuel avertissement du serveur (responsable non posé).
+  const [nouvelle, setNouvelle] = useState<{ id: string; nom: string; avertissement?: string } | null>(null);
+  const idNouvelle = nouvelle?.id || undefined; // '' : le surlignage est terminé, le message reste
+  const nouvelleVisible = idNouvelle !== undefined && donnees?.demandes.some((d) => d.id === idNouvelle) === true;
   // Le mot de passe temporaire n'existe qu'ici et dans la boîte qui l'affiche : état React seulement (ni URL, ni stockage, ni cache).
   const [remise, setRemise] = useState<{ nom: string; motDePasse: string; regeneration: boolean } | null>(null);
   // La boîte de dialogue ouverte vise une demande par son id (état de la page : elle survit aux filtres et au tri).
@@ -52,6 +65,30 @@ export function Demandes() {
     etats: actions.etats,
     onAction: (d: Demande, action: ActionNom) => (action === 'valider' ? actions.valider(d.id) : setCible({ action, id: d.id })),
     onFermer: (d: Demande) => actions.fermer(d.id),
+    surlignee: idNouvelle || null,
+  };
+  // La ligne créée apparaît avec un léger retard (réplication d'Entra) : on relit la liste jusqu'à la voir, puis on la montre.
+  useEffect(() => {
+    if (idNouvelle === undefined || nouvelleVisible) return;
+    let essais = 0;
+    const id = setInterval(() => {
+      if (++essais > RELECTURES_NOUVELLE) clearInterval(id);
+      else void queryClient.invalidateQueries({ queryKey: SUIVI_KEY });
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [idNouvelle, nouvelleVisible, queryClient]);
+  useEffect(() => {
+    if (idNouvelle === undefined || !nouvelleVisible) return;
+    document.getElementById(`demande-${idNouvelle}`)?.scrollIntoView?.({ block: 'nearest' });
+    const id = setTimeout(() => setNouvelle((n) => (n?.id === idNouvelle ? { ...n, id: '' } : n)), SURLIGNAGE_MS);
+    return () => clearTimeout(id);
+  }, [idNouvelle, nouvelleVisible]);
+  const surCreee = (creee: DemandeCreee, valeurs: DemandeSortie) => {
+    setNouvelle({ id: creee.id, nom: `${valeurs.prenom} ${valeurs.nom}`, avertissement: creee.avertissement });
+    // La ligne doit être visible : ni recherche ni filtre ne la masquent.
+    setTerme('');
+    setStatut('tous');
+    void queryClient.invalidateQueries({ queryKey: SUIVI_KEY });
   };
   const visibles = useMemo(() => (donnees ? filtrerDemandes(donnees.demandes, { terme, statut, tri, aujourdhui: jour }) : []), [donnees, terme, statut, tri, jour]);
   const filtre = terme.trim() !== '' || statut !== 'tous';
@@ -67,8 +104,29 @@ export function Demandes() {
         <h1 id="demandes-titre" className="text-2xl font-semibold tracking-tight">
           Demandes
         </h1>
-        <Actualisation misAJourA={suivi.dataUpdatedAt} enCours={suivi.isFetching} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Actualisation misAJourA={suivi.dataUpdatedAt} enCours={suivi.isFetching} />
+          {peutCreer && <NouvelleDemande onCree={surCreee} onRelire={() => void queryClient.invalidateQueries({ queryKey: SUIVI_KEY })} />}
+        </div>
       </div>
+
+      {nouvelle && (
+        <Alert role="status">
+          <AlertTitle>Demande créée pour {nouvelle.nom}</AlertTitle>
+          <AlertDescription>
+            {nouvelle.avertissement === 'manager_non_affecte' ? (
+              <p>
+                Le compte existe, mais le <strong>responsable n’a pas pu être affecté</strong> : à poser dans Entra. Ne renvoyez pas la demande, cela créerait un doublon.
+              </p>
+            ) : (
+              <p>Elle attend la validation de la direction.</p>
+            )}
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => setNouvelle(null)}>
+              Fermer ce message
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {suivi.isPending && (
         <>

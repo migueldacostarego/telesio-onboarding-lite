@@ -38,8 +38,11 @@ export function DemandesTable({ tri, ...lignes }: PropsLignes & { tri: Tri }) {
         <TableBody>
           {demandes.map((d) => (
             <Fragment key={d.id}>
-              <TableRow>
-                <TableCell className="font-medium">{d.nom}</TableCell>
+              <TableRow id={`demande-${d.id}`} data-nouvelle={lignes.surlignee === d.id || undefined} className={lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : undefined}>
+                <TableCell className="font-medium">
+                  {d.nom}
+                  {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
+                </TableCell>
                 <TableCell>{d.poste ?? ABSENT}</TableCell>
                 <TableCell>{d.service ?? ABSENT}</TableCell>
                 <TableCell className="whitespace-nowrap">{formatArrivee(d.dateArrivee)}</TableCell>

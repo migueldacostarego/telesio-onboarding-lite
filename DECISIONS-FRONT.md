@@ -36,3 +36,21 @@ Choix faits sans attendre de réponse quand une étape en demandait un qui chang
   - Borné à 5 tentatives par compte et par ouverture de l'écran, pour qu'une panne durable ne déclenche pas une écriture toutes les 30 s.
   - Aucun appel si la lecture Graph du compte a échoué (`verification: echec`) ou si l'onboarding est incomplet.
 - **Test serveur instable constaté une fois** : `test/direction.test.ts` « 409 sans suppression… » a échoué une fois pendant que d'autres commandes tournaient en parallèle, puis a passé 4 fois de suite (et sur le code d'avant mes changements). Non lié à cette étape ; à surveiller en CI.
+
+## Étape 3 : Nouvelle demande
+
+- **Versions** (`web/`, exactes, `--before=2026-10-22`) : `react-hook-form` **7.90.0** (11 oct.), `zod` **4.6.7** (12 oct.), `@hookform/resolvers` **5.9.2** (17 oct.) et sa seule dépendance `@standard-schema/utils` 0.3.0 (2024). Trois paquets ajoutés au `package-lock.json`, rien d'autre ne change, `npm audit` : 0.
+  - **`@hookform/resolvers` n'était pas dans la consigne** : c'est le pont entre react-hook-form et zod. Sans lui il faudrait un résolveur écrit à la main.
+  - Écartées : `react-hook-form` 7.91.0 (publiée le 2026-10-23, moins de 7 jours) et `@hookform/resolvers` 6.0.x (nouvelle version majeure de 10 jours, non évaluée). Retenir 5.9.2.
+- **zod et la CSP de `/app`.** Le contrôle Chrome a montré une violation `script-src` « eval » : zod 4 sonde `new Function` pour compiler ses schémas, et la CSP la signale même quand l'erreur est interceptée. `z.config({ jitless: true })` (`lib/demandeForm.ts`, testé) supprime la compilation et la sonde ; 0 violation ensuite. À garder si un autre schéma zod est ajouté.
+- **Le terme de recherche du responsable et « jamais dans l'URL ».** Il n'entre jamais dans l'**adresse de la page** (`location`, routeur) ni dans le stockage du navigateur (testé et vérifié dans Chrome). L'API, elle, n'a que `GET /api/annuaire?q=` : la requête contient donc `q` dans sa chaîne de requête, comme pour la page actuelle `/demande`. Le serveur ne la trace pas (longueur seulement) ; un journal d'accès de la plateforme (App Service, Easy Auth) pourrait la voir. Pour l'éviter il faudrait une route `POST` de recherche : changement d'API non fait.
+  - Côté cache de requêtes, la recherche a `gcTime: 0` (rien ne survit à l'écran).
+- **Formulaire** : panneau latéral (`sheet`), chargé à la première ouverture (`lazy`, un fichier de 38 Ko gzip à part : react-hook-form et zod ne pèsent pas sur les personnes qui ne créent rien). Les règles de zod reprennent celles du serveur (`src/validation.ts`), qui reste l'autorité : ses erreurs 400 s'affichent sous le champ concerné, la saisie est conservée.
+  - Un clic à côté **ne ferme pas** le panneau (une longue saisie perdue par un clic de travers) ; Échap le ferme, sauf pendant l'envoi ; si la liste du responsable est ouverte, Échap ferme d'abord la liste.
+  - Responsable : motif ARIA « combobox » (flèches, Entrée, Échap), attente de 300 ms, 2 caractères au moins, 64 au plus. Entrée dans ce champ ne soumet jamais le formulaire.
+  - Licence : liste déroulante native d'après `GET /api/licences`, « libellé : N disponibles », grisée à 0. Lue à chaque ouverture.
+  - La date d'arrivée dans le passé est refusée côté interface d'après le jour du navigateur (confort) ; le serveur tranche d'après le fuseau métier.
+- **Une création n'est jamais rejouée** (doublon de compte). Après un 502, le panneau reste ouvert avec l'erreur, l'étape et la consigne « ne renvoyez pas la demande : le compte a peut-être été créé » ; la liste est relue pour que la personne vérifie.
+- **409 `licence_indisponible`** : message sous le champ Licence, licences relues (le compteur a changé). Les autres 409 (aucun identifiant libre) : erreur dans le panneau.
+- **Après succès** : panneau fermé, message « Demande créée pour … » (avec « Fermer ce message »), recherche et filtre remis à zéro pour que la ligne soit visible, ligne en évidence 30 s (fond, liseré, « (nouvelle demande) » pour les lecteurs d'écran). Si Entra n'a pas encore répliqué le compte, la liste est relue toutes les 5 s, 6 fois au plus, jusqu'à le voir.
+- **Avertissement `manager_non_affecte`** : le message reste affiché jusqu'à fermeture, avec « Ne renvoyez pas la demande, cela créerait un doublon ».

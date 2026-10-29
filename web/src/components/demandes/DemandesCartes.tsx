@@ -13,9 +13,17 @@ export function DemandesCartes(lignes: PropsLignes) {
       {demandes.map((d) => {
         const poste = [d.poste, d.service].filter(Boolean).join(' · ');
         return (
-          <li key={d.id} className="space-y-1.5 rounded-lg border bg-card p-3 text-card-foreground">
+          <li
+            key={d.id}
+            id={`demande-${d.id}`}
+            data-nouvelle={lignes.surlignee === d.id || undefined}
+            className={`space-y-1.5 rounded-lg border p-3 text-card-foreground ${lignes.surlignee === d.id ? 'border-ring bg-accent ring-2 ring-ring/40' : 'bg-card'}`}
+          >
             <div className="flex items-start justify-between gap-2">
-              <p className="min-w-0 font-medium break-words">{d.nom}</p>
+              <p className="min-w-0 font-medium break-words">
+                {d.nom}
+                {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
+              </p>
               <StatutBadge statut={d.statut} />
             </div>
             <p className="text-sm text-muted-foreground">{poste || 'Poste non renseigné'}</p>
