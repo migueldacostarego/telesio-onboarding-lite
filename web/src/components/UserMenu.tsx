@@ -27,8 +27,9 @@ export function UserMenu({ user }: { user: Moi }) {
   // Toujours affiché, même sans droit : le badge dit le rôle du jeton, il n'en déduit rien.
   const roles = user.roles;
   return (
-    // Non modal : le mode modal injecte un <style> à l'exécution (verrouillage du défilement), bloqué par la CSP.
-    <DropdownMenu modal={false}>
+    // Modal (défaut de Radix) : le verrouillage du défilement crée un <style> à l'exécution, autorisé par le nonce de la CSP
+    // (lib/nonce.ts, posé avant le rendu).
+    <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`Menu utilisateur, ${nom}${roles.length ? `, ${roles.join(', ')}` : ''}`}
         className="flex items-center gap-2 rounded-md p-1 pr-2 outline-none hover:bg-primary-foreground/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-foreground data-[state=open]:bg-primary-foreground/10"

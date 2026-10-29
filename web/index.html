@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Remplacé par Express à chaque requête (nonce de la CSP, voir src/routes/web.ts) : lu par src/lib/nonce.ts avant le rendu. -->
+    <meta name="csp-nonce" content="__CSP_NONCE__" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Telesio Onboarding</title>
   </head>

@@ -3,8 +3,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { App } from '@/App';
+import { appliquerNonce } from '@/lib/nonce';
 import { createQueryClient } from '@/lib/query';
 import './index.css';
+
+// Avant tout rendu : les <style> créés à l'exécution par Radix (menus et fenêtres modaux) portent le nonce de la CSP.
+appliquerNonce();
 
 const queryClient = createQueryClient();
 const root = document.getElementById('root');

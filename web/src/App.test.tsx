@@ -1,8 +1,10 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { setNonce } from 'get-nonce';
 import { describe, expect, it, vi } from 'vitest';
 import { api } from '@/lib/api';
+import { appliquerNonce } from '@/lib/nonce';
 import { LOGOUT_URL } from '@/lib/auth';
 import { AUCUN_DROIT, CAMILLE, DROITS_DIRECTION, DROITS_RH, lecturesSuivi, mockApi, mockFetch, renderApp, reply } from '@/test/helpers';
 
@@ -110,6 +112,28 @@ describe('en-tête et menu utilisateur', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
     expect(bouton).toHaveFocus();
+  });
+
+  it('menu modal : le <style> de verrouillage du défilement que Radix crée porte le nonce de la CSP', async () => {
+    document.head.insertAdjacentHTML('beforeend', '<meta name="csp-nonce" content="nonce-de-test-123">');
+    expect(appliquerNonce()).toBe('nonce-de-test-123');
+    connecte();
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByRole('button', { name: /Menu utilisateur/ }));
+    await screen.findByRole('menu');
+
+    // Radix (react-remove-scroll) a créé au moins une feuille, toujours avec le nonce : sans lui, la CSP la bloquerait.
+    const styles = [...document.head.querySelectorAll('style')];
+    expect(styles.length).toBeGreaterThan(0);
+    expect(styles.every((s) => s.getAttribute('nonce') === 'nonce-de-test-123')).toBe(true);
+    expect(document.body).toHaveAttribute('data-scroll-locked');
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(document.body).not.toHaveAttribute('data-scroll-locked');
+    document.head.querySelector('meta[name="csp-nonce"]')?.remove();
+    setNonce(undefined as unknown as string);
   });
 
   it('le menu s’ouvre aussi à la souris', async () => {
