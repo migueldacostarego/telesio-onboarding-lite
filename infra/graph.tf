@@ -11,8 +11,7 @@ locals {
     "User.Read.All",                            # manager, disponibilité de l'UPN
     "GroupMember.ReadWrite.All",                # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups (valideur group)
     "LicenseAssignment.Read.All",               # GET /subscribedSkus : licences disponibles
-    "UserAuthenticationMethod.ReadWrite.All",   # TAP (sensible) : à RETIRER (phase 2) une fois les deux rôles ci-dessous validés sur test
-    "UserAuthMethod-TAP.ReadWrite.All",         # lister, créer et supprimer le TAP (doc Graph : seul « ReadWrite.All » couvre la suppression)
+    "User-PasswordProfile.ReadWrite.All",       # mot de passe temporaire le jour J (passwordProfile, changement imposé à la 1re connexion)
     "UserAuthMethod-MicrosoftAuthApp.Read.All", # onboarding Terminé : Authenticator inscrit (GET /authentication/microsoftAuthenticatorMethods)
     "Sites.Selected",                           # un seul site, via le grant ci-dessous
   ]

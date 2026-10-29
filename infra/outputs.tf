@@ -27,7 +27,7 @@ output "license_extension" {
 }
 
 output "arrivants_group_id" {
-  description = "Groupe des arrivants (ARRIVANTS_GROUP_ID) : cible des politiques TAP et SSPR."
+  description = "Groupe des arrivants (ARRIVANTS_GROUP_ID) : cible de l'accès conditionnel qui impose Authenticator."
   value       = azuread_group.arrivants.object_id
 }
 

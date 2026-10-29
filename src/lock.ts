@@ -2,7 +2,7 @@ import { ServiceError } from './demandes';
 
 /**
  * Une seule action à la fois par clé (un compte, ou un acteur RH pour la création) : un double clic reçoit 409
- * au lieu de rejouer la même suite d'écritures Graph (deux TAP, deux comptes). En mémoire : valable tant que l'app
+ * au lieu de rejouer la même suite d'écritures Graph (deux mots de passe, deux comptes). En mémoire : valable tant que l'app
  * tourne sur une seule instance (B1 du POC) ; au-delà, il faudrait un verrou partagé.
  */
 export class KeyedLock {

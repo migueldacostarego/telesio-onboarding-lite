@@ -11,10 +11,6 @@ export interface Config {
   statusExtension?: string;
   /** Rôle d'application (Easy Auth) qui donne accès aux routes RH. */
   rhRole: string;
-  /** Durée de vie du TAP, en minutes (multi-usage), comptée à partir de son début. La politique TAP du tenant doit l'autoriser (durée maximale). */
-  tapLifetimeMinutes: number;
-  /** Délai avant que le TAP soit utilisable (startDateTime = maintenant + délai) : laisse Entra répliquer le TAP et le groupe. */
-  tapStartDelayMinutes: number;
   /** Fuseau qui définit « aujourd'hui » (jour J, date d'arrivée dans le passé). */
   timeZone: string;
   /** Faire confiance à l'en-tête d'identité Easy Auth (jamais sans Easy Auth, sauf dev local). */
@@ -27,7 +23,7 @@ export interface Config {
   licenses: LicenseOption[];
   /** Nom complet de l'attribut d'extension qui porte le skuId choisi : extension_<appId sans tirets>_licenceOnboarding. */
   licenseExtension?: string;
-  /** Groupe de sécurité des arrivants : ajouté à l'activation, retiré à Terminé. Cible des politiques TAP et SSPR du tenant. Absent : activation fermée (503). */
+  /** Groupe de sécurité des arrivants : ajouté à la validation, retiré à Terminé. Cible de l'accès conditionnel qui impose Authenticator. Absent : activation fermée (503). */
   arrivantsGroupId?: string;
   /** Extension qui porte la date d'activation : extension_<appId sans tirets>_activationOnboarding. Absente : activation fermée (503). */
   activationExtension?: string;
@@ -52,14 +48,6 @@ const GRAPH_ID_RE = /^[A-Za-z0-9!._,-]+$/;
 const EXTENSION_RE = /^extension_[0-9a-f]{32}_[A-Za-z0-9_]+$/i;
 
 const opt = (v: string | undefined): string | undefined => (v?.trim() ? v.trim() : undefined);
-
-function intIn(raw: string | undefined, name: string, def: number, min: number, max: number): number {
-  const v = opt(raw);
-  if (v === undefined) return def;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} invalide (entier entre ${min} et ${max})`);
-  return n;
-}
 
 /** LICENSES : tableau JSON [{ skuId, libelle, groupId }] ; GUID valides et uniques, libellé de 1 à 64 caractères. */
 function parseLicenses(raw: string | undefined): LicenseOption[] {
@@ -120,8 +108,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const folderPattern = opt(env.SHAREPOINT_FOLDER_PATTERN) ?? DEFAULT_FOLDER_PATTERN;
   const patternError = checkFolderPattern(folderPattern);
   if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
-  const tapLifetimeMinutes = intIn(env.TAP_LIFETIME_MINUTES, 'TAP_LIFETIME_MINUTES', 720, 10, 43200);
-  const tapStartDelayMinutes = intIn(env.TAP_START_DELAY_MINUTES, 'TAP_START_DELAY_MINUTES', 5, 0, 60);
   const arrivantsGroupRaw = opt(env.ARRIVANTS_GROUP_ID);
   if (arrivantsGroupRaw !== undefined && !GUID_RE.test(arrivantsGroupRaw)) throw new Error('ARRIVANTS_GROUP_ID invalide (attendu : GUID)');
   const activationExtension = opt(env.ENTRA_ACTIVATION_EXTENSION);
@@ -138,8 +124,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     upnDomain,
     statusExtension,
     rhRole: opt(env.RH_ROLE) ?? 'RH',
-    tapLifetimeMinutes,
-    tapStartDelayMinutes,
     timeZone,
     trustAuthHeaders: easyAuth || devBypass,
     direction: { type, objectId },

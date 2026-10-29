@@ -1,7 +1,8 @@
 import { todayIn } from './dates';
 import { ServiceError } from './demandes';
 import { step, type DirectionDeps } from './direction';
-import { DirectoryError, type OnboardingUser, type PendingDemande, type TapInfo, type TapResult } from './directory';
+import type { OnboardingUser, PendingDemande } from './directory';
+import { temporaryPassword } from './password';
 import type { MotifRegeneration } from './validation';
 
 export type ActivationDeps = Pick<DirectionDeps, 'config' | 'directory' | 'audit'>;
@@ -20,7 +21,7 @@ export interface OnboardingState {
 
 export interface ActivationItem extends PendingDemande {
   statut: 'Validé' | 'Actif';
-  /** activer : jour J atteint ; attendre : arrivée dans le futur ; regenerer : compte Actif, TAP à refaire (avec motif). */
+  /** activer : jour J atteint ; attendre : arrivée dans le futur ; regenerer : compte Actif, nouveau mot de passe temporaire (avec motif). */
   action: 'activer' | 'attendre' | 'regenerer';
   /** Comptes Actif seulement ; { verification: 'echec' } si la lecture Graph a échoué pour ce compte. */
   onboarding?: OnboardingState | { verification: 'echec' };
@@ -50,14 +51,11 @@ function activationConfig(deps: ActivationDeps): { groupId: string; activationEx
   return { groupId: arrivantsGroupId, activationExt: activationExtension };
 }
 
-/** Valide : utilisable maintenant, ou pas encore commencé (startDateTime dans le futur). Expired et OneTimeUsed ne le sont pas. */
-export const tapValide = (t: TapInfo): boolean => t.isUsable || t.methodUsabilityReason === 'NotYetValid';
-
-const tapExpireA = (startDateTime: string | null, lifetimeInMinutes: number | null): string | null => {
-  if (!startDateTime || lifetimeInMinutes === null) return null;
-  const start = Date.parse(startDateTime);
-  return Number.isFinite(start) ? new Date(start + lifetimeInMinutes * 60_000).toISOString() : null;
-};
+/**
+ * La remise du mot de passe temporaire met elle-même à jour lastPasswordChangeDateTime, quelques secondes après la date
+ * d'activation écrite juste avant. Seul un changement postérieur à cette marge compte comme le changement de l'arrivant.
+ */
+export const MARGE_REMISE_MS = 60_000;
 
 /**
  * Comptes Validé, et tous les Actif tant que l'onboarding n'est pas Terminé (avec l'état du mot de passe et d'Authenticator).
@@ -94,7 +92,7 @@ export async function listActivations(
 }
 
 /**
- * Mot de passe changé après l'activation (l'initial, aléatoire, date de la création du compte) ET Authenticator inscrit.
+ * Mot de passe changé par l'arrivant après la dernière remise (date d'activation + MARGE_REMISE_MS) ET Authenticator inscrit.
  * Compte activé avant l'extension d'activation : repli sur la date de création du compte.
  */
 export async function inspectOnboarding(deps: ActivationDeps, actor: string, id: string): Promise<OnboardingState> {
@@ -107,26 +105,17 @@ export async function inspectOnboarding(deps: ActivationDeps, actor: string, id:
   // Les formats diffèrent (millisecondes, décalage) : comparaison numérique, jamais de chaînes.
   const reference = Date.parse(progress.activation ?? progress.createdDateTime ?? '');
   const dernier = Date.parse(progress.lastPasswordChange ?? '');
-  const motDePasse = Number.isFinite(reference) && Number.isFinite(dernier) && dernier > reference;
+  const motDePasse = Number.isFinite(reference) && Number.isFinite(dernier) && dernier > reference + MARGE_REMISE_MS;
   return { motDePasse, authenticator, termine: motDePasse && authenticator };
 }
 
 export interface Activation {
   id: string;
   statut: 'Actif';
-  /** true : TAP recréé sur un compte déjà activé (« Régénérer », ou reprise d'une activation interrompue). */
+  /** true : nouveau mot de passe temporaire sur un compte déjà actif (« Régénérer »). */
   regeneration: boolean;
-  /** Visible une seule fois : à remettre en main propre, jamais tracé ni mis en cache. */
-  temporaryAccessPass: string;
-  lifetimeInMinutes: number;
-  startDateTime: string;
-  /** Fin de validité : début + durée. */
-  expireA: string | null;
-  isUsableOnce: boolean;
-  /** Délai avant que le TAP soit utilisable (« utilisable dans N minutes »). */
-  utilisableDansMinutes: number;
-  /** Fuseau d'affichage des heures (TZ_METIER). */
-  fuseau: string;
+  /** Visible une seule fois : à remettre en main propre, jamais tracé ni mis en cache. Changement imposé à la 1re connexion. */
+  motDePasseTemporaire: string;
 }
 
 async function loadUser(deps: ActivationDeps, actor: string, id: string): Promise<OnboardingUser> {
@@ -145,73 +134,30 @@ function conflict(deps: ActivationDeps, actor: string, user: OnboardingUser, id:
 }
 
 /**
- * Ordre fixe, sans deviner la raison d'un refus d'Entra (un seul TAP autorisé par compte) : les TAP existants sont
- * supprimés, puis le nouveau est créé. Si la création échoue ensuite, le compte n'a plus de TAP : la réponse 502
- * le dit (`tap: 'aucun'`) et RH réessaie. À l'activation, un TAP encore valide a déjà été refusé (409) en amont :
- * seuls des TAP expirés ou consommés sont supprimés ici.
+ * Date de remise (référence de « mot de passe changé par l'arrivant »), écrite AVANT la réinitialisation : la date que
+ * cette dernière pose (lastPasswordChangeDateTime) tombe donc après la référence, mais dans la marge MARGE_REMISE_MS.
+ * Puis mot de passe temporaire, changement imposé à la première connexion. Il n'est ni tracé ni conservé.
  */
-async function issueTap(deps: ActivationDeps, actor: string, id: string, now: Date, fail: Record<string, unknown>) {
-  const { config, directory, audit } = deps;
-  const existants = await step(deps, actor, 'tap_lecture', id, fail, () => directory.listTaps(id));
-  let removed = 0;
-  if (existants.length > 0) {
-    removed = await step(deps, actor, 'tap_suppression', id, fail, async () => {
-      for (const t of existants) {
-        try {
-          await directory.deleteTap(id, t.id);
-        } catch (err) {
-          // Déjà supprimé (ou remplacé) côté Entra : rien à faire.
-          if (err instanceof DirectoryError && err.kind === 'notFound') continue;
-          throw err;
-        }
-      }
-      return existants.length;
-    });
-    audit.track({ action: 'demande.tap_supprime', actor, outcome: 'ok', cible: id, nombre: removed });
-  }
-  const debut = new Date(now.getTime() + config.tapStartDelayMinutes * 60_000).toISOString();
-  const request = { lifetimeInMinutes: config.tapLifetimeMinutes, startDateTime: debut };
-  const tap: TapResult = await step(deps, actor, 'tap_creation', id, { ...fail, ...(removed > 0 ? { tap: 'aucun' } : {}) }, () =>
-    directory.createTap(id, request),
-  );
-
-  // Jamais la valeur du TAP : seulement qu'il a été créé, pour quelle durée et à partir de quand.
-  audit.track({
-    action: 'demande.tap_cree',
-    actor,
-    outcome: 'ok',
-    cible: id,
-    dureeMinutes: tap.lifetimeInMinutes,
-    debutDansMinutes: config.tapStartDelayMinutes,
-    usageUnique: tap.isUsableOnce,
-  });
-  const startDateTime = tap.startDateTime ?? debut;
-  return {
-    removed,
-    view: {
-      temporaryAccessPass: tap.temporaryAccessPass,
-      lifetimeInMinutes: tap.lifetimeInMinutes,
-      startDateTime,
-      expireA: tapExpireA(startDateTime, tap.lifetimeInMinutes),
-      isUsableOnce: tap.isUsableOnce,
-      utilisableDansMinutes: config.tapStartDelayMinutes,
-      fuseau: config.timeZone,
-    },
-  };
+async function issuePassword(deps: ActivationDeps, actor: string, id: string, now: Date, activationExt: string, fail: Record<string, unknown>) {
+  const { directory, audit } = deps;
+  await step(deps, actor, 'activation_date', id, fail, () => directory.setExtension(id, activationExt, now.toISOString()));
+  const motDePasseTemporaire = temporaryPassword();
+  await step(deps, actor, 'mot_de_passe', id, fail, () => directory.resetPassword(id, motDePasseTemporaire));
+  audit.track({ action: 'demande.mdp_temporaire', actor, outcome: 'ok', cible: id });
+  return motDePasseTemporaire;
 }
 
 /**
- * Validé, jour J atteint : compte activé, ajouté au groupe des arrivants, date d'activation écrite, TAP multi-usage
- * (utilisable dans TAP_START_DELAY_MINUTES), puis statut Actif.
- * Pas de nouveau TAP si un TAP valide existe (409) : Entra le remplacerait en silence et le code déjà remis serait perdu.
- * RH remplace un TAP valide par une régénération explicite (regenererTap). Reprise : un compte Validé déjà activé
- * dont le TAP a échoué est accepté ; si le TAP existe mais que le statut n'a pas été posé, passer par regenererTap.
+ * Validé, jour J atteint : compte activé, groupe des arrivants (déjà posé à la validation, rejoué sans effet ; cible de
+ * l'accès conditionnel qui impose Authenticator), mot de passe temporaire, puis statut Actif.
+ * Rejouable : après un échec en cours de route le compte reste Validé, et un nouvel « Activer » refait tout
+ * (le mot de passe éventuellement posé, jamais affiché, est remplacé).
  */
 export async function activerDemande(deps: ActivationDeps, actor: string, id: string, now: Date): Promise<Activation> {
   const { config, directory, audit } = deps;
   const { groupId, activationExt } = activationConfig(deps);
   const user = await loadUser(deps, actor, id);
-  const refuse = (raison: string, extra?: Record<string, unknown>) => conflict(deps, actor, user, id, raison, extra);
+  const refuse = (raison: string) => conflict(deps, actor, user, id, raison);
 
   if (user.statut === 'Terminé') refuse('onboarding_termine');
   if (user.statut === 'Actif') refuse('deja_actif');
@@ -220,54 +166,40 @@ export async function activerDemande(deps: ActivationDeps, actor: string, id: st
   if ((user.dateArrivee as string) > todayIn(config.timeZone, now)) refuse('date_arrivee_future');
 
   const fail = { statut: user.statut as string };
-  const existants = await step(deps, actor, 'tap_lecture', id, fail, () => directory.listTaps(id));
-  const valide = existants.find(tapValide);
-  if (valide) refuse('tap_valide', { expireA: tapExpireA(valide.startDateTime, valide.lifetimeInMinutes), fuseau: config.timeZone });
-
   if (!user.accountEnabled) {
     await step(deps, actor, 'activation_compte', id, fail, () => directory.setAccountEnabled(id, true));
     audit.track({ action: 'demande.compte_active', actor, outcome: 'ok', cible: id });
   }
-  // Le groupe porte la politique TAP : posé dès la validation, rejoué ici (sans effet si déjà membre) pour les comptes
-  // validés avant ce changement ou si l'ajout de la validation a été annulé à la main.
   await step(deps, actor, 'groupe_arrivants', id, fail, () => directory.addGroupMember(groupId, id));
   audit.track({ action: 'demande.arrivants_ajout', actor, outcome: 'ok', cible: id, groupe: groupId });
-  await step(deps, actor, 'activation_date', id, fail, () => directory.setExtension(id, activationExt, now.toISOString()));
 
-  const { view } = await issueTap(deps, actor, id, now, fail);
-  // Échec ici : 502 sans TAP dans la réponse ; le TAP existe mais son code n'a jamais été montré : RH régénère.
+  const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail);
+  // Échec ici : 502 sans mot de passe dans la réponse ; le compte reste Validé et RH clique à nouveau sur « Activer ».
   await step(deps, actor, 'statut', id, fail, () => directory.setExtension(id, config.statusExtension, 'Actif'));
   audit.track({ action: 'demande.activee', actor, outcome: 'ok', cible: id });
-  return { id, statut: 'Actif', regeneration: false, ...view };
+  return { id, statut: 'Actif', regeneration: false, motDePasseTemporaire };
 }
 
 /**
- * Régénération explicite par RH, avec un motif (code fixe) tracé : remplace le TAP existant, valide ou non.
- * Comptes Actif, ou Validé déjà activé (activation interrompue après la création du TAP : l'activation est alors menée à terme).
- * Interdite une fois l'onboarding Terminé.
+ * Nouveau mot de passe temporaire par RH (perdu, refusé), avec un motif (code fixe) tracé. Comptes Actif seulement ;
+ * interdit une fois l'onboarding Terminé. Remplace aussi un mot de passe déjà choisi par l'arrivant : il devra le
+ * changer de nouveau, et la référence de « mot de passe changé » repart de cette remise.
  */
-export async function regenererTap(deps: ActivationDeps, actor: string, id: string, motif: MotifRegeneration, now: Date): Promise<Activation> {
-  const { config, directory, audit } = deps;
+export async function regenererMotDePasse(deps: ActivationDeps, actor: string, id: string, motif: MotifRegeneration, now: Date): Promise<Activation> {
+  const { directory, audit } = deps;
   const { groupId, activationExt } = activationConfig(deps);
   const user = await loadUser(deps, actor, id);
   const refuse = (raison: string) => conflict(deps, actor, user, id, raison);
 
   if (user.statut === 'Terminé') refuse('onboarding_termine');
-  const interrompue = user.statut === 'Validé' && user.accountEnabled;
-  if (user.statut !== 'Actif' && !interrompue) refuse('statut');
+  if (user.statut !== 'Actif') refuse('statut');
   if (!user.accountEnabled) refuse('compte_desactive');
 
-  const fail = { statut: user.statut as string };
+  const fail = { statut: 'Actif' };
   await step(deps, actor, 'groupe_arrivants', id, fail, () => directory.addGroupMember(groupId, id));
-  const { view } = await issueTap(deps, actor, id, now, fail);
-  audit.track({ action: 'demande.tap_regenere', actor, outcome: 'ok', cible: id, motif });
-
-  if (interrompue) {
-    await step(deps, actor, 'activation_date', id, fail, () => directory.setExtension(id, activationExt, now.toISOString()));
-    await step(deps, actor, 'statut', id, fail, () => directory.setExtension(id, config.statusExtension, 'Actif'));
-    audit.track({ action: 'demande.activee', actor, outcome: 'ok', cible: id });
-  }
-  return { id, statut: 'Actif', regeneration: true, ...view };
+  const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail);
+  audit.track({ action: 'demande.mdp_regenere', actor, outcome: 'ok', cible: id, motif });
+  return { id, statut: 'Actif', regeneration: true, motDePasseTemporaire };
 }
 
 export interface Termine {
@@ -278,9 +210,9 @@ export interface Termine {
 }
 
 /**
- * Actif et onboarding complet (revérifié ici, jamais cru sur parole) : TAP supprimé, retrait du groupe des arrivants,
- * puis statut Terminé en dernier. Rejouable : un échec en cours de route laisse le compte Actif, et la reprise
- * refait les étapes (suppression sans effet s'il n'y a plus de TAP, retrait seulement si le compte est encore membre).
+ * Actif et onboarding complet (revérifié ici, jamais cru sur parole) : retrait du groupe des arrivants (fin de
+ * l'accès conditionnel propre aux arrivants), puis statut Terminé en dernier. Rejouable : un échec en cours de route
+ * laisse le compte Actif, et la reprise ne retire le compte du groupe que s'il en est encore membre.
  */
 export async function terminerOnboarding(deps: ActivationDeps, actor: string, id: string): Promise<Termine> {
   const { config, directory, audit } = deps;
@@ -295,13 +227,6 @@ export async function terminerOnboarding(deps: ActivationDeps, actor: string, id
   }
 
   const fail = { statut: 'Actif' };
-  const removed = await step(deps, actor, 'tap_suppression', id, fail, async () => {
-    const taps = await directory.listTaps(id);
-    for (const t of taps) await directory.deleteTap(id, t.id);
-    return taps.length;
-  });
-  if (removed > 0) audit.track({ action: 'demande.tap_supprime', actor, outcome: 'ok', cible: id, nombre: removed });
-
   // Retirer un non-membre échoue en 400 chez Graph : on ne retire que si le compte est encore dans le groupe.
   const retire = await step(deps, actor, 'groupe_retrait_arrivants', id, fail, async () => {
     if (!(await directory.isMemberOfGroup(id, groupId))) return false;

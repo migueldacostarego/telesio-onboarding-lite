@@ -100,7 +100,7 @@ describe('GET /api/demandes, valider, refuser', () => {
     expect([...h.ctx.graph.folders.keys()]).toEqual(['Martin Anna']);
     const logged = JSON.stringify(h.ctx.events);
     expect(h.ctx.events.map((e) => e.action)).toEqual(['licence.groupe_ajout', 'licence.attribuee', 'demande.arrivants_ajout', 'demande.validee', 'demande.dossier']);
-    // Groupe des arrivants (cible de la politique TAP) dès la validation : réplication acquise avant le jour J.
+    // Groupe des arrivants (cible de l’accès conditionnel Authenticator) dès la validation : réplication acquise avant le jour J.
     expect(h.ctx.graph.groups.get(ARRIVANTS_GROUP)?.has(id)).toBe(true);
     expect(h.ctx.events.every((e) => e.actor === DIR_ID)).toBe(true);
     for (const pii of ['Martin', 'Anna', 'sp.test']) expect(logged).not.toContain(pii);

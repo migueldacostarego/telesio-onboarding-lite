@@ -104,8 +104,8 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
   }
   const licence = await ensureLicense(deps, actor, id, option);
 
-  // Groupe des arrivants (cible de la politique TAP) dès la validation, et non à l'activation : l'appartenance a
-  // le temps de se répliquer avant le jour J. Sans risque, le compte reste désactivé jusqu'à l'activation.
+  // Groupe des arrivants (cible de l'accès conditionnel qui impose Authenticator) dès la validation, et non à
+  // l'activation : l'appartenance a le temps de se répliquer avant le jour J. Sans risque, le compte reste désactivé jusqu'à l'activation.
   // Avant le statut : un échec laisse la demande EnAttente, visible et revalidable par la direction.
   if (config.arrivantsGroupId) {
     const groupId = config.arrivantsGroupId;

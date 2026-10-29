@@ -1,8 +1,8 @@
 import type { LicenseOption } from './config';
 import { MAX_LOCAL_BASE, normalizePart, upnBase } from './upn';
 
-/** Motifs de régénération du TAP : codes fixes, tracés tels quels (un texte libre pourrait contenir un nom). */
-export const MOTIFS_REGENERATION = ['code_perdu', 'code_refuse', 'tap_expire', 'activation_interrompue', 'autre'] as const;
+/** Motifs de régénération du mot de passe temporaire : codes fixes, tracés tels quels (un texte libre pourrait contenir un nom). */
+export const MOTIFS_REGENERATION = ['code_perdu', 'code_refuse', 'autre'] as const;
 export type MotifRegeneration = (typeof MOTIFS_REGENERATION)[number];
 
 export interface DemandeInput {
@@ -85,7 +85,7 @@ export type MotifValidation = { ok: true; motif: string } | { ok: false; details
 
 export type RegenerationValidation = { ok: true; motif: MotifRegeneration } | { ok: false; details: Record<string, string> };
 
-/** Motif de régénération du TAP : l'un des codes fixes (tracé tel quel, jamais de texte libre). */
+/** Motif de régénération du mot de passe temporaire : l'un des codes fixes (tracé tel quel, jamais de texte libre). */
 export function validateRegeneration(body: unknown): RegenerationValidation {
   const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const motif = (MOTIFS_REGENERATION as readonly unknown[]).includes(b.motif) ? (b.motif as MotifRegeneration) : undefined;

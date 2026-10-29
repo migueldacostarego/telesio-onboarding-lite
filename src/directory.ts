@@ -79,26 +79,6 @@ export interface OnboardingUser {
   licence: string | null;
 }
 
-/** Réponse Graph réduite aux champs utiles ; le secret n'existe que dans cet objet, jamais dans un log. */
-export interface TapResult {
-  /** Identifiant du TAP créé (Graph le renvoie) : permet de ne pas supprimer le nouveau en nettoyant l'ancien. */
-  id?: string;
-  temporaryAccessPass: string;
-  lifetimeInMinutes: number;
-  startDateTime: string | null;
-  isUsableOnce: boolean;
-}
-
-/** TAP existant (liste Graph : jamais le secret). Un utilisateur n'en a qu'un. */
-export interface TapInfo {
-  id: string;
-  isUsable: boolean;
-  /** NotYetValid (début dans le futur), Expired, OneTimeUsed, etc. */
-  methodUsabilityReason: string | null;
-  startDateTime: string | null;
-  lifetimeInMinutes: number | null;
-}
-
 /** Données lues pour décider si l'onboarding est terminé. */
 export interface OnboardingProgress {
   /** lastPasswordChangeDateTime (création du mot de passe, ou dernier changement) ; null si absent. */
@@ -157,10 +137,8 @@ export interface Directory {
     hiredSince?: string,
   ): Promise<{ demandes: PendingDemande[]; tronque: boolean }>;
   setAccountEnabled(id: string, enabled: boolean): Promise<void>;
-  listTaps(userId: string): Promise<TapInfo[]>;
-  deleteTap(userId: string, tapId: string): Promise<void>;
-  /** TAP multi-usage (isUsableOnce false), utilisable à partir de startDateTime. */
-  createTap(userId: string, opts: { lifetimeInMinutes: number; startDateTime: string }): Promise<TapResult>;
+  /** Mot de passe temporaire : Entra impose son changement à la première connexion (forceChangePasswordNextSignIn). */
+  resetPassword(userId: string, password: string): Promise<void>;
   /** GET /users/{id}?$select=lastPasswordChangeDateTime,createdDateTime,<extension d'activation>. */
   getOnboardingProgress(userId: string, activationExt: string): Promise<OnboardingProgress>;
   /** GET /users/{id}/authentication/microsoftAuthenticatorMethods : au moins une inscription. */
@@ -437,16 +415,9 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async listTaps(userId: string): Promise<TapInfo[]> {
+  async resetPassword(userId: string, password: string): Promise<void> {
     try {
-      const res = await this.client.api(`/users/${userId}/authentication/temporaryAccessPassMethods`).get();
-      return ((res?.value ?? []) as Record<string, unknown>[]).map((m) => ({
-        id: m.id as string,
-        isUsable: m.isUsable === true,
-        methodUsabilityReason: typeof m.methodUsabilityReason === 'string' ? m.methodUsabilityReason : null,
-        startDateTime: typeof m.startDateTime === 'string' ? m.startDateTime : null,
-        lifetimeInMinutes: typeof m.lifetimeInMinutes === 'number' ? m.lifetimeInMinutes : null,
-      }));
+      await this.client.api(`/users/${userId}`).patch({ passwordProfile: { password, forceChangePasswordNextSignIn: true } });
     } catch (err) {
       throw wrap(err);
     }
@@ -466,32 +437,6 @@ export class GraphDirectory implements Directory {
     try {
       const res = await this.client.api(`/users/${userId}/authentication/microsoftAuthenticatorMethods`).get();
       return ((res?.value ?? []) as unknown[]).length > 0;
-    } catch (err) {
-      throw wrap(err);
-    }
-  }
-
-  async deleteTap(userId: string, tapId: string): Promise<void> {
-    try {
-      await this.client.api(`/users/${userId}/authentication/temporaryAccessPassMethods/${tapId}`).delete();
-    } catch (err) {
-      throw wrap(err);
-    }
-  }
-
-  async createTap(userId: string, opts: { lifetimeInMinutes: number; startDateTime: string }): Promise<TapResult> {
-    try {
-      const res = await this.client
-        .api(`/users/${userId}/authentication/temporaryAccessPassMethods`)
-        .post({ isUsableOnce: false, lifetimeInMinutes: opts.lifetimeInMinutes, startDateTime: opts.startDateTime });
-      // Le TAP n'est lisible qu'à la création ; on ne renvoie que les champs utiles.
-      return {
-        id: typeof res.id === 'string' ? res.id : undefined,
-        temporaryAccessPass: res.temporaryAccessPass as string,
-        lifetimeInMinutes: res.lifetimeInMinutes as number,
-        startDateTime: (res.startDateTime ?? null) as string | null,
-        isUsableOnce: res.isUsableOnce === true,
-      };
     } catch (err) {
       throw wrap(err);
     }

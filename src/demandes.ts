@@ -1,7 +1,7 @@
-import { randomInt } from 'node:crypto';
 import type { Audit } from './audit';
 import type { ReadyConfig } from './config';
 import { DirectoryError, graphFailureProps, type Directory } from './directory';
+import { randomPassword } from './password';
 import { upnBase, upnCandidate } from './upn';
 import type { DemandeInput } from './validation';
 
@@ -27,18 +27,6 @@ export class ServiceError extends Error {
 export const USAGE_LOCATION = 'FR';
 const MAX_UPN_ATTEMPTS = 20;
 const DEFAULT_RETRY_DELAYS = [500, 1500, 3000, 5000];
-
-function randomPassword(length = 32): string {
-  const sets = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789', '!#$%&*+-=?@_'];
-  const all = sets.join('');
-  const chars = sets.map((s) => s[randomInt(s.length)] as string);
-  while (chars.length < length) chars.push(all[randomInt(all.length)] as string);
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
-    [chars[i], chars[j]] = [chars[j] as string, chars[i] as string];
-  }
-  return chars.join('');
-}
 
 export interface DemandeCreee {
   id: string;

@@ -1,32 +1,27 @@
 # Réglages du tenant pour l'onboarding (à faire à la main)
 
-À faire avec un compte administrateur, rôle **Authentication Policy Administrator** au minimum, dans le centre d'administration Entra (https://entra.microsoft.com). Ces réglages concernent le tenant, pas le code : Terraform ne les pose pas (il faudrait donner à l'identité d'apply `Policy.ReadWrite.AuthenticationMethod`, un droit tenant très large). À refaire pour chaque tenant (test, dev, prod).
+Ces réglages se font avec un compte administrateur (au minimum **Conditional Access Administrator** et **Authentication Policy Administrator**), dans le centre d'administration Entra (https://entra.microsoft.com). Ils concernent le tenant, pas le code : Terraform ne les pose pas, car il faudrait donner à l'identité d'apply des droits tenant très larges (`Policy.ReadWrite.ConditionalAccess`, `Policy.ReadWrite.AuthenticationMethod`). Ils sont à refaire pour chaque tenant (test, dev, prod).
 
-**À ne pas déployer avant** : tant que la politique TAP n'accepte pas 720 minutes en multi-usage, Graph refuse le TAP de l'activation (la durée maximale par défaut est de 8 h).
+Ce qu'on obtient : le jour J, RH remet un **mot de passe temporaire**. À la première connexion, sur un PC ou sur n'importe quel service Microsoft, Entra **impose de changer ce mot de passe**, puis l'accès conditionnel **impose d'inscrire Microsoft Authenticator** avant d'aller plus loin. L'application considère l'onboarding comme terminé quand les deux sont faits.
 
 ## 0. Relever l'état actuel (avant de changer quoi que ce soit)
 
-L'état actuel de `telesiosandbox` n'a pas pu être lu depuis le CLI (403 sur `/policies/authenticationMethodsPolicy`). Notez, pour chacun des trois réglages ci-dessous, l'état et les cibles actuels. Seule la politique TAP est ciblée sur le groupe des arrivants ; Authenticator et SSPR sont ouverts à **tous les utilisateurs** (choix retenu), ce qui évite de perdre ces méthodes quand l'application retire la personne du groupe à `Terminé`.
+Pour chacun des réglages ci-dessous, notez l'état et les cibles actuels. Vérifiez surtout les **paramètres de sécurité par défaut** (Entra ID, Overview, Properties, « Manage security defaults ») : l'accès conditionnel est impossible tant qu'ils sont actifs.
 
-## 1. Créer le groupe des arrivants (Terraform)
+- En test : désactivez-les.
+- En prod : avant de les désactiver, créez des politiques d'accès conditionnel équivalentes (MFA pour tous, blocage de l'authentification héritée). Sinon, le tenant perd la MFA imposée à tous.
 
-Le groupe `sg-telesio-onboarding-<env>-arrivants` est créé par `terraform apply` ([infra/arrivants.tf](../infra/arrivants.tf)) ; il doit exister avant d'être ciblé. Relever son objectId (`terraform output arrivants_group_id`). L'application y ajoute chaque compte **dès la validation par la direction** (compte encore désactivé), pour que l'appartenance soit répliquée avant le jour J ; elle l'en retire à `Terminé`.
+## 1. Groupe des arrivants (Terraform)
 
-## 2. Politique Temporary Access Pass
+Le groupe `sg-telesio-onboarding-<env>-arrivants` est créé par `terraform apply` ([infra/arrivants.tf](../infra/arrivants.tf)). Relevez son objectId avec `terraform output arrivants_group_id`. L'application y ajoute chaque compte **dès la validation par la direction**, alors que le compte est encore désactivé : l'appartenance a ainsi le temps de se répliquer avant le jour J. Elle l'en retire à `Terminé`.
 
-Entra ID, Authentication methods, Policies, **Temporary Access Pass**.
+## 2. Droit de poser le mot de passe temporaire
 
-| Réglage | Valeur |
-| --- | --- |
-| Enable | Oui |
-| Target | Select groups : `sg-telesio-onboarding-<env>-arrivants` |
-| Minimum lifetime | 10 à 720 minutes (la valeur par défaut, 60, convient) |
-| **Maximum lifetime** | **720 minutes ou plus** (8 h par défaut : insuffisant pour 12 h) |
-| Default lifetime | 720 minutes |
-| **One-time use** | **Non** (le TAP de l'activation est multi-usage ; « Oui » forcerait l'usage unique et Graph le refuserait) |
-| Length | 8 (par défaut) |
+Terraform donne à l'identité managée la permission Graph `User-PasswordProfile.ReadWrite.All`. Si l'activation échoue à l'étape `mot_de_passe` avec `http: 403` (visible dans Application Insights, événement `demande.echec`), attribuez aussi un rôle à l'identité managée :
 
-Seuls les membres du groupe peuvent se connecter avec un TAP, même si Graph accepte d'en créer un pour n'importe quel compte.
+Entra ID, Roles and administrators, **Password Administrator**, Add assignments, puis choisissez l'identité `id-telesio-onboarding-<env>`.
+
+Ce rôle ne permet de réinitialiser que le mot de passe des comptes non administrateurs. C'est aussi un garde-fou : l'application ne peut pas prendre la main sur un compte privilégié.
 
 ## 3. Microsoft Authenticator
 
@@ -38,52 +33,48 @@ Entra ID, Authentication methods, Policies, **Microsoft Authenticator**.
 | Target | **Tous les utilisateurs** |
 | Authentication mode | Any |
 
-Tous les utilisateurs : l'application retire l'arrivant du groupe des arrivants à `Terminé` ; avec une cible limitée à ce groupe, la personne perdrait à ce moment la méthode que l'application vient de vérifier.
+Ciblez tous les utilisateurs : à `Terminé`, l'application retire l'arrivant du groupe des arrivants. Avec une cible limitée à ce groupe, la personne perdrait à ce moment la méthode qu'elle vient d'inscrire.
 
-## 4. Réinitialisation du mot de passe en libre-service (SSPR)
+## 4. Force d'authentification « Authenticator obligatoire »
 
-Entra ID, Password reset.
+Entra ID, Protection, Conditional Access, **Authentication strengths**, New authentication strength.
 
-| Page | Réglage | Valeur |
-| --- | --- | --- |
-| Properties | Self service password reset enabled | **All** (tous les utilisateurs) |
-| Authentication methods | Number of methods required to reset | **1** (l'arrivant n'a qu'Authenticator) |
-| Authentication methods | Methods available to users | Mobile app notification, Mobile app code |
-| Registration | Require users to register when signing in | **Oui** |
-| Registration | Days before users are asked to reconfirm | 180 (au choix) |
+| Réglage | Valeur |
+| --- | --- |
+| Name | Authenticator obligatoire |
+| Méthodes autorisées | **Password + Microsoft Authenticator (Push Notification)**, et **Microsoft Authenticator (Phone Sign-in)** |
 
-SSPR pour des comptes cloud exige Entra ID P1 (inclus dans Business Premium). L'inscription obligatoire fait que l'arrivant, connecté avec le TAP dans un navigateur, est redirigé vers l'inscription combinée (Authenticator). SSPR restant ouvert à tous, la personne peut toujours réinitialiser son mot de passe après `Terminé`.
+Aucune autre méthode n'est cochée (ni SMS, ni appel, ni TAP).
 
-**Attention** : « Require users to register when signing in » = Oui s'applique alors à **tous** les utilisateurs du tenant, pas seulement aux arrivants : chacun sera invité à inscrire ses méthodes à sa prochaine connexion. À annoncer avant de l'activer, surtout en prod.
+## 5. Accès conditionnel « Arrivants : Authenticator obligatoire »
 
-## 5. Inscription combinée et accès conditionnel
+Entra ID, Protection, Conditional Access, Policies, **New policy**.
 
-- L'inscription combinée (MFA et SSPR) est déjà active sur tous les tenants.
-- Si une politique d'accès conditionnel cible l'action « Register security information » ou impose une force d'authentification, vérifier qu'elle accepte le TAP pour la première inscription.
+| Réglage | Valeur |
+| --- | --- |
+| Users, Include | Select users and groups : `sg-telesio-onboarding-<env>-arrivants` |
+| Users, Exclude | Le ou les comptes d'urgence (break-glass) |
+| Target resources | **All resources** (anciennement All cloud apps) |
+| Grant | Grant access, **Require authentication strength** : `Authenticator obligatoire` |
+| Enable policy | **On** (ou Report-only le temps d'un premier essai) |
 
-## 6. Intune et Autopilot (hors de ce dépôt)
+Ne créez aucune politique qui bloque l'action « Register security information » pour ce groupe : l'arrivant doit pouvoir inscrire Authenticator juste après avoir changé son mot de passe.
 
-- Profil Autopilot **user-driven, Microsoft Entra join** (le TAP n'est pas pris en charge en hybride, ni sur les kiosques en self-deploying).
-- Activer **Web sign-in** (`EnableWebSignIn`, Policy CSP Authentication) : le fournisseur de connexion natif de Windows ne gère pas le TAP.
-- Un TAP multi-usage permet de le saisir une seconde fois pour Windows Hello for Business sans en redemander un.
+## 6. Ce qui n'est plus nécessaire
 
-## 7. Vérifier sur un compte de test
+- **Politique Temporary Access Pass** : l'application n'émet plus de TAP. Vous pouvez la désactiver, ou retirer le groupe des arrivants de ses cibles.
+- **SSPR** : il ne sert plus au parcours, car le changement de mot de passe se fait à la première connexion. Il reste utile pour les mots de passe oubliés plus tard. Si vous l'activez, ne mettez pas « Require users to register when signing in » à Oui sans prévenir : ce réglage s'applique à tout le tenant.
 
-1. Activer le compte depuis l'écran RH : le TAP s'affiche une fois, « utilisable dans 5 minutes ».
-2. Attendre 5 minutes, puis se connecter avec le TAP (https://mysignins.microsoft.com/security-info, ou OOBE Autopilot).
-3. Inscrire Microsoft Authenticator, puis réinitialiser le mot de passe par SSPR (https://aka.ms/sspr).
-4. Recharger l'écran RH : l'onboarding passe à terminé, le TAP est supprimé, le compte quitte le groupe des arrivants, le statut devient `Terminé`.
+## 7. Intune et Autopilot (hors de ce dépôt)
 
-Deux points que la documentation ne tranche pas et qu'il faut observer :
+- Profil Autopilot **user-driven, Microsoft Entra join**. En OOBE, la personne saisit son adresse et le mot de passe temporaire, le change, puis inscrit Authenticator (accès conditionnel).
+- Web sign-in n'est plus nécessaire : il servait au TAP.
 
-- Le TAP déclenche-t-il l'obligation de changer le mot de passe (`forceChangePasswordNextSignIn: true`) à la première connexion ? Le TAP ne permet pas de changer un mot de passe que l'on ne connaît pas (la doc l'indique), d'où le passage par SSPR.
-- Le lien « Réinitialiser le mot de passe » de l'écran de verrouillage Windows exige un réglage Intune (non vérifié ici) ; sinon utiliser https://aka.ms/sspr.
-- Le TAP n'est utilisable que 5 minutes après l'activation (`TAP_START_DELAY_MINUTES`) : une connexion plus tôt échoue, ce n'est pas un défaut.
+## 8. Vérifier sur un compte de test
 
-## Ordre de mise en œuvre
+1. Créez une demande (RH) pour un compte neuf avec la date d'arrivée du jour, faites-la valider (direction), puis activez-la depuis l'écran RH. Le mot de passe temporaire s'affiche une seule fois.
+2. Dans une fenêtre privée, connectez-vous sur https://myaccount.microsoft.com avec l'adresse et ce mot de passe. Si Entra le refuse, réessayez une à deux minutes plus tard (réplication).
+3. Attendu : Entra demande un **nouveau mot de passe**, puis demande d'**inscrire Microsoft Authenticator**, puis vous arrivez sur la page.
+4. Rechargez l'écran RH : l'onboarding passe à « Terminé », et le compte quitte le groupe des arrivants.
 
-1. Relever l'état actuel (section 0) ; cibles retenues : TAP sur le groupe des arrivants, Authenticator et SSPR pour tous.
-2. `terraform apply` (groupe des arrivants, extension `activationOnboarding`, rôles Graph granulaires).
-3. Réglages des sections 2 à 4.
-4. Déployer l'application, valider sur test (section 7).
-5. Phase 2 Terraform : retirer `UserAuthenticationMethod.ReadWrite.All` une fois la validation faite avec les deux rôles granulaires.
+Un point reste à observer : au point 3, l'inscription d'Authenticator est-elle bien proposée directement ? Elle doit l'être d'après la documentation, pour les comptes sans méthode qui satisfait la force d'authentification. Si Entra bloque au lieu de proposer l'inscription, passez la politique en Report-only et consultez les journaux de connexion (Sign-in logs, onglet Conditional Access).
