@@ -197,7 +197,7 @@ function showPassword(d, t) {
     el('div', { class: 'msg ok' },
       el('p', { text: 'Mot de passe temporaire pour ' + d.nom + ' : à remettre en main propre. Il ne sera plus affiché.' }),
       el('div', { class: 'mdp', text: t.motDePasseTemporaire }),
-      el('p', { text: 'À la première connexion (PC ou n’importe quel service Microsoft), la personne doit le changer, puis inscrire Microsoft Authenticator. S’il est refusé, réessayer dans une à deux minutes.' }),
+      el('p', { text: 'À la première connexion (PC ou n’importe quel service Microsoft), la personne doit inscrire Microsoft Authenticator, puis changer ce mot de passe. S’il est refusé, réessayer dans une à deux minutes.' }),
       el('button', { type: 'button', text: 'Masquer', onclick: () => box.replaceChildren() })));
 }
 function etat(d) {

@@ -2,7 +2,7 @@
 
 Ces réglages se font avec un compte administrateur (au minimum **Conditional Access Administrator** et **Authentication Policy Administrator**), dans le centre d'administration Entra (https://entra.microsoft.com). Ils concernent le tenant, pas le code : Terraform ne les pose pas, car il faudrait donner à l'identité d'apply des droits tenant très larges (`Policy.ReadWrite.ConditionalAccess`, `Policy.ReadWrite.AuthenticationMethod`). Ils sont à refaire pour chaque tenant (test, dev, prod).
 
-Ce qu'on obtient : le jour J, RH remet un **mot de passe temporaire**. À la première connexion, sur un PC ou sur n'importe quel service Microsoft, Entra **impose de changer ce mot de passe**, puis l'accès conditionnel **impose d'inscrire Microsoft Authenticator** avant d'aller plus loin. L'application considère l'onboarding comme terminé quand les deux sont faits.
+Ce qu'on obtient : le jour J, RH remet un **mot de passe temporaire**. À la première connexion, sur un PC ou sur n'importe quel service Microsoft, l'accès conditionnel **impose d'inscrire Microsoft Authenticator**, puis Entra **impose de changer ce mot de passe** avant d'aller plus loin. L'application considère l'onboarding comme terminé quand les deux sont faits.
 
 ## 0. Relever l'état actuel (avant de changer quoi que ce soit)
 
@@ -74,7 +74,7 @@ Ne créez aucune politique qui bloque l'action « Register security information 
 
 1. Créez une demande (RH) pour un compte neuf avec la date d'arrivée du jour, faites-la valider (direction), puis activez-la depuis l'écran RH. Le mot de passe temporaire s'affiche une seule fois.
 2. Dans une fenêtre privée, connectez-vous sur https://myaccount.microsoft.com avec l'adresse et ce mot de passe. Si Entra le refuse, réessayez une à deux minutes plus tard (réplication).
-3. Attendu : Entra demande un **nouveau mot de passe**, puis demande d'**inscrire Microsoft Authenticator**, puis vous arrivez sur la page.
+3. Attendu (constaté sur test le 2026-10-29) : Entra demande d'**inscrire Microsoft Authenticator**, puis un **nouveau mot de passe**, puis vous arrivez sur la page.
 4. Rechargez l'écran RH : l'onboarding passe à « Terminé », et le compte quitte le groupe des arrivants.
 
-Un point reste à observer : au point 3, l'inscription d'Authenticator est-elle bien proposée directement ? Elle doit l'être d'après la documentation, pour les comptes sans méthode qui satisfait la force d'authentification. Si Entra bloque au lieu de proposer l'inscription, passez la politique en Report-only et consultez les journaux de connexion (Sign-in logs, onglet Conditional Access).
+Vérifié sur test le 2026-10-29 : l'inscription d'Authenticator est proposée directement, et `User-PasswordProfile.ReadWrite.All` suffit (pas besoin du rôle Password Administrator). Le passage à « Terminé » peut prendre quelques minutes (propagation d'Entra). Si un jour Entra bloque au lieu de proposer l'inscription, passez la politique en Report-only et consultez les journaux de connexion (Sign-in logs, onglet Conditional Access).
