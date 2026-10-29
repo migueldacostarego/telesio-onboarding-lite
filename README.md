@@ -103,16 +103,40 @@ Application permissions accordées par Terraform ([infra/graph.tf](infra/graph.t
 | `GroupMember.ReadWrite.All` | Ajouter le compte au groupe de licence à la validation (retrait en cas de `CountViolation`), et au groupe des arrivants à la validation (retrait à `Terminé`). Couvre aussi `checkMemberGroups` (valideur de type `group`), ce qui remplace `GroupMember.Read.All`. **Sensible** : permet d'ajouter n'importe quel compte à n'importe quel groupe de sécurité du tenant qui n'est pas assignable à un rôle (donc d'en hériter les accès). Garde-fous dans l'app : seuls les groupes de `LICENSES` sont visés, seulement sur un compte d'onboarding désactivé au statut `EnAttente` ou `Validé`, validateur Direction, chaque ajout et retrait tracé. Un groupe assignable à un rôle resterait inaccessible (il exigerait `RoleManagement.ReadWrite.Directory`, volontairement non accordée). |
 | `LicenseAssignment.Read.All` | `GET /subscribedSkus` : lire `prepaidUnits.enabled` et `consumedUnits` pour la liste de licences de RH et pour refuser avant toute écriture. C'est le moindre privilège de cette route ; `Organization.Read.All` (plus large) n'est pas nécessaire. Un 403 transitoire peut apparaître plusieurs heures après l'attribution du rôle (propagation côté Graph, constaté sur test) : il disparaît sans autre action. L'état de licence du compte (`licenseAssignmentStates`) se lit avec `User.Read.All`. |
 
+## Front React (/app)
+
+Socle posé (étape 2 du front) : aucun écran n'est migré. `/app` affiche l'accueil (en-tête « Telesio Onboarding », un lien par écran) ; les écrans `/app/demande`, `/app/activation` et `/app/direction` sont des pages « à venir » qui renvoient vers les pages actuelles `/demande`, `/activation` et `/direction`, **toujours en service** jusqu'à leur migration.
+
+- **Code** : [web/](web/), un paquet npm à part (son `package-lock.json`, ses scripts). Vite 8, React 19, TypeScript strict, Tailwind CSS 4, shadcn/ui (style `radix-vega`, `components.json`), React Router (`basename="/app"`), TanStack Query. Tests : Vitest, Testing Library, jsdom.
+- **Build** : `npm run build` à la racine compile le serveur (`dist/`) puis le front dans `dist/web` (`web/vite.config.ts`, `base: '/app/'`, aucune ressource inlinée). Le paquet de déploiement (`dist`) l'emporte, `deploy.yml` vérifie que `dist/web/index.html` existe.
+- **Service** ([src/routes/web.ts](src/routes/web.ts), monté avant les pages-coquilles) : fichiers statiques sous `/app`, repli sur `index.html` pour les GET/HEAD sans extension (routes du front), 404 pour un fichier absent (jamais du HTML à la place d'un script), 503 si le front n'est pas construit. `index.html` en `no-store`, `assets/` (nom à empreinte) en `private, max-age=31536000, immutable`. Easy Auth protège `/app` comme le reste ; les droits restent vérifiés par `/api`.
+- **CSP de `/app`** : `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`. Ni nonce, ni `unsafe-inline`, ni CDN ; polices système. Contrôle Chrome headless (`/app/`, `/app/demande`, route inconnue) : aucun message en console, aucun élément `<style>` dans le DOM. Pas de toasts : `sonner` injecte un `<style>` à l'exécution, bloqué par cette CSP, il a été retiré. Les messages (erreurs, avertissements) s'affichent dans l'écran ou la ligne concernés avec le composant `alert` ; [web/src/components/ApiErrorAlert.tsx](web/src/components/ApiErrorAlert.tsx) en affiche une `ApiError`. Toute bibliothèque qui crée un `<style>` ou un `<script>` à l'exécution est à écarter. Les pages actuelles gardent leur CSP à nonce.
+- **Client API** ([web/src/lib/api.ts](web/src/lib/api.ts)) : fetch same-origin, JSON, écritures en `Content-Type: application/json` (corps `{}` par défaut, sinon 415). Un succès est `{ kind: 'ok' }`. **202** : `{ kind: 'en_cours', data: { message, code, etape } }` (pas une erreur, alors que `fetch` le range dans `ok`). Les autres statuts lèvent `ApiError` avec `kind` (`invalide` 400/415, `non_autorise` 401/403, `introuvable` 404, `conflit` 409, `amont` 502, `indisponible` 503, `serveur`, `reseau` si fetch échoue, `session` si la réponse n'est pas du JSON ou si Easy Auth redirige) et les champs du back : `code`, `etape`, `raison`, `details`, `id`.
+- **TanStack Query** ([web/src/lib/query.ts](web/src/lib/query.ts)) : une lecture est rejouée deux fois au plus, seulement sur `reseau`, `amont` ou `indisponible`. Une écriture n'est jamais rejouée et son résultat n'est pas gardé en cache (`gcTime: 0` : le mot de passe temporaire ne survit pas à l'écran qui l'affiche).
+- **Composants shadcn** : `alert`, `badge`, `button`, `card`, `field`, `input`, `label`, `separator`, `table`. **`form` n'existe plus dans le registre shadcn** (entrée vide pour ce style) : `field` le remplace. `react-hook-form` et zod ne sont pas installés : ils viendront avec l'écran Demande. Le paquet `shadcn` n'est **pas** une dépendance (ses avis `npm audit` : `body-parser`, `deepmerge`). Pour ajouter un composant, lancer la CLI épinglée :
+
+  ```bash
+  cd web && npm_config_before=<date du jour - 7 j> npm_config_save_exact=true npx shadcn@4.22.1 add <composant>
+  ```
+
+  puis contrôler le diff, `grep '[\^~]' package.json` (aucun résultat attendu) et `npm audit`. Les variantes `data-*` de `shadcn/tailwind.css` utilisées par les composants sont recopiées dans `web/src/index.css` ; ses utilitaires (`scroll-fade`, `shimmer`, `no-scrollbar`, keyframes `accordion`) n'y sont pas : les ajouter si un composant en a besoin.
+- **Paquet `cn`** (les composants importent `cn` depuis `cn`, remplaçant de `clsx` + `tailwind-merge`) : vérifié le 2026-10-29 qu'il appartient à shadcn. Le dépôt `shadcn-ui/cn` est dans la même organisation GitHub (id 139895814) que `shadcn-ui/ui` ; `npm view cn` donne pour seul mainteneur `shadcn <m@shadcn.com>` et la provenance npm (SLSA) atteste la publication depuis le workflow `release.yml` de `shadcn-ui/cn` ; le paquet `shadcn` lui-même en dépend ; environ 17 millions de téléchargements par semaine. Réserve : le nom `cn` existait depuis 2013 (versions 0.1.x d'un autre auteur) et les versions de shadcn datent de septembre 2026 (0.x, version la plus récente publiée le 2026-10-16). Pour revenir au standard : `lib/utils.ts` avec `clsx` et `tailwind-merge`, et `import { cn } from "@/lib/utils"` dans `components/ui/*`.
+- **Charte graphique** : la charte Telesio n'est pas dans le dépôt. Seul le logo ([web/src/assets/telesio.svg](web/src/assets/telesio.svg), téléchargé depuis telesio.fr le 2026-10-29, couleurs d'origine) est en place, dans l'en-tête. Son texte est `#F0F5FF` (quasi blanc) : l'en-tête a donc le fond sombre neutre `bg-primary` de shadcn. Le fichier ne contient que deux éléments `svg` et `path`, ni script, ni lien externe, ni attribut `on*`, `href` ou `style`. Les autres jetons (couleurs, rayons) et la police système restent ceux, neutres, de shadcn (`web/src/index.css`), à remplacer quand la charte sera fournie.
+- **Dépendances** : versions exactes (`web/.npmrc`, `save-exact`). Les 373 paquets du `package-lock.json` (transitives comprises) sont publiés depuis plus de 7 jours (installation avec `--before=2026-10-22`, puis relevé des dates dans le champ `time` du registre). `npm audit --prefix web` : 0 avis.
+
 ## Développement
 
 Prérequis : Node.js 22 LTS (`.nvmrc`).
 
 ```bash
 npm ci
-npm run build   # compile vers dist/
-npm run lint
-npm test
-npm run dev     # build + démarre sur le port 3000
+npm ci --prefix web   # dépendances du front (web/)
+npm run build         # serveur vers dist/, front vers dist/web
+npm run lint          # serveur puis front
+npm run typecheck     # serveur puis front
+npm test              # serveur puis front
+npm run dev           # build + démarre sur le port 3000 (front sous /app)
+npm run dev --prefix web   # front seul avec rechargement à chaud, /api relayée vers le port 3000
 ```
 
 ## Infra et déploiement (Terraform)
@@ -195,9 +219,9 @@ L'environnement `test` utilise `false` ([envs/test.tfvars](infra/envs/test.tfvar
 
 ### CI/CD (OIDC, actions épinglées par SHA)
 
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) : build, lint, tests de l'app.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) : build, lint, tests de l'app et du front (`web/`).
 - [.github/workflows/infra-plan.yml](.github/workflows/infra-plan.yml) : sur PR touchant `infra/`, `fmt`, `validate` et `plan` de dev (et de prod dès que `AZURE_SUBSCRIPTION_ID_PROD` est renseignée) avec l'identité de lecture seule.
-- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) : sur `main`, build de l'app, puis `dev` (apply automatique puis déploiement), puis `prod` (même chose, après approbation de l'environnement ; ignoré tant que `AZURE_SUBSCRIPTION_ID_PROD` est vide). La logique commune est dans [release-environment.yml](.github/workflows/release-environment.yml) ; le déploiement termine par un contrôle de `/healthz`.
+- [.github/workflows/deploy.yml](.github/workflows/deploy.yml) : sur `main`, build de l'app (front compris, dans `dist/web`), puis `dev` (apply automatique puis déploiement), puis `prod` (même chose, après approbation de l'environnement ; ignoré tant que `AZURE_SUBSCRIPTION_ID_PROD` est vide). La logique commune est dans [release-environment.yml](.github/workflows/release-environment.yml) ; le déploiement termine par un contrôle de `/healthz`.
 
 L'apply de prod re-planifie après approbation : relire le plan de la PR avant de merger.
 
@@ -213,4 +237,5 @@ Règle : correctif appliqué seulement si la version corrigée a plus de 7 jours
 
 - `body-parser` (via express), DoS sur corps compressé : corrigé en 2.4.0, publiée le 2026-10-22, donc **non appliqué**. Atténuation en place : les parseurs sont en `inflate: false` (corps compressé refusé, 415).
 - `@azure/msal-node` (via `@azure/identity`), fuite de paramètres dans le flux « authorization code » : corrigé en 7.1.0 (publiée le 2026-10-13, assez ancienne), mais `@azure/identity@4.14.0` exige `^6.0.0`. Le correctif demanderait un `overrides` vers une version majeure non prévue par identity, ou `--force` qui rétrograde identity : **non appliqué**. Exposition probable limitée : l'app s'authentifie par identité managée, pas par flux interactif (à confirmer à la lecture de l'avis).
-- À relancer quand `@azure/identity` accepte msal-node 7.x et quand body-parser 2.4.0 aura 7 jours.
+- `web/` : `npm audit --prefix web` ne signale rien. Le paquet `shadcn` (qui portait 4 avis : `body-parser`, `deepmerge`) a été retiré des dépendances ; la CLI s'utilise par `npx shadcn@4.22.1`.
+- À relancer quand `@azure/identity` accepte msal-node 7.x et quand body-parser 2.4.0 aura 7 jours (racine ; `web/` à relancer à chaque ajout de dépendance).

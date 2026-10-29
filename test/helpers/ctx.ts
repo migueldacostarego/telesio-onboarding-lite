@@ -41,7 +41,7 @@ export const principal = (roles: string[] = [], oid = RH_ID) =>
     }),
   ).toString('base64');
 
-export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean; now?: () => Date } = {}) {
+export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean; now?: () => Date; webDir?: string } = {}) {
   const graph = new FakeGraph();
   graph.skus.set(LICENSE_SKU, { enabled: 5, consumed: 1 });
   graph.skus.set(LICENSE_SKU_B, { enabled: 3, consumed: 0 });
@@ -76,7 +76,7 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
     managerRetryDelaysMs: [0, 0],
     licensePollDelaysMs: [0, 0, 0],
     sleep: async () => {},
-  });
+  }, { webDir: opts.webDir });
   return { graph, events, app };
 }
 
