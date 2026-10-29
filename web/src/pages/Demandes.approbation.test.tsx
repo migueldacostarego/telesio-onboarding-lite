@@ -36,14 +36,14 @@ describe('Valider', () => {
     await waitFor(() => expect(lecturesSuivi(fetchMock)).toBe(2));
     const ligne = await screen.findByRole('row', { name: /Éloïse Dupont/ });
     await waitFor(() => expect(within(ligne).getByText('Validée')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /de Éloïse Dupont/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Valider|Refuser) la demande de Éloïse Dupont/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('ne propose que ce que l’API propose : rien sans `actions` (créateur de la demande, droit manquant)', async () => {
     monter({ demandes: [enAttente(ELOISE, { actions: [] }), enAttente(HUGO)], ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
-    expect(screen.queryByRole('button', { name: /de Éloïse Dupont/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(Valider|Refuser) la demande de Éloïse Dupont/ })).not.toBeInTheDocument();
     expect(valider(HUGO.nom)).toBeInTheDocument();
   });
 
@@ -62,7 +62,7 @@ describe('Valider', () => {
 
     etat.demandes = [valide(ELOISE), enAttente(HUGO)];
     await act(async () => finir(reply(200, {})));
-    await waitFor(() => expect(screen.queryByRole('button', { name: /de Éloïse Dupont/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^(Valider|Refuser) la demande de Éloïse Dupont/ })).not.toBeInTheDocument());
   });
 
   it('deux lignes en même temps : chacune garde son état', async () => {
@@ -101,7 +101,7 @@ describe('compte pas encore répliqué (404 sur valider)', () => {
     await avancer(1_500);
     expect(ecritures(fetchMock)).toHaveLength(2);
     await waitFor(() => expect(screen.queryByText('Compte en cours de création')).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.queryByRole('button', { name: /de Éloïse Dupont/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^(Valider|Refuser) la demande de Éloïse Dupont/ })).not.toBeInTheDocument());
   });
 
   it('abandonne après une minute et six essais : ApiErrorAlert dans la ligne, boutons rendus, plus aucun essai', async () => {

@@ -8,12 +8,18 @@ import type { Demande } from '@/lib/suivi';
 import { Demandes } from '@/pages/Demandes';
 import { mockApi, reply } from '@/test/helpers';
 
+// Requêtes fictives encore en attente à la fin d'un test : libérées, sinon TanStack (mutation sans observateur, gcTime 0) réarme un
+// minuteur de 0 ms en boucle et le suivant, aux minuteries simulées, ne rend plus la main.
+const aLiberer: Array<() => void> = [];
+
 /** À appeler en tête d'un fichier de test : temps simulé (le temps réel continue de couler), date figée au 28 octobre 2026. */
 export function tempsSimule() {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date(2026, 9, 28, 12, 0, 0) });
   });
-  afterEach(() => {
+  afterEach(async () => {
+    aLiberer.splice(0).forEach((liberer) => liberer());
+    await Promise.resolve();
     vi.useRealTimers();
   });
 }
@@ -37,7 +43,15 @@ export const actif = (p: { id: string; nom: string }, o: Partial<Demande> = {}):
 /** Fausse API avec une liste que les tests modifient : `suivi` relit toujours `etat.demandes`. */
 export function monter(o: { demandes?: Demande[]; moi?: object; lire?: (url: string) => Response | Promise<Response> | undefined; ecrire: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>; surSession?: () => void }) {
   const etat = { demandes: o.demandes ?? [enAttente(ELOISE), enAttente(HUGO)] };
-  const fetchMock = mockApi({ moi: o.moi, suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), lire: o.lire, ecrire: o.ecrire });
+  const ecrire = (url: string, corps: Record<string, unknown>) => {
+    const r = o.ecrire(url, corps);
+    if (!(r instanceof Promise)) return r;
+    return new Promise<Response>((resolve, reject) => {
+      aLiberer.push(() => resolve(reply(200, {})));
+      r.then(resolve, reject);
+    });
+  };
+  const fetchMock = mockApi({ moi: o.moi, suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), lire: o.lire, ecrire });
   const client = createQueryClient(o.surSession);
   const vue = render(
     <QueryClientProvider client={client}>

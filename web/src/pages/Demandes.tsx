@@ -5,6 +5,7 @@ import { Actualisation } from '@/components/demandes/Actualisation';
 import { Barre } from '@/components/demandes/Barre';
 import { DialogueActivation } from '@/components/demandes/DialogueActivation';
 import { DialogueMotDePasse } from '@/components/demandes/DialogueMotDePasse';
+import { PanneauDetail } from '@/components/demandes/PanneauDetail';
 import { NouvelleDemande } from '@/components/demandes/NouvelleDemande';
 import { DialogueRefus } from '@/components/demandes/DialogueRefus';
 import { DialogueRegeneration } from '@/components/demandes/DialogueRegeneration';
@@ -61,9 +62,14 @@ export function Demandes() {
   // La demande n'offre plus l'action (traitée ailleurs, ou disparue) : la boîte se ferme, sauf si l'action est déjà partie.
   const ouverte = cible !== null && demandeCible && (demandeCible.actions.includes(cible.action) || cibleEnCours) ? demandeCible : undefined;
   const boite = (action: Exclude<ActionNom, 'valider'>) => (cible?.action === action ? ouverte : undefined);
+  // Panneau de détail : une demande par son id (état de la page : il survit aux filtres, au tri et au passage tableau / cartes).
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const detail = detailId === null ? undefined : donnees?.demandes.find((d) => d.id === detailId);
+  const surAction = (d: Demande, action: ActionNom) => (action === 'valider' ? actions.valider(d.id) : setCible({ action, id: d.id }));
   const lignes = {
     etats: actions.etats,
-    onAction: (d: Demande, action: ActionNom) => (action === 'valider' ? actions.valider(d.id) : setCible({ action, id: d.id })),
+    onOuvrir: (d: Demande) => setDetailId(d.id),
+    onAction: surAction,
     onFermer: (d: Demande) => actions.fermer(d.id),
     surlignee: idNouvelle || null,
   };
@@ -200,6 +206,13 @@ export function Demandes() {
         </>
       )}
 
+      <PanneauDetail
+        demande={detail}
+        etat={detail ? actions.etats[detail.id] : undefined}
+        onAction={(action) => detail && surAction(detail, action)}
+        onFermerMessage={() => detail && actions.fermer(detail.id)}
+        onFermer={() => setDetailId(null)}
+      />
       <DialogueRefus
         demande={boite('refuser')}
         enCours={cibleEnCours}

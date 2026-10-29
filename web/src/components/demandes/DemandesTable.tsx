@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
-import { actionsDe, aUnMessage, type PropsLignes } from '@/components/demandes/lignes';
+import { actionsDe, aUnMessage, occupee, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { formatArrivee, type Tri } from '@/lib/suivi';
 
 const COLONNES = 7;
@@ -38,9 +38,23 @@ export function DemandesTable({ tri, ...lignes }: PropsLignes & { tri: Tri }) {
         <TableBody>
           {demandes.map((d) => (
             <Fragment key={d.id}>
-              <TableRow id={`demande-${d.id}`} data-nouvelle={lignes.surlignee === d.id || undefined} className={lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : undefined}>
+              <TableRow
+                id={`demande-${d.id}`}
+                data-nouvelle={lignes.surlignee === d.id || undefined}
+                className={`${occupee(lignes, d) ? '' : 'cursor-pointer'} ${lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : ''}`}
+                onClick={occupee(lignes, d) ? undefined : (e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
+              >
                 <TableCell className="font-medium">
-                  {d.nom}
+                  {/* Le nom est le bouton accessible (clavier, lecteur d'écran) ; la ligne entière est cliquable à la souris. */}
+                  <button
+                    type="button"
+                    disabled={occupee(lignes, d)}
+                    aria-label={`Voir le détail de la demande de ${d.nom}`}
+                    onClick={() => lignes.onOuvrir(d)}
+                    className="rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 disabled:no-underline"
+                  >
+                    {d.nom}
+                  </button>
                   {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
                 </TableCell>
                 <TableCell>{d.poste ?? ABSENT}</TableCell>

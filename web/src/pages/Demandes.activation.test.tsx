@@ -28,7 +28,7 @@ describe('Activer', () => {
   it('confirmation d’abord (rien n’est envoyé), Annuler ferme sans écrire', async () => {
     const { fetchMock, user } = monter({ demandes: aValider, ecrire: () => remise() });
     await screen.findByText('Hugo Lambert');
-    expect(screen.queryByRole('button', { name: /Activer le compte de Hugo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Activer le compte de Hugo/ })).not.toBeInTheDocument();
 
     await user.click(activer(ELOISE.nom));
     const boite = await screen.findByRole('dialog', { name: 'Activer le compte de Éloïse Dupont ?' });
@@ -70,6 +70,20 @@ describe('Activer', () => {
     // La liste est relue : la ligne passe à Activée, la boîte reste ouverte.
     await waitFor(() => expect(lecturesSuivi(fetchMock)).toBeGreaterThanOrEqual(2));
     expect(screen.getByText(MOT_DE_PASSE)).toBeInTheDocument();
+  });
+
+  it('requête longue : aucun minuteur de 0 ms en boucle (mutation sans observateur), et plus rien en cache à la fin', async () => {
+    let finir!: (r: Response) => void;
+    const { client, user } = monter({ demandes: aValider, ecrire: () => new Promise<Response>((r) => (finir = r)) });
+    await screen.findByText('Hugo Lambert');
+    await user.click(activer(ELOISE.nom));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
+    expect(client.getMutationCache().getAll()).toHaveLength(1);
+    await avancer(10_000); // se bloquerait si TanStack réarmait un minuteur de 0 ms sans fin
+    expect(vi.getTimerCount()).toBeLessThan(20);
+    await act(async () => finir(remise()));
+    await screen.findByText(MOT_DE_PASSE);
+    expect(client.getMutationCache().getAll()).toHaveLength(0);
   });
 
   it('la boîte ne se ferme ni par Échap ni par un clic à côté (pas de perte par accident), seulement par Fermer ; plus rien ensuite', async () => {

@@ -71,8 +71,17 @@ export function useActionsDemandes(demandes: readonly Demande[] | undefined, { o
   const vivant = useRef(true);
   const { mutateAsync } = useMutation({ mutationFn: ecrire });
   // Activer et régénérer renvoient le mot de passe temporaire : la mutation n'a aucun observateur (`useMutation` garderait la
-  // dernière réponse dans son résultat) et `gcTime: 0` la retire du cache dès qu'elle se termine.
-  const executerSensible = (appel: Appel) => queryClient.getMutationCache().build(queryClient, { mutationFn: ecrire }).execute(appel);
+  // dernière réponse dans son résultat) et sort du cache dès qu'elle se termine (`remove`), sans attendre un délai. `gcTime:
+  // Infinity` pendant l'attente : avec 0, TanStack réarmerait un minuteur de 0 ms en boucle tant que la requête est en cours.
+  const executerSensible = async (appel: Appel) => {
+    const cache = queryClient.getMutationCache();
+    const mutation = cache.build(queryClient, { mutationFn: ecrire, gcTime: Infinity });
+    try {
+      return await mutation.execute(appel);
+    } finally {
+      cache.remove(mutation);
+    }
+  };
   const surRemise = useRef(onRemise);
   useEffect(() => {
     surRemise.current = onRemise;
