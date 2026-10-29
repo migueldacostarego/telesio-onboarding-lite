@@ -4,10 +4,17 @@
 MVP d'onboarding : RH saisit une demande → la direction valide → compte Entra (désactivé, attributs natifs) + dossier SharePoint → RH active le jour J (mot de passe temporaire remis en main propre ; changement imposé par Entra, Authenticator imposé par l'accès conditionnel). Pas de base de données : l'état vit dans l'extension Entra `statutOnboarding`. Détails : README.md.
 
 ## État
-- Étapes 1 à 6 fusionnées sur main (licence par groupe : PR #3). En cours sur `feat/tap-autopilot` : étape 7 (activation le jour J, mot de passe temporaire à changer à la 1re connexion, régénération avec motif, Terminé = mot de passe changé + Authenticator inscrit ; le TAP a été abandonné) et les corrections de l'audit du parcours (groupe des arrivants posé à la validation, verrou par compte, statut posé dans `POST /users`).
-- Testé à la main sur test (2026-10-29) : à la 1re connexion, Authenticator puis changement du mot de passe imposés, passage à Terminé ; `User-PasswordProfile.ReadWrite.All` suffit. Réglages du tenant : docs/reglages-tenant-onboarding.md.
-- Envs test et dev déployés (tenant telesiosandbox, abonnement telesio-test). Prod inactive tant qu'il n'y a pas de vrai tenant.
+- Étapes 1 à 7 fusionnées sur main (licence par groupe : PR #3 ; activation par mot de passe temporaire et corrections du parcours : PR #5 ; droit Group.Read.All de l'identité d'apply : PR #4). Le TAP a été abandonné.
+- Testé à la main sur test (2026-10-29) : à la 1re connexion, Authenticator puis changement du mot de passe imposés, passage à Terminé ; `User-PasswordProfile.ReadWrite.All` suffit. Réglages du tenant (à refaire à la main par tenant) : docs/reglages-tenant-onboarding.md.
+- Envs test et dev déployés (tenant telesiosandbox, abonnement telesio-test). test s'applique à la main (`terraform apply` hors CI) ; dev par la CI à chaque fusion sur main. Dev n'a pas de site SharePoint dédié (validation en 503) : tester le parcours complet sur test. Prod inactive tant qu'il n'y a pas de vrai tenant.
 - Stack : Node/TypeScript, App Service, Terraform (infra/), déploiement GitHub Actions en OIDC.
+- Avant la prod : le statut est une extension que tout administrateur d'utilisateurs peut écrire ; restreindre l'app (unité administrative à gestion restreinte) avant le vrai tenant.
+
+## Prochaine étape : le front
+- Écrans actuels : pages-coquilles servies par `src/routes/pages.ts`, scripts inline (nonce CSP) dans `src/views/layout.ts`, données par `/api` uniquement.
+- Commencer par l'écran RH. Statut de chaque demande en stepper horizontal (étapes faites en vert, en cours en bleu, à venir en gris, badge « 2 sur 4 »).
+- Délais d'Entra à gérer côté écran : un compte tout juste créé n'est pas validable tout de suite (bouton Valider désactivé tant qu'il n'est pas prêt) ; la validation peut prendre ~30 s (attente visible) ; un 202 `licence_en_cours` se revalide seul ; le passage à Terminé peut prendre quelques minutes après la 1re connexion.
+- Ne jamais afficher ni stocker le mot de passe temporaire ailleurs que dans le DOM, une seule fois.
 
 ## Règles
 - Zéro secret dans le code : identité managée partout (Graph, Key Vault).
