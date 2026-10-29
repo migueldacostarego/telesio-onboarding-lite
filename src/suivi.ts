@@ -19,7 +19,7 @@ const STATUTS = ['EnAttente', 'Validé', 'Actif', 'Terminé'] as const;
 type Statut = (typeof STATUTS)[number];
 
 /** Actions proposées à la personne connectée pour une demande (calculées côté serveur, jamais déduites par l'interface). */
-export type SuiviAction = 'approuver' | 'refuser' | 'activer';
+export type SuiviAction = 'approuver' | 'refuser' | 'activer' | 'regenerer';
 
 export interface SuiviItem {
   id: string;
@@ -35,7 +35,8 @@ export interface SuiviItem {
   onboarding?: OnboardingState | { verification: 'echec' };
   /**
    * Actions disponibles pour la personne connectée : approuver et refuser (droit approuver, EnAttente, jamais sur sa propre
-   * demande), activer (droit activer, Validé). Vide sinon : l'interface ne propose que ce qui figure ici.
+   * demande), activer (droit activer, Validé), regenerer (droit activer, Actif : l'onboarding n'est pas Terminé, sinon le statut
+   * serait Terminé). Vide sinon : l'interface ne propose que ce qui figure ici.
    */
   actions: SuiviAction[];
 }
@@ -43,6 +44,7 @@ export interface SuiviItem {
 function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, actor: string): SuiviAction[] {
   if (statut === 'EnAttente') return droits.approuver && !isCreator(d.createur, actor) ? ['approuver', 'refuser'] : [];
   if (statut === 'Validé') return droits.activer ? ['activer'] : [];
+  if (statut === 'Actif') return droits.activer ? ['regenerer'] : [];
   return [];
 }
 

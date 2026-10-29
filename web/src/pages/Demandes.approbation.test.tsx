@@ -1,54 +1,12 @@
-import { QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { BrowserRouter } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createQueryClient } from '@/lib/query';
-import type { Demande } from '@/lib/suivi';
-import { Demandes } from '@/pages/Demandes';
-import { ecritures, lecturesSuivi, mockApi, reply, stubBureau } from '@/test/helpers';
+import { act, screen, waitFor, within } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ecritures, lecturesSuivi, reply, stubBureau } from '@/test/helpers';
+import { ELOISE, HUGO, avancer, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 
-// Les délais (nouvel essai à 5 s, revalidation à 60 s, actualisation à 30 s) sont avancés à la main ; le temps réel continue de couler.
-beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date(2026, 9, 28, 12, 0, 0) });
-});
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-const ELOISE = { id: 'id-eloise', nom: 'Éloïse Dupont' };
-const HUGO = { id: 'id-hugo', nom: 'Hugo Lambert' };
-const enAttente = (p: { id: string; nom: string }, o: Partial<Demande> = {}): Demande => ({
-  ...p,
-  poste: 'Comptable',
-  service: 'Finance',
-  dateArrivee: '2026-11-03',
-  statut: 'EnAttente',
-  etape: 1,
-  actions: ['approuver', 'refuser'],
-  ...o,
-});
-const valide = (p: { id: string; nom: string }): Demande => enAttente(p, { statut: 'Validé', etape: 2, actions: [] });
-
-/** Fausse API avec une liste que les tests modifient : `suivi` relit toujours `etat.demandes`. */
-function monter(o: { demandes?: Demande[]; ecrire: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>; surSession?: () => void }) {
-  const etat = { demandes: o.demandes ?? [enAttente(ELOISE), enAttente(HUGO)] };
-  const fetchMock = mockApi({ suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), ecrire: o.ecrire });
-  const client = createQueryClient(o.surSession);
-  const vue = render(
-    <QueryClientProvider client={client}>
-      <BrowserRouter>
-        <Demandes />
-      </BrowserRouter>
-    </QueryClientProvider>,
-  );
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-  return { etat, fetchMock, client, user, ...vue };
-}
+tempsSimule();
 
 const valider = (nom: string) => screen.getByRole('button', { name: `Valider la demande de ${nom}` });
 const refuser = (nom: string) => screen.getByRole('button', { name: `Refuser la demande de ${nom}` });
-const avancer = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
 const POST_ELOISE = '/api/demandes/id-eloise/valider';
 const introuvable = () => reply(404, { error: 'Demande introuvable' });
 

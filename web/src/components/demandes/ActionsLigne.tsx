@@ -1,15 +1,14 @@
-import { CheckIcon, Loader2Icon, XIcon } from 'lucide-react';
+import { CheckIcon, KeyRoundIcon, Loader2Icon, PowerIcon, XIcon, type LucideIcon } from 'lucide-react';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { verrouille, type EtatLigne } from '@/lib/actions';
+import { verrouille, type ActionNom, type EtatLigne } from '@/lib/actions';
 import type { Demande } from '@/lib/suivi';
 
 export interface PropsActions {
   demande: Demande;
   etat: EtatLigne | undefined;
-  onValider: () => void;
-  onRefuser: () => void;
+  onAction: (action: ActionNom) => void;
 }
 
 const Attente = ({ children }: { children: string }) => (
@@ -19,32 +18,47 @@ const Attente = ({ children }: { children: string }) => (
   </p>
 );
 
+interface Bouton {
+  /** Entrée de `actions` (API) qui le propose. */
+  api: string;
+  action: ActionNom;
+  libelle: string;
+  /** Texte pendant l'attente (le spinner remplace l'icône). */
+  attente: string;
+  /** Nom accessible : « Valider la demande de … ». */
+  nom: (nom: string) => string;
+  variante: 'default' | 'destructive' | 'outline';
+  Icone: LucideIcon;
+}
+
+/** Ordre d'affichage. Un bouton n'existe que si l'API le propose pour la personne connectée (`actions`). */
+const BOUTONS: Bouton[] = [
+  { api: 'approuver', action: 'valider', libelle: 'Valider', attente: 'Validation…', nom: (n) => `Valider la demande de ${n}`, variante: 'default', Icone: CheckIcon },
+  { api: 'refuser', action: 'refuser', libelle: 'Refuser', attente: 'Refus…', nom: (n) => `Refuser la demande de ${n}`, variante: 'destructive', Icone: XIcon },
+  { api: 'activer', action: 'activer', libelle: 'Activer', attente: 'Activation…', nom: (n) => `Activer le compte de ${n}`, variante: 'default', Icone: PowerIcon },
+  { api: 'regenerer', action: 'regenerer', libelle: 'Régénérer', attente: 'Régénération…', nom: (n) => `Régénérer le mot de passe de ${n}`, variante: 'outline', Icone: KeyRoundIcon },
+];
+
 /**
  * Boutons d'une ligne : seulement les actions que l'API propose pour la personne connectée (`actions`). Tant que quelque chose
- * tourne pour la ligne, rien n'y est cliquable : Valider porte alors le spinner (la validation peut durer 30 s).
+ * tourne pour la ligne, rien n'y est cliquable : le bouton de l'action en cours porte le spinner (la validation peut durer 30 s).
  */
-export function ActionsLigne({ demande, etat, onValider, onRefuser }: PropsActions) {
-  const peutValider = demande.actions.includes('approuver');
-  const peutRefuser = demande.actions.includes('refuser');
+export function ActionsLigne({ demande, etat, onAction }: PropsActions) {
+  const proposes = BOUTONS.filter((b) => demande.actions.includes(b.api));
   const occupee = verrouille(etat);
-  const validation = etat?.phase === 'en_cours' && etat.action === 'valider';
-  const refus = etat?.phase === 'en_cours' && etat.action === 'refuser';
-  if (!peutValider && !peutRefuser) return null;
+  if (proposes.length === 0) return null;
   return (
     <div className="flex flex-col items-start gap-1.5">
       <div className="flex flex-wrap gap-2">
-        {peutValider && (
-          <Button size="sm" disabled={occupee} aria-busy={validation} aria-label={`Valider la demande de ${demande.nom}`} onClick={onValider}>
-            {validation ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : <CheckIcon aria-hidden="true" />}
-            {validation ? 'Validation…' : 'Valider'}
-          </Button>
-        )}
-        {peutRefuser && (
-          <Button size="sm" variant="destructive" disabled={occupee} aria-busy={refus} aria-label={`Refuser la demande de ${demande.nom}`} onClick={onRefuser}>
-            {refus ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : <XIcon aria-hidden="true" />}
-            {refus ? 'Refus…' : 'Refuser'}
-          </Button>
-        )}
+        {proposes.map(({ action, libelle, attente, nom, variante, Icone }) => {
+          const enCours = etat?.phase === 'en_cours' && etat.action === action;
+          return (
+            <Button key={action} size="sm" variant={variante} disabled={occupee} aria-busy={enCours} aria-label={nom(demande.nom)} onClick={() => onAction(action)}>
+              {enCours ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : <Icone aria-hidden="true" />}
+              {enCours ? attente : libelle}
+            </Button>
+          );
+        })}
       </div>
       {etat?.phase === 'compte_en_creation' && <Attente>Compte en cours de création</Attente>}
       {etat?.phase === 'licence_en_cours' && <Attente>Licence en cours d’attribution</Attente>}

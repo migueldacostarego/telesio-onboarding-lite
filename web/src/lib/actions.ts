@@ -13,7 +13,31 @@ export const REESSAIS_COMPTE_MS = [5_000, 5_000, 10_000, 10_000, 15_000, 15_000]
 export const REVALIDATION_LICENCE_MS = 60_000;
 export const REVALIDATIONS_LICENCE_MAX = 5;
 
-export type ActionNom = 'valider' | 'refuser';
+/** Actions d'une ligne. `activer` et `regenerer` renvoient un mot de passe temporaire : il ne passe jamais par le cache de requêtes. */
+export type ActionNom = 'valider' | 'refuser' | 'activer' | 'regenerer';
+
+/** Action de `actions` (API) → écriture de l'interface. Le champ `actions` de l'API est la seule source des boutons. */
+export const ACTION_API: Record<string, ActionNom> = { approuver: 'valider', refuser: 'refuser', activer: 'activer', regenerer: 'regenerer' };
+
+/** Motifs de régénération acceptés par l'API (pas de texte libre : il pourrait contenir un nom). */
+export const MOTIFS_REGENERATION = [
+  { code: 'code_perdu', libelle: 'Mot de passe perdu' },
+  { code: 'code_refuse', libelle: 'Mot de passe refusé à la connexion' },
+  { code: 'autre', libelle: 'Autre raison' },
+] as const;
+export type MotifRegeneration = (typeof MOTIFS_REGENERATION)[number]['code'];
+
+/** Corps de l'écriture : `refuser` envoie un motif libre, `regenerer` un code, les autres `{}`. */
+export const corpsAction = (action: ActionNom, motif?: string): Record<string, unknown> =>
+  action === 'refuser' || action === 'regenerer' ? { motif } : {};
+
+/** Réponse de `activer` et `regenerer` : le mot de passe n'existe que là. */
+export interface Remise {
+  id: string;
+  motDePasse: string;
+  /** true : nouveau mot de passe après une première remise. */
+  regeneration: boolean;
+}
 
 /** Ce que la ligne montre pour une demande dont une action est en cours (jamais le contenu d'une saisie). */
 export type EtatLigne =

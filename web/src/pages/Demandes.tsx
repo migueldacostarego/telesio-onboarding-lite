@@ -2,14 +2,19 @@ import { useMemo, useState } from 'react';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Actualisation } from '@/components/demandes/Actualisation';
 import { Barre } from '@/components/demandes/Barre';
+import { DialogueActivation } from '@/components/demandes/DialogueActivation';
+import { DialogueMotDePasse } from '@/components/demandes/DialogueMotDePasse';
 import { DialogueRefus } from '@/components/demandes/DialogueRefus';
+import { DialogueRegeneration } from '@/components/demandes/DialogueRegeneration';
 import { DemandesCartes, DemandesCartesSquelette } from '@/components/demandes/DemandesCartes';
 import { DemandesTable, DemandesTableSquelette } from '@/components/demandes/DemandesTable';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useActionsDemandes } from '@/hooks/useActionsDemandes';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { useTerminaisonAuto } from '@/hooks/useTerminaisonAuto';
 import { useNow } from '@/hooks/useNow';
+import type { ActionNom } from '@/lib/actions';
 import { aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
@@ -26,17 +31,26 @@ export function Demandes() {
   const jour = aujourdhui(new Date(useNow(60_000)));
 
   const donnees = suivi.data;
-  const actions = useActionsDemandes(donnees?.demandes);
-  // La boîte de dialogue de refus vise une demande par son id (état de la page : elle survit aux filtres et au tri).
-  const [refusId, setRefusId] = useState<string | null>(null);
-  const cible = refusId === null ? undefined : donnees?.demandes.find((d) => d.id === refusId);
-  const refusEnCours = refusId !== null && actions.etats[refusId]?.phase === 'en_cours';
-  // La demande ne se refuse plus (traitée ailleurs, ou disparue) : la boîte se ferme, sauf si le refus est déjà parti.
-  const refusOuvert = cible !== undefined && (cible.actions.includes('refuser') || refusEnCours) ? cible : undefined;
+  // Le mot de passe temporaire n'existe qu'ici et dans la boîte qui l'affiche : état React seulement (ni URL, ni stockage, ni cache).
+  const [remise, setRemise] = useState<{ nom: string; motDePasse: string; regeneration: boolean } | null>(null);
+  // La boîte de dialogue ouverte vise une demande par son id (état de la page : elle survit aux filtres et au tri).
+  const [cible, setCible] = useState<{ action: Exclude<ActionNom, 'valider'>; id: string } | null>(null);
+  const actions = useActionsDemandes(donnees?.demandes, {
+    onRemise: ({ id, motDePasse, regeneration }) => {
+      setRemise({ nom: donnees?.demandes.find((d) => d.id === id)?.nom ?? '', motDePasse, regeneration });
+      setCible(null);
+    },
+  });
+  useTerminaisonAuto(donnees?.demandes, suivi.dataUpdatedAt);
+  const demandeCible = cible === null ? undefined : donnees?.demandes.find((d) => d.id === cible.id);
+  const etatCible = cible === null ? undefined : actions.etats[cible.id];
+  const cibleEnCours = cible !== null && etatCible?.phase === 'en_cours' && etatCible.action === cible.action;
+  // La demande n'offre plus l'action (traitée ailleurs, ou disparue) : la boîte se ferme, sauf si l'action est déjà partie.
+  const ouverte = cible !== null && demandeCible && (demandeCible.actions.includes(cible.action) || cibleEnCours) ? demandeCible : undefined;
+  const boite = (action: Exclude<ActionNom, 'valider'>) => (cible?.action === action ? ouverte : undefined);
   const lignes = {
     etats: actions.etats,
-    onValider: (d: Demande) => actions.valider(d.id),
-    onRefuser: (d: Demande) => setRefusId(d.id),
+    onAction: (d: Demande, action: ActionNom) => (action === 'valider' ? actions.valider(d.id) : setCible({ action, id: d.id })),
     onFermer: (d: Demande) => actions.fermer(d.id),
   };
   const visibles = useMemo(() => (donnees ? filtrerDemandes(donnees.demandes, { terme, statut, tri, aujourdhui: jour }) : []), [donnees, terme, statut, tri, jour]);
@@ -129,13 +143,24 @@ export function Demandes() {
       )}
 
       <DialogueRefus
-        demande={refusOuvert}
-        enCours={refusEnCours}
-        onFermer={() => setRefusId(null)}
-        onConfirmer={(motif) => {
-          if (refusId !== null) void actions.refuser(refusId, motif).then(() => setRefusId(null));
-        }}
+        demande={boite('refuser')}
+        enCours={cibleEnCours}
+        onFermer={() => setCible(null)}
+        onConfirmer={(motif) => cible && void actions.refuser(cible.id, motif).then(() => setCible(null))}
       />
+      <DialogueActivation
+        demande={boite('activer')}
+        enCours={cibleEnCours}
+        onFermer={() => setCible(null)}
+        onConfirmer={() => cible && void actions.activer(cible.id).then(() => setCible(null))}
+      />
+      <DialogueRegeneration
+        demande={boite('regenerer')}
+        enCours={cibleEnCours}
+        onFermer={() => setCible(null)}
+        onConfirmer={(motif) => cible && void actions.regenerer(cible.id, motif).then(() => setCible(null))}
+      />
+      <DialogueMotDePasse remise={remise} onFermer={() => setRemise(null)} />
     </section>
   );
 }

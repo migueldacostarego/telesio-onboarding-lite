@@ -153,13 +153,17 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
     expect(actions(await suivi(['RH', 'Direction'], AUTRE_ID), id)).toEqual(['activer']);
   });
 
-  it('Actif et Terminé : aucune action', async () => {
+  it('Actif : regenerer pour RH seulement (nouveau mot de passe temporaire) ; Terminé : aucune action', async () => {
     const actif = compte('Actif', 'Actif');
     g().groups.set(ARRIVANTS_GROUP, new Set([actif]));
     const fini = g().addPending(EXT, { givenName: 'Fini', surname: 'Test', statut: 'Terminé', hireDate: '2026-10-20', enabled: true, extras: { extension_0123456789abcdef0123456789abcdef_activationOnboarding: '2026-10-25T10:00:00Z' } });
     const out = await suivi(['RH', 'Direction'], AUTRE_ID);
-    expect(actions(out, actif)).toEqual([]);
+    expect(actions(out, actif)).toEqual(['regenerer']);
     expect(actions(out, fini)).toEqual([]);
+    const direction = await suivi(['Direction'], DIR_ID);
+    expect(actions(direction, actif)).toEqual([]);
+    expect(actions(direction, fini)).toEqual([]);
+    expect(actions(await suivi(['RH'], RH_ID), actif)).toEqual(['regenerer']);
   });
 
   it('un seul champ de plus par demande, et l’objectId du créateur n’est jamais renvoyé', async () => {

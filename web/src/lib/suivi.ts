@@ -15,6 +15,17 @@ export const LIBELLES: Record<Statut, string> = {
 
 export const NB_ETAPES = STATUTS.length;
 
+/** État d'onboarding d'un compte Actif (GET /api/suivi) : { verification: 'echec' } si la lecture Graph de ce compte a échoué. */
+export interface Onboarding {
+  motDePasse: boolean;
+  authenticator: boolean;
+  termine: boolean;
+}
+export type EtatOnboarding = Onboarding | { verification: 'echec' };
+
+/** Vrai si l'API dit que le mot de passe a changé et qu'Authenticator est inscrit (la finalisation passe par POST /terminer). */
+export const onboardingComplet = (o: EtatOnboarding | undefined): boolean => o !== undefined && 'termine' in o && o.termine === true;
+
 /** Une demande de GET /api/suivi (les champs que l'écran lit). */
 export interface Demande {
   id: string;
@@ -26,7 +37,10 @@ export interface Demande {
   statut: Statut;
   /** 1 EnAttente, 2 Validé, 3 Actif, 4 Terminé. */
   etape: number;
+  /** Ce que la personne connectée peut faire : `approuver`, `refuser`, `activer`, `regenerer`. L'interface n'en propose pas d'autre. */
   actions: string[];
+  /** Comptes Actif seulement. */
+  onboarding?: EtatOnboarding;
 }
 
 export interface Suivi {
