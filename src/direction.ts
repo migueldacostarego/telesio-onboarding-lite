@@ -55,7 +55,7 @@ async function loadForAction(
   actor: string,
   id: string,
   allowed: readonly string[],
-  action: 'valider' | 'refuser',
+  action: 'valider' | 'refuser' | 'reprendre',
 ): Promise<OnboardingUser> {
   const creatorExt = creatorExtensionOf(deps);
   const user = await step(deps, actor, 'lecture', id, {}, () =>
@@ -66,7 +66,8 @@ async function loadForAction(
     throw new ServiceError(404, { error: 'Demande introuvable' });
   }
   // Personne ne valide ni ne refuse sa propre demande. Une demande sans créateur (antérieure à l'extension) n'est pas contrôlable.
-  if (isCreator(user.createur, actor)) {
+  // Reprendre le dossier n'approuve rien (la validation a déjà eu lieu) : la règle ne s'y applique pas.
+  if (action !== 'reprendre' && isCreator(user.createur, actor)) {
     deps.audit.track({ action: 'demande.auto_approbation', actor, outcome: 'refuse', cible: id, operation: action });
     throw new ServiceError(403, { error: 'Vous ne pouvez pas valider ni refuser une demande que vous avez créée', code: 'auto_approbation' });
   }
@@ -138,9 +139,15 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
     audit.track({ action: 'demande.reprise', actor, outcome: 'ok', cible: id });
   }
 
+  const dossier = await creerDossier(deps, actor, id, user, library);
+  return { id, statut: 'Validé', licence, dossier, reprise };
+}
+
+/** Crée le dossier SharePoint de la personne (idempotent : un dossier existant est réutilisé). Le compte reste Validé en cas d'échec. */
+async function creerDossier(deps: DirectionDeps, actor: string, id: string, user: OnboardingUser, library: Library): Promise<Validation['dossier']> {
   const after = { statut: 'Validé' };
   const name = await step(deps, actor, 'dossier_nom', id, after, async () =>
-    buildFolderName(config.sharePoint.folderPattern, {
+    buildFolderName(deps.config.sharePoint.folderPattern, {
       nom: user.surname ?? '',
       prenom: user.givenName ?? '',
       id,
@@ -148,8 +155,23 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
   );
   const folder = await step(deps, actor, 'dossier_sharepoint', id, after, () => library.ensureFolder(name));
   // Ni le nom du dossier (contient le nom de la personne) ni l'URL ne sont tracés.
-  audit.track({ action: 'demande.dossier', actor, outcome: 'ok', cible: id, dossier: folder.id, cree: folder.created });
-  return { id, statut: 'Validé', licence, dossier: { id: folder.id, url: folder.webUrl, cree: folder.created }, reprise };
+  deps.audit.track({ action: 'demande.dossier', actor, outcome: 'ok', cible: id, dossier: folder.id, cree: folder.created });
+  return { id: folder.id, url: folder.webUrl, cree: folder.created };
+}
+
+/**
+ * Compte Validé dont le dossier SharePoint manque (échec après la validation, 502) : recrée le dossier seulement. Ni la licence
+ * ni le groupe des arrivants ne sont retouchés, le statut non plus. Réservé à la direction (droit approuver) ; comme `valider`,
+ * 409 pour un autre statut. Idempotent : un dossier déjà là est réutilisé.
+ */
+export async function reprendreDossier(deps: DirectionDeps, actor: string, id: string): Promise<{ id: string; statut: 'Validé'; dossier: Validation['dossier'] }> {
+  if (!deps.library) {
+    throw new ServiceError(503, { error: 'SharePoint non configuré (SHAREPOINT_SITE_ID, SHAREPOINT_DRIVE_ID)' });
+  }
+  const user = await loadForAction(deps, actor, id, ['Validé'], 'reprendre');
+  const dossier = await creerDossier(deps, actor, id, user, deps.library);
+  deps.audit.track({ action: 'demande.reprise_dossier', actor, outcome: 'ok', cible: id });
+  return { id, statut: 'Validé', dossier };
 }
 
 /** Trace le refus (longueur du motif seulement), puis supprime le compte (corbeille Entra, 30 jours). */

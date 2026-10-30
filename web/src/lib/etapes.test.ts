@@ -5,7 +5,7 @@ import { etapesDe } from '@/lib/etapes';
 
 const etats = (d: Parameters<typeof etapesDe>[0], e?: EtatLigne) => etapesDe(d, e).map((x) => `${x.cle}:${x.etat}`);
 const base = { dateArrivee: '2026-11-03' };
-const erreur = (action: 'valider' | 'activer' | 'refuser' | 'regenerer'): EtatLigne => ({ phase: 'erreur', action, error: new ApiError({ status: 409, kind: 'conflit', message: 'x' }) });
+const erreur = (action: 'valider' | 'activer' | 'refuser' | 'regenerer' | 'reprendre'): EtatLigne => ({ phase: 'erreur', action, error: new ApiError({ status: 409, kind: 'conflit', message: 'x' }) });
 
 describe('étapes d’une demande', () => {
   it.each([
@@ -57,5 +57,14 @@ describe('étapes d’une demande', () => {
   it('date d’arrivée dite dans l’étape Activée', () => {
     expect(etapesDe({ ...base, etape: 2 })[2]?.detail).toContain('3 nov. 2026');
     expect(etapesDe({ dateArrivee: null, etape: 2 })[2]?.detail).toContain('non renseignée');
+  });
+
+  it('compte Validé sans dossier SharePoint (API : reprendre) : étape Validée en échec, en cours pendant la reprise, de nouveau en échec si elle échoue', () => {
+    const d = { ...base, etape: 2, actions: ['reprendre'] };
+    expect(etapesDe(d)[1]).toMatchObject({ etat: 'echec', detail: expect.stringContaining('dossier SharePoint') });
+    expect(etapesDe(d, { phase: 'en_cours', action: 'reprendre' })[1]).toMatchObject({ etat: 'en_cours' });
+    expect(etapesDe(d, erreur('reprendre'))[1]).toMatchObject({ etat: 'echec', detail: expect.stringContaining('nouvelle tentative') });
+    expect(etapesDe({ ...base, etape: 2, actions: [] })[1]?.etat).toBe('reussie');
+    expect(etapesDe({ ...base, etape: 3, actions: ['reprendre'] })[1]?.etat).toBe('reussie'); // seulement pour un compte Validé
   });
 });

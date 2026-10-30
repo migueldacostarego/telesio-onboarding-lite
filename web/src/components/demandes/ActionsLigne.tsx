@@ -1,4 +1,4 @@
-import { CheckIcon, KeyRoundIcon, Loader2Icon, PowerIcon, XIcon, type LucideIcon } from 'lucide-react';
+import { CheckIcon, KeyRoundIcon, Loader2Icon, PowerIcon, RotateCcwIcon, XIcon, type LucideIcon } from 'lucide-react';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,8 @@ interface Bouton {
 const BOUTONS: Bouton[] = [
   { api: 'approuver', action: 'valider', libelle: 'Valider', attente: 'Validation…', nom: (n) => `Valider la demande de ${n}`, variante: 'default', Icone: CheckIcon },
   { api: 'refuser', action: 'refuser', libelle: 'Refuser', attente: 'Refus…', nom: (n) => `Refuser la demande de ${n}`, variante: 'destructive', Icone: XIcon },
+  // Compte Validé dont le dossier SharePoint manque (après un 502) : recrée le dossier seulement, sans refaire la licence ni le groupe.
+  { api: 'reprendre', action: 'reprendre', libelle: 'Réessayer', attente: 'Nouvelle tentative…', nom: (n) => `Réessayer la création du dossier de ${n}`, variante: 'outline', Icone: RotateCcwIcon },
   { api: 'activer', action: 'activer', libelle: 'Activer', attente: 'Activation…', nom: (n) => `Activer le compte de ${n}`, variante: 'default', Icone: PowerIcon },
   { api: 'regenerer', action: 'regenerer', libelle: 'Régénérer', attente: 'Régénération…', nom: (n) => `Régénérer le mot de passe de ${n}`, variante: 'outline', Icone: KeyRoundIcon },
 ];

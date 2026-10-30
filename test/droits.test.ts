@@ -148,6 +148,7 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
 
   it('Validé : activer pour RH seulement, y compris pour le créateur', async () => {
     const id = compte('Valide', 'Validé', { createur: RH_ID, hireDate: '2026-10-27' });
+    g().folders.set('Test Valide', { id: 'dossier', folder: {} }); // le dossier existe : aucune reprise à proposer
     expect(actions(await suivi(['RH'], RH_ID), id)).toEqual(['activer']);
     expect(actions(await suivi(['Direction'], DIR_ID), id)).toEqual([]);
     expect(actions(await suivi(['RH', 'Direction'], AUTRE_ID), id)).toEqual(['activer']);

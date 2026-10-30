@@ -101,6 +101,9 @@ export interface PendingDemande {
   dateArrivee: string | null;
   /** objectId du créateur, présent seulement si la liste a été demandée avec l'extension du créateur ; null si la demande n'en porte pas. */
   createur?: string | null;
+  /** Prénom et nom de famille (nom du dossier SharePoint), présents seulement si la liste les a demandés (`withNames`) ; jamais renvoyés tels quels par l'API. */
+  prenom?: string | null;
+  famille?: string | null;
 }
 
 /** Disponibilité d'un SKU : prepaidUnits.enabled et consumedUnits de GET /subscribedSkus. */
@@ -140,6 +143,7 @@ export interface Directory {
     statut: string,
     hiredSince?: string,
     creatorExt?: string,
+    withNames?: boolean,
   ): Promise<{ demandes: PendingDemande[]; tronque: boolean }>;
   setAccountEnabled(id: string, enabled: boolean): Promise<void>;
   /** Mot de passe temporaire : Entra impose son changement à la première connexion (forceChangePasswordNextSignIn). */
@@ -184,6 +188,8 @@ interface RawPending {
   jobTitle?: string | null;
   department?: string | null;
   employeeHireDate?: string | null;
+  givenName?: string | null;
+  surname?: string | null;
   manager?: { id: string; displayName: string } | null;
 }
 
@@ -274,7 +280,7 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async listByStatut(ext: string, statut: string, hiredSince?: string, creatorExt?: string) {
+  async listByStatut(ext: string, statut: string, hiredSince?: string, creatorExt?: string, withNames = false) {
     // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
     // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
     // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
@@ -283,7 +289,7 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`${ext} eq '${statut}'`)
-        .select(`id,displayName,jobTitle,department,employeeHireDate${creatorExt ? `,${creatorExt}` : ''}`)
+        .select(`id,displayName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}${creatorExt ? `,${creatorExt}` : ''}`)
         .expand('manager($select=id,displayName)')
         .top(100)
         .count(true);
@@ -309,6 +315,7 @@ export class GraphDirectory implements Directory {
           manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
           dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
           ...(creatorExt ? { createur: typeof u[creatorExt] === 'string' ? (u[creatorExt] as string) : null } : {}),
+          ...(withNames ? { prenom: typeof u.givenName === 'string' ? u.givenName : null, famille: typeof u.surname === 'string' ? u.surname : null } : {}),
         }))
         .filter((d) => !hiredSince || (d.dateArrivee !== null && d.dateArrivee >= hiredSince));
       return { demandes, tronque };

@@ -33,6 +33,8 @@ export class FakeGraph {
     patch?: number;
     post?: number;
     folder?: number;
+    /** Échec de la lecture des dossiers de la racine (GET children). */
+    folderList?: number;
     delete?: number;
     /** Échec du PATCH qui pose le mot de passe temporaire (passwordProfile). */
     passwordPatch?: number;
@@ -57,6 +59,10 @@ export class FakeGraph {
   groups = new Map<string, Set<string>>();
   /** Dossiers SharePoint : nom -> { id, folder? } (folder absent = c'est un fichier). */
   folders = new Map<string, { id: string; folder?: object }>();
+  /** Lectures de la racine (GET children) faites : une seule par liste, jamais une par compte. */
+  folderListings = 0;
+  /** Taille de page de GET children (0 : tout d'un coup). */
+  folderPageSize = 0;
   deleted: string[] = [];
   /** SKU -> unités (GET /subscribedSkus : prepaidUnits.enabled et consumedUnits). */
   skus = new Map<string, { enabled: number; consumed: number }>();
@@ -200,6 +206,8 @@ export class FakeGraph {
             jobTitle: u.props.jobTitle,
             department: u.props.department,
             employeeHireDate: u.props.employeeHireDate,
+            // Graph ne renvoie givenName et surname que si $select les nomme.
+            ...(call.select?.includes('givenName') ? { givenName: u.props.givenName, surname: u.props.surname } : {}),
             manager: u.manager ? this.managerOf(u.manager) : undefined,
             // Attributs d'extension (créateur) : Graph les renvoie quand $select les nomme.
             ...Object.fromEntries(Object.entries(u.props).filter(([k]) => k.startsWith('extension_') && k !== ext[1])),
@@ -286,6 +294,15 @@ export class FakeGraph {
       const item = { id: `folder-${this.folders.size + 1}`, folder: {} };
       this.folders.set(name, item);
       return { ...item, webUrl: `https://sp.test/${encodeURIComponent(name)}` };
+    }
+    if (method === 'GET' && children) {
+      this.folderListings++;
+      if (this.failOn.folderList) throw graphError(this.failOn.folderList, 'accessDenied');
+      const all = [...this.folders.entries()].map(([name, f]) => ({ name, ...f }));
+      const size = this.folderPageSize;
+      if (!size) return { value: all };
+      const value = all.slice(skip, skip + size);
+      return skip + size >= all.length ? { value } : { value, '@odata.nextLink': `https://graph.microsoft.com/v1.0/sites/s/drives/d/root/children?$skiptoken=${skip + size}` };
     }
     const byName = /^\/sites\/[^/]+\/drives\/[^/]+\/root:\/(.+)$/.exec(path);
     if (method === 'GET' && byName) {

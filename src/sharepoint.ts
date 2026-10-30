@@ -8,9 +8,21 @@ export interface FolderResult {
   created: boolean;
 }
 
+/** Noms (en minuscules : SharePoint ne distingue pas la casse) des dossiers de la racine de la bibliothèque. */
+export interface FolderNames {
+  noms: Set<string>;
+  /** false : la liste a été coupée au plafond de pages, l'absence d'un nom ne prouve rien. */
+  complet: boolean;
+}
+
 export interface Library {
   ensureFolder(name: string): Promise<FolderResult>;
+  /** Lecture seule, une requête paginée pour toute la racine (pas une par compte). */
+  listFolderNames(): Promise<FolderNames>;
 }
+
+/** Pages de 999 suivies au plus par lecture de la racine : au-delà, la liste est marquée incomplète. */
+const MAX_PAGES = 10;
 
 /** Dossiers à la racine d'une bibliothèque d'un seul site (permission Sites.Selected). */
 export class GraphSharePoint implements Library {
@@ -23,6 +35,25 @@ export class GraphSharePoint implements Library {
   ) {
     // Ids validés au chargement de la config. Le chemin lie le drive au site : 404 si non appariés.
     this.root = `/sites/${siteId}/drives/${driveId}/root`;
+  }
+
+  async listFolderNames(): Promise<FolderNames> {
+    try {
+      const noms = new Set<string>();
+      let req = this.client.api(`${this.root}/children`).select('name,folder').top(999);
+      for (let page = 1; ; page++) {
+        const res = await req.get();
+        for (const item of (res?.value ?? []) as { name?: string; folder?: object }[]) {
+          if (item.folder && typeof item.name === 'string') noms.add(item.name.toLowerCase());
+        }
+        const next = res?.['@odata.nextLink'] as string | undefined;
+        if (!next) return { noms, complet: true };
+        if (page >= MAX_PAGES) return { noms, complet: false };
+        req = this.client.api(next);
+      }
+    } catch (err) {
+      throw wrap(err);
+    }
   }
 
   async ensureFolder(name: string): Promise<FolderResult> {

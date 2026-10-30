@@ -31,11 +31,18 @@ export const LIBELLES_ETAT: Record<EtatEtape, string> = {
  * Une étape est « en échec » quand l'action qui y mène vient d'échouer (valider, activer) ou que l'état d'onboarding n'a pas pu
  * être lu ; l'échec d'un refus ou d'une régénération n'est pas celui d'une étape (le message d'erreur est dans la ligne).
  */
-export function etapesDe(d: Pick<Demande, 'etape' | 'dateArrivee' | 'onboarding'>, etat?: EtatLigne): Etape[] {
+export function etapesDe(d: Pick<Demande, 'etape' | 'dateArrivee' | 'onboarding'> & { actions?: readonly string[] }, etat?: EtatLigne): Etape[] {
   const n = d.etape;
   const echecDe = (action: 'valider' | 'activer') => etat?.phase === 'erreur' && etat.action === action;
 
   const validee: Etape = { cle: 'validee', libelle: 'Validée', etat: n >= 2 ? 'reussie' : 'en_cours' };
+  // Compte Validé dont le dossier SharePoint manque : l'API propose `reprendre`. La validation n'est pas terminée tant que le dossier n'existe pas.
+  if (n === 2 && d.actions?.includes('reprendre')) {
+    validee.etat = 'echec';
+    validee.detail = 'Le dossier SharePoint n’a pas été créé : réessayer.';
+    if (etat?.phase === 'en_cours' && etat.action === 'reprendre') Object.assign(validee, { etat: 'en_cours', detail: 'Création du dossier en cours.' } satisfies Partial<Etape>);
+    if (etat?.phase === 'erreur' && etat.action === 'reprendre') validee.detail = 'La nouvelle tentative a échoué : voir le message, puis réessayer.';
+  }
   if (n < 2) {
     if (echecDe('valider')) Object.assign(validee, { etat: 'echec', detail: 'La validation a échoué : voir le message, puis réessayer.' } satisfies Partial<Etape>);
     else if (etat?.phase === 'compte_en_creation') validee.detail = 'Compte en cours de création : nouvel essai automatique.';

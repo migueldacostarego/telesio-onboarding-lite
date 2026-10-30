@@ -192,6 +192,8 @@ export function useActionsDemandes(demandes: readonly Demande[] | undefined, { o
     valider: (id: string) => void demarrer(id, 'valider'),
     /** Ces trois-là rendent la main quand le serveur a répondu (la boîte de dialogue se ferme alors ; l'erreur éventuelle est dans la ligne). */
     refuser: (id: string, motif: string) => demarrer(id, 'refuser', motif),
+    /** Valider et reprendre partent d'un clic, sans boîte de dialogue ; reprendre recrée le dossier SharePoint manquant d'un compte Validé. */
+    reprendre: (id: string) => void demarrer(id, 'reprendre'),
     activer: (id: string) => demarrer(id, 'activer'),
     regenerer: (id: string, motif: string) => demarrer(id, 'regenerer', motif),
     /** Ferme l'erreur ou l'avertissement d'une ligne. */

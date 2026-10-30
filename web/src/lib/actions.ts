@@ -14,10 +14,12 @@ export const REVALIDATION_LICENCE_MS = 60_000;
 export const REVALIDATIONS_LICENCE_MAX = 5;
 
 /** Actions d'une ligne. `activer` et `regenerer` renvoient un mot de passe temporaire : il ne passe jamais par le cache de requêtes. */
-export type ActionNom = 'valider' | 'refuser' | 'activer' | 'regenerer';
+export type ActionNom = 'valider' | 'refuser' | 'activer' | 'regenerer' | 'reprendre';
+/** Actions qui passent par une boîte de dialogue (les autres partent d'un clic). */
+export type ActionAvecBoite = 'refuser' | 'activer' | 'regenerer';
 
 /** Action de `actions` (API) → écriture de l'interface. Le champ `actions` de l'API est la seule source des boutons. */
-export const ACTION_API: Record<string, ActionNom> = { approuver: 'valider', refuser: 'refuser', activer: 'activer', regenerer: 'regenerer' };
+export const ACTION_API: Record<string, ActionNom> = { approuver: 'valider', refuser: 'refuser', activer: 'activer', regenerer: 'regenerer', reprendre: 'reprendre' };
 
 /** Motifs de régénération acceptés par l'API (pas de texte libre : il pourrait contenir un nom). */
 export const MOTIFS_REGENERATION = [

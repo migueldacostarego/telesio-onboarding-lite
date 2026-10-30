@@ -17,7 +17,7 @@ import { useActionsDemandes } from '@/hooks/useActionsDemandes';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { useTerminaisonAuto } from '@/hooks/useTerminaisonAuto';
 import { useNow } from '@/hooks/useNow';
-import type { ActionNom } from '@/lib/actions';
+import type { ActionAvecBoite, ActionNom } from '@/lib/actions';
 import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
 import { useMoi } from '@/lib/moi';
 import { SUIVI_KEY, aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
@@ -48,7 +48,7 @@ export function Demandes() {
   // Le mot de passe temporaire n'existe qu'ici et dans la boîte qui l'affiche : état React seulement (ni URL, ni stockage, ni cache).
   const [remise, setRemise] = useState<{ nom: string; motDePasse: string; regeneration: boolean } | null>(null);
   // La boîte de dialogue ouverte vise une demande par son id (état de la page : elle survit aux filtres et au tri).
-  const [cible, setCible] = useState<{ action: Exclude<ActionNom, 'valider'>; id: string } | null>(null);
+  const [cible, setCible] = useState<{ action: ActionAvecBoite; id: string } | null>(null);
   const actions = useActionsDemandes(donnees?.demandes, {
     onRemise: ({ id, motDePasse, regeneration }) => {
       setRemise({ nom: donnees?.demandes.find((d) => d.id === id)?.nom ?? '', motDePasse, regeneration });
@@ -61,11 +61,15 @@ export function Demandes() {
   const cibleEnCours = cible !== null && etatCible?.phase === 'en_cours' && etatCible.action === cible.action;
   // La demande n'offre plus l'action (traitée ailleurs, ou disparue) : la boîte se ferme, sauf si l'action est déjà partie.
   const ouverte = cible !== null && demandeCible && (demandeCible.actions.includes(cible.action) || cibleEnCours) ? demandeCible : undefined;
-  const boite = (action: Exclude<ActionNom, 'valider'>) => (cible?.action === action ? ouverte : undefined);
+  const boite = (action: ActionAvecBoite) => (cible?.action === action ? ouverte : undefined);
   // Panneau de détail : une demande par son id (état de la page : il survit aux filtres, au tri et au passage tableau / cartes).
   const [detailId, setDetailId] = useState<string | null>(null);
   const detail = detailId === null ? undefined : donnees?.demandes.find((d) => d.id === detailId);
-  const surAction = (d: Demande, action: ActionNom) => (action === 'valider' ? actions.valider(d.id) : setCible({ action, id: d.id }));
+  const surAction = (d: Demande, action: ActionNom) => {
+    if (action === 'valider') actions.valider(d.id);
+    else if (action === 'reprendre') actions.reprendre(d.id);
+    else setCible({ action, id: d.id });
+  };
   const lignes = {
     etats: actions.etats,
     onOuvrir: (d: Demande) => setDetailId(d.id),

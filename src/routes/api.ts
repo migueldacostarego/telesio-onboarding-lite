@@ -6,7 +6,7 @@ import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations, regenererMotDePasse, terminerOnboarding } from '../activation';
 import { listSuivi } from '../suivi';
-import { listDemandes, refuserDemande, validerDemande } from '../direction';
+import { listDemandes, refuserDemande, reprendreDossier, validerDemande } from '../direction';
 import { listLicences, SkuAvailabilityCache } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
 import { KeyedLock } from '../lock';
@@ -158,6 +158,15 @@ export function createApiRouter(deps: ApiDeps): Router {
     } finally {
       // Une validation consomme (ou constate l'absence de) une unité : la liste RH ne doit plus servir l'ancien compte.
       skuCache.invalidate();
+    }
+  });
+
+  // Direction : recrée le dossier SharePoint manquant d'un compte Validé (après un 502), sans refaire la licence ni le groupe.
+  api.post('/demandes/:id/reprendre', approuver, badId, jsonOnly, json, async (req, res) => {
+    try {
+      res.json(await lock.run(key(req), () => reprendreDossier(deps, actor(res), String(req.params.id))));
+    } catch (err) {
+      fail(res, err);
     }
   });
 
