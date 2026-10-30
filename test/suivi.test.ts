@@ -66,10 +66,10 @@ describe('GET /api/suivi', () => {
 
   it('chaque demande ne porte que id, nom, poste, service, date d’arrivée, statut, étape, actions (et onboarding pour Actif)', async () => {
     const manager = g().addUser('chef@exemple.test', 'Chef Secret');
-    const id = g().addPending(EXT, { givenName: 'Anna', surname: 'Martin', statut: 'Validé', hireDate: '2026-11-03', managerId: manager });
+    const id = g().addPending(EXT, { givenName: 'Anna', surname: 'Martin', statut: 'Validé', hireDate: '2026-10-27', managerId: manager });
     const out = await suivi();
     expect(out.demandes).toEqual([
-      { id, nom: 'Anna Martin', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-11-03', statut: 'Validé', etape: 2, actions: ['activer'] },
+      { id, nom: 'Anna Martin', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-10-27', statut: 'Validé', etape: 2, actions: ['activer'] },
     ]);
     expect(JSON.stringify(out)).not.toContain('Chef Secret');
   });
@@ -188,4 +188,53 @@ describe('GET /api/suivi : activation non configurée', () => {
       });
     });
   }
+});
+
+describe('GET /api/suivi : activer seulement à partir de la date d’arrivée (jour calculé dans TZ_METIER)', () => {
+  // 2026-10-26 23:30 UTC = 2026-10-27 00:30 à Paris (CET) : le jour J dépend du fuseau.
+  const MINUIT_PARIS = () => new Date('2026-10-26T23:30:00Z');
+  const actionsDe = async (h: ReturnType<typeof harness>, hireDate: string | null) => {
+    const id = h.ctx.graph.addPending(EXT, { givenName: 'Jour', surname: 'Test', statut: 'Validé', hireDate: hireDate ?? '2026-10-27', extras: hireDate === null ? { employeeHireDate: null } : undefined });
+    const out = (await (await h.callRh('GET', '/api/suivi')).json()) as { demandes: { id: string; actions: string[] }[] };
+    return out.demandes.find((d) => d.id === id)?.actions;
+  };
+
+  describe('fuseau Europe/Paris (défaut)', () => {
+    const h = harness({}, { now: MINUIT_PARIS });
+    beforeEach(async () => {
+      if (h.ctx) await h.stop();
+      await h.start();
+    });
+    afterAll(() => h.stop());
+
+    it('le jour J et les jours passés : activer', async () => {
+      expect(await actionsDe(h, '2026-10-27')).toEqual(['activer']); // jour J à Paris, encore la veille en UTC
+      expect(await actionsDe(h, '2026-10-20')).toEqual(['activer']);
+    });
+    it('arrivée à venir : aucune action', async () => {
+      expect(await actionsDe(h, '2026-10-28')).toEqual([]);
+      expect(await actionsDe(h, '2026-11-03')).toEqual([]);
+    });
+    it('date d’arrivée absente : aucune action (la route la refuse aussi)', async () => {
+      expect(await actionsDe(h, null)).toEqual([]);
+    });
+    it('ce que propose actions est ce que la route accepte : la veille du jour J, activer répond 409 avant toute écriture', async () => {
+      const id = h.ctx.graph.addPending(EXT, { givenName: 'Veille', surname: 'Test', statut: 'Validé', hireDate: '2026-10-28' });
+      expect((await h.callRh('POST', `/api/demandes/${id}/activer`)).status).toBe(409);
+      expect(h.ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    });
+  });
+
+  describe('TZ_METIER=UTC : le même instant est encore la veille', () => {
+    const h = harness({ TZ_METIER: 'UTC' }, { now: MINUIT_PARIS });
+    beforeEach(async () => {
+      if (h.ctx) await h.stop();
+      await h.start();
+    });
+    afterAll(() => h.stop());
+    it('arrivée le 27 : pas encore d’activer ; le 26 : activer', async () => {
+      expect(await actionsDe(h, '2026-10-27')).toEqual([]);
+      expect(await actionsDe(h, '2026-10-26')).toEqual(['activer']);
+    });
+  });
 });
