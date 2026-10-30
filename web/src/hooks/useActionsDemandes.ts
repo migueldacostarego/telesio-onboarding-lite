@@ -15,6 +15,7 @@ import {
 } from '@/lib/actions';
 import { isSessionExpiredError } from '@/lib/session';
 import { SUIVI_KEY, type Demande } from '@/lib/suivi';
+import { attendre } from '@/lib/synchro';
 
 type Etats = Record<string, EtatLigne>;
 interface Appel {
@@ -28,6 +29,17 @@ const ecrire = ({ id, action, motif }: Appel) => api.post<Record<string, unknown
 interface Rejeux {
   compte: number;
   licence: number;
+}
+
+/**
+ * La ligne après une action réussie, quand elle change de statut : valider (Validé) et activer (Actif). Les actions à venir sont
+ * inconnues du client (le jour J, le dossier SharePoint) : aucune, jusqu'à la lecture suivante de l'API. Refuser retire la ligne
+ * comme avant ; régénérer et reprendre ne changent pas de statut (la ligne est déjà là, l'API la renvoie).
+ */
+function statutApres(d: Demande, action: ActionNom): Demande | undefined {
+  if (action === 'valider') return { ...d, statut: 'Validé', etape: 2, actions: [], onboarding: undefined };
+  if (action === 'activer') return { ...d, statut: 'Actif', etape: 3, actions: [], onboarding: { motDePasse: false, authenticator: false, termine: false } };
+  return undefined;
 }
 
 const sans = (etats: Etats, id: string): Etats => {
@@ -176,7 +188,11 @@ export function useActionsDemandes(demandes: readonly Demande[] | undefined, { o
       surRemise.current?.({ id, motDePasse, regeneration: action === 'regenerer' });
     }
 
-    // Succès : la ligne reste verrouillée jusqu'à ce que la liste (l'état réel) soit relue.
+    // Succès : la ligne prend tout de suite son nouveau statut dans le cache (et le garde tant que la réplication d'Entra ne l'a pas
+    // rendu, 3 minutes au plus : lib/synchro.ts), puis reste verrouillée jusqu'à ce que la liste (l'état réel) soit relue.
+    const avant = courantes.current?.find((d) => d.id === id);
+    const apres = avant && statutApres(avant, action);
+    if (apres) attendre(queryClient, apres);
     poser(id, { phase: 'en_cours', action });
     void rafraichir().finally(() => poser(id));
   };

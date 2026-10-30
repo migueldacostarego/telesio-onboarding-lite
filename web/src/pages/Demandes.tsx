@@ -20,12 +20,14 @@ import type { ActionAvecBoite, ActionNom } from '@/lib/actions';
 import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
 import { useMoi } from '@/lib/moi';
 import { SUIVI_KEY, aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
+import { attendre, enSynchro } from '@/lib/synchro';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
 const PLAFOND = 100;
-/** La ligne créée reste en évidence ce temps-là ; tant qu'elle n'est pas dans la liste (réplication), la liste est relue toutes les 5 s, 6 fois au plus. */
+/** La ligne créée reste en évidence ce temps-là. */
 const SURLIGNAGE_MS = 30_000;
-const RELECTURES_NOUVELLE = 6;
+/** Tant qu'une ligne attend que l'API la rende (réplication d'Entra : lib/synchro.ts), la liste est relue à cette cadence. */
+const RELECTURE_SYNCHRO_MS = 5_000;
 
 export function Demandes() {
   const suivi = useSuivi();
@@ -39,7 +41,8 @@ export function Demandes() {
 
   const donnees = suivi.data;
   const queryClient = useQueryClient();
-  const peutCreer = useMoi().data?.droits.creer === true;
+  const droits = useMoi().data?.droits;
+  const peutCreer = droits?.creer === true;
   // Demande qui vient d'être créée : son id (ligne en évidence) et l'éventuel avertissement du serveur (responsable non posé).
   const [nouvelle, setNouvelle] = useState<{ id: string; nom: string; avertissement?: string } | null>(null);
   const idNouvelle = nouvelle?.id || undefined; // '' : le surlignage est terminé, le message reste
@@ -75,16 +78,14 @@ export function Demandes() {
     onFermer: (d: Demande) => actions.fermer(d.id),
     surlignee: idNouvelle || null,
   };
-  // La ligne créée apparaît avec un léger retard (réplication d'Entra) : on relit la liste jusqu'à la voir, puis on la montre.
+  // Une ligne créée, validée ou activée par l'écran attend que la réplication d'Entra la rende à `GET /api/suivi` (elle reste affichée
+  // en attendant) : on relit la liste jusqu'à la retrouver. Le délai est borné par lib/synchro.ts (3 minutes), pas ici.
+  const synchronisation = enSynchro(donnees?.demandes);
   useEffect(() => {
-    if (idNouvelle === undefined || nouvelleVisible) return;
-    let essais = 0;
-    const id = setInterval(() => {
-      if (++essais > RELECTURES_NOUVELLE) clearInterval(id);
-      else void queryClient.invalidateQueries({ queryKey: SUIVI_KEY });
-    }, 5_000);
+    if (!synchronisation) return;
+    const id = setInterval(() => void queryClient.invalidateQueries({ queryKey: SUIVI_KEY }), RELECTURE_SYNCHRO_MS);
     return () => clearInterval(id);
-  }, [idNouvelle, nouvelleVisible, queryClient]);
+  }, [synchronisation, queryClient]);
   useEffect(() => {
     if (idNouvelle === undefined || !nouvelleVisible) return;
     document.getElementById(`demande-${idNouvelle}`)?.scrollIntoView?.({ block: 'nearest' });
@@ -92,7 +93,19 @@ export function Demandes() {
     return () => clearTimeout(id);
   }, [idNouvelle, nouvelleVisible]);
   const surCreee = (creee: DemandeCreee, valeurs: DemandeSortie) => {
-    setNouvelle({ id: creee.id, nom: `${valeurs.prenom} ${valeurs.nom}`, avertissement: creee.avertissement });
+    const nom = `${valeurs.prenom} ${valeurs.nom}`; // le nom affiché que le serveur donne au compte
+    setNouvelle({ id: creee.id, nom, avertissement: creee.avertissement });
+    // La ligne est dans la liste tout de suite, sans attendre la réplication d'Entra ; l'API la rendra (actions : celles de la direction, d'après droits).
+    attendre(queryClient, {
+      id: creee.id,
+      nom,
+      poste: valeurs.poste,
+      service: valeurs.service,
+      dateArrivee: valeurs.dateArrivee,
+      statut: 'EnAttente',
+      etape: 1,
+      actions: droits?.approuver ? ['approuver', 'refuser'] : [],
+    });
     // La ligne doit être visible : ni recherche ni filtre ne la masquent.
     setTerme('');
     setStatut('tous');

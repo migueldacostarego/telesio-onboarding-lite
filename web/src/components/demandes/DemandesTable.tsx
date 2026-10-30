@@ -3,7 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
 import { Progression } from '@/components/demandes/Progression';
-import { StatutBadge } from '@/components/demandes/StatutBadge';
+import { StatutBadge, Synchronisation } from '@/components/demandes/StatutBadge';
 import { actionsDe, aUnMessage, occupee, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { formatArrivee, type Tri } from '@/lib/suivi';
 
@@ -62,6 +62,7 @@ export function DemandesTable({ tri, ...lignes }: PropsLignes & { tri: Tri }) {
                 <TableCell className="whitespace-nowrap">{formatArrivee(d.dateArrivee)}</TableCell>
                 <TableCell>
                   <StatutBadge statut={d.statut} />
+                  <Synchronisation synchro={d.synchro} />
                 </TableCell>
                 <TableCell>
                   <Progression etape={d.etape} />

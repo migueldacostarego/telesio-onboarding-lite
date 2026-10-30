@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api } from '@/lib/api';
+import { fusionner } from '@/lib/synchro';
 
 /** Statuts renvoyés par GET /api/suivi, dans l'ordre du parcours (étape 1 à 4). */
 export const STATUTS = ['EnAttente', 'Validé', 'Actif', 'Terminé'] as const;
@@ -41,6 +42,8 @@ export interface Demande {
   actions: string[];
   /** Comptes Actif seulement. */
   onboarding?: EtatOnboarding;
+  /** Côté interface seulement (jamais dans l'API) : la ligne vient d'être écrite par l'écran et attend que l'API la rende (voir lib/synchro.ts). */
+  synchro?: boolean;
 }
 
 export interface Suivi {
@@ -54,6 +57,7 @@ export const SUIVI_KEY = ['suivi'] as const;
 export const ACTUALISATION_MS = 30_000;
 
 export function useSuivi() {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: SUIVI_KEY,
     queryFn: async (): Promise<Suivi> => {
@@ -61,7 +65,8 @@ export function useSuivi() {
       if (res.kind !== 'ok' || !Array.isArray(res.data?.demandes)) {
         throw new ApiError({ status: res.status, kind: 'serveur', message: 'Réponse inattendue du serveur.' });
       }
-      return { demandes: res.data.demandes, tronque: res.data.tronque === true };
+      // Les lignes que l'écran vient d'écrire (créée, validée, activée) restent affichées tant que la réplication d'Entra les rate.
+      return { demandes: fusionner(queryClient, res.data.demandes), tronque: res.data.tronque === true };
     },
     // Les données restent affichées pendant l'actualisation (pas de squelette, pas de clignotement).
     refetchInterval: ACTUALISATION_MS,

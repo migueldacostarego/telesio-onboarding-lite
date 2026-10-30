@@ -210,19 +210,31 @@ describe('envoi', () => {
     expect(await screen.findByLabelText('Prénom')).toHaveValue('');
   });
 
-  it('la ligne créée n’est pas encore répliquée : la liste est relue toutes les 5 s jusqu’à la voir', async () => {
+  it('la ligne créée n’est pas encore répliquée : elle est affichée tout de suite avec « synchronisation… », la liste est relue toutes les 5 s, l’indicateur part quand l’API la rend', async () => {
     const { etat, fetchMock, user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await remplir(user);
     await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    await waitFor(() => expect(lecturesSuivi(fetchMock)).toBe(2));
-    expect(screen.queryByRole('row', { name: /Camille Durand/ })).not.toBeInTheDocument();
+
+    // L'API ne la renvoie pas encore : la ligne est là quand même, mise en évidence, avec ce que la personne a saisi.
+    const ligne = await screen.findByRole('row', { name: /Camille Durand/ });
+    expect(ligne).toHaveAttribute('data-nouvelle', 'true');
+    expect(within(ligne).getByText('En attente')).toBeInTheDocument();
+    expect(within(ligne).getByText('Analyste')).toBeInTheDocument();
+    expect(within(ligne).getByText('synchronisation…')).toBeInTheDocument();
+
+    // Relue toutes les 5 s ; toujours là tant que l'API ne la rend pas.
+    const avant = lecturesSuivi(fetchMock);
+    await avancer(11_000);
+    expect(lecturesSuivi(fetchMock)).toBeGreaterThan(avant);
+    expect(within(screen.getByRole('row', { name: /Camille Durand/ })).getByText('synchronisation…')).toBeInTheDocument();
 
     etat.demandes = [...etat.demandes, nouvelleLigne()];
     await avancer(5_100);
-    expect(await screen.findByRole('row', { name: /Camille Durand/ })).toHaveAttribute('data-nouvelle', 'true');
+    await waitFor(() => expect(within(screen.getByRole('row', { name: /Camille Durand/ })).queryByText('synchronisation…')).not.toBeInTheDocument());
+    expect(screen.getByRole('row', { name: /Camille Durand/ })).toHaveAttribute('data-nouvelle', 'true');
   });
 
   it('la recherche et le filtre ne masquent pas la nouvelle ligne', async () => {
