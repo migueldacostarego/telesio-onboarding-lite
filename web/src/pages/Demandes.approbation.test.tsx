@@ -20,7 +20,9 @@ describe('Valider', () => {
     await user.click(valider(ELOISE.nom));
     expect(ecritures(fetchMock)).toEqual([{ url: POST_ELOISE, corps: {} }]);
     expect(valider(ELOISE.nom)).toHaveAttribute('aria-busy', 'true');
-    expect(valider(ELOISE.nom)).toHaveTextContent('Validation…');
+    // Le libellé ne change pas (la largeur du bouton non plus) : le spinner remplace l'icône, et l'attente est dite à part.
+    expect(valider(ELOISE.nom)).toHaveTextContent(/^Valider$/);
+    expect(screen.getByRole('status')).toHaveTextContent('Validation…');
     expect(valider(ELOISE.nom)).toBeDisabled();
     expect(refuser(ELOISE.nom)).toBeDisabled();
     // Les autres lignes ne sont pas touchées.

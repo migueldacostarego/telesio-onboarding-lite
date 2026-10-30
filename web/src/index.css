@@ -190,5 +190,7 @@
     }
   html {
     @apply font-sans;
+    /* La barre de défilement de la page ne fait pas changer la largeur du contenu (liste courte, filtre, fenêtre ouverte). */
+    scrollbar-gutter: stable;
     }
 }

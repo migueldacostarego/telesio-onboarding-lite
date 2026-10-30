@@ -29,7 +29,8 @@ describe('Réessayer : reprise du dossier SharePoint manquant', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(ecritures(fetchMock)).toEqual([{ url: URL_REPRENDRE, corps: {} }]);
     expect(reessayer()).toHaveAttribute('aria-busy', 'true');
-    expect(reessayer()).toHaveTextContent('Nouvelle tentative…');
+    expect(reessayer()).toHaveTextContent(/^Réessayer$/);
+    expect(screen.getByRole('status')).toHaveTextContent('Nouvelle tentative…');
     expect(reessayer()).toBeDisabled();
     await user.click(reessayer());
     expect(ecritures(fetchMock)).toHaveLength(1);
