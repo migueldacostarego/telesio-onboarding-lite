@@ -96,9 +96,9 @@ describe('responsable : recherche dans l’annuaire', () => {
     expect(screen.getByText('Saisissez 2 caractères au moins.')).toBeInTheDocument();
 
     await user.type(recherche, 'ar'); // « mar »
-    await avancer(250);
+    await avancer(150); // bien avant 300 ms, même si le temps réel s'ajoute au temps simulé
     expect(annuaire(fetchMock)).toHaveLength(0);
-    await avancer(100);
+    await avancer(300);
     await screen.findByRole('option', { name: /Marie Responsable/ });
     expect(annuaire(fetchMock)).toEqual(['/api/annuaire?q=mar']);
   });
