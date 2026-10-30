@@ -61,6 +61,13 @@ resource "azuread_service_principal" "web" {
 
   # Seuls les utilisateurs affectés à un rôle peuvent se connecter.
   app_role_assignment_required = true
+
+  # L'owner enregistré est l'identité qui a appliqué (apply CI, ou la personne en local) ; le plan de PR tourne avec une
+  # autre identité, en lecture seule, qui ne doit pas devenir owner (elle pourrait ajouter des secrets). Sans ceci, chaque
+  # plan affiche un faux changement d'owners.
+  lifecycle {
+    ignore_changes = [owners]
+  }
 }
 
 resource "azuread_application_redirect_uris" "web" {
