@@ -93,3 +93,18 @@ export async function listen(app: ReturnType<typeof setup>['app']): Promise<{ ba
     close: () => new Promise<void>((r) => void server.close(() => r())),
   };
 }
+
+const APP = 'extension_0123456789abcdef0123456789abcdef_';
+/** Extensions de l'historique (auteur et date de chaque étape) : à passer à `harness` quand le test les couvre. */
+export const HISTORY = {
+  validation: `${APP}validationOnboarding`,
+  activation: `${APP}premiereActivationOnboarding`,
+  regeneration: `${APP}regenerationOnboarding`,
+  termine: `${APP}termineOnboarding`,
+};
+export const HISTORY_ENV = {
+  ENTRA_HISTORY_VALIDATION_EXTENSION: HISTORY.validation,
+  ENTRA_HISTORY_ACTIVATION_EXTENSION: HISTORY.activation,
+  ENTRA_HISTORY_REGENERATION_EXTENSION: HISTORY.regeneration,
+  ENTRA_HISTORY_TERMINE_EXTENSION: HISTORY.termine,
+};

@@ -5,6 +5,7 @@ import { buildFolderName } from './folder';
 import type { Library } from './sharepoint';
 import { ServiceError } from './demandes';
 import { ensureLicense } from './licence';
+import { encoderEvenement } from './history';
 
 export interface DirectionDeps {
   config: ReadyConfig;
@@ -14,6 +15,8 @@ export interface DirectionDeps {
   /** Attentes entre deux lectures de l'état de licence (traitement par groupe asynchrone). */
   licensePollDelaysMs?: number[];
   sleep?: (ms: number) => Promise<void>;
+  /** Horloge (dates de l'historique) ; défaut : l'heure du serveur. */
+  now?: () => Date;
 }
 
 /** Exécute une étape Graph ; toute erreur devient un 502 qui nomme l'étape (jamais de message brut). */
@@ -132,7 +135,9 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
   }
 
   if (!reprise) {
-    await step(deps, actor, 'statut', id, {}, () => directory.setExtension(id, config.statusExtension, 'Validé'));
+    // Le statut et son auteur s'écrivent dans le même PATCH : jamais un compte Validé sans savoir qui l'a validé (si l'historique est configuré).
+    const historique = config.history ? { [config.history.validation]: encoderEvenement(actor, (deps.now ?? (() => new Date()))()) } : {};
+    await step(deps, actor, 'statut', id, {}, () => directory.setExtensions(id, { [config.statusExtension]: 'Validé', ...historique }));
     audit.track({ action: 'demande.validee', actor, outcome: 'ok', cible: id });
   } else {
     audit.track({ action: 'demande.reprise', actor, outcome: 'ok', cible: id });

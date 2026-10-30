@@ -236,6 +236,10 @@ export class FakeGraph {
         displayName: u.displayName,
         givenName: u.props.givenName,
         surname: u.props.surname,
+        userPrincipalName: u.upn,
+        jobTitle: u.props.jobTitle,
+        department: u.props.department,
+        manager: call.expand && u.manager ? this.managerOf(u.manager) : undefined,
         employeeHireDate: u.props.employeeHireDate,
         lastPasswordChangeDateTime: u.props.lastPasswordChangeDateTime,
         createdDateTime: u.props.createdDateTime,
@@ -342,8 +346,8 @@ export class FakeGraph {
         this.passwords.set(u.id, [...(this.passwords.get(u.id) ?? []), profile]);
         delete body.passwordProfile;
       }
-      // La date d'activation (extension activationOnboarding) n'est pas le statut : seul le statut échoue ici.
-      if (Object.keys(body).some((k) => k.startsWith('extension_') && !k.endsWith('_activationOnboarding')) && this.failOn.statusPatch) {
+      // La date d'activation et l'historique ne sont pas le statut : seule l'écriture du statut échoue ici.
+      if (Object.keys(body).some((k) => k.endsWith('_statutOnboarding')) && this.failOn.statusPatch) {
         throw graphError(this.failOn.statusPatch, 'Request_BadRequest');
       }
       if ('accountEnabled' in body) {

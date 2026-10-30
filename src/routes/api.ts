@@ -5,6 +5,7 @@ import { droitsDe, requireAuthenticated, requireDroit, type Principal } from '..
 import type { ReadyConfig } from '../config';
 import { createDemande, ServiceError } from '../demandes';
 import { activerDemande, listActivations, regenererMotDePasse, terminerOnboarding } from '../activation';
+import { lireDemande } from '../detail';
 import { listSuivi } from '../suivi';
 import { listDemandes, refuserDemande, reprendreDossier, validerDemande } from '../direction';
 import { listLicences, SkuAvailabilityCache } from '../licence';
@@ -151,6 +152,17 @@ export function createApiRouter(deps: ApiDeps): Router {
     }
     next();
   };
+
+  // Toute personne qui a accès : détail d'une demande (identité, licence, dossier, chronologie), lecture seule. 404 pour un compte
+  // qui n'est pas une demande d'onboarding (jamais le profil d'un autre compte).
+  api.get('/demandes/:id', acces, badId, async (req, res) => {
+    try {
+      const { id, roles } = res.locals.principal as Principal;
+      res.json(await lireDemande(deps, id, String(req.params.id), now(), droitsDe(roles, config)));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
 
   api.post('/demandes/:id/valider', approuver, badId, jsonOnly, json, async (req, res) => {
     try {

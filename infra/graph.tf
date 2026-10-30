@@ -112,6 +112,42 @@ resource "msgraph_resource" "creator_extension" {
   }
 }
 
+# Historique de l'onboarding : auteur et date de chaque étape, écrits dans le même PATCH que le statut (valeur « <objectId>|<date ISO> »,
+# 65 caractères au plus pour 256 permis). La création vient de createdDateTime et de createurOnboarding ; la date du mot de passe
+# et d'Authenticator viennent d'Entra. Aucune permission Graph de plus : User.ReadWrite.All écrit déjà les extensions du compte.
+# Même mécanique que statutOnboarding (nom complet extension_<appId>_<nom> renvoyé par Graph). Les noms sont injectés dans
+# ENTRA_HISTORY_*_EXTENSION (main.tf) : sans ces réglages l'app n'enregistre pas l'historique (jamais de 503).
+locals {
+  history_extensions = {
+    validation   = "validationOnboarding"
+    activation   = "premiereActivationOnboarding"
+    regeneration = "regenerationOnboarding"
+    termine      = "termineOnboarding"
+  }
+}
+
+resource "msgraph_resource" "history_extension" {
+  for_each = local.history_extensions
+
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = each.value
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  # Détruire l'extension efface cette étape de l'historique de tous les comptes.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
 # Sites.Selected n'ouvre aucun site tant qu'un grant explicite n'existe pas : rôle write sur le seul
 # site SHAREPOINT_SITE_ID, pour l'identité managée (identifiée par son client ID).
 # L'appelant (Terraform) doit pouvoir gérer les permissions du site (voir README), sinon

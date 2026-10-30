@@ -28,8 +28,21 @@ export interface Config {
   activationExtension?: string;
   /** Extension qui porte l'objectId du créateur de la demande (extension_<appId>_createurOnboarding) : écrite à la création, lue pour tracer l'auto-approbation (demande.auto_approbation). */
   creatorExtension?: string;
+  /**
+   * Extensions de l'historique (auteur et date de chaque étape, au format `acteur|date ISO`) : validation, première activation,
+   * dernière régénération du mot de passe (avec le nombre de régénérations) et passage à Terminé. Toutes ou aucune. Absentes :
+   * l'historique n'est pas enregistré (aucune écriture de plus, jamais de 503) et la page de détail le dit.
+   */
+  history?: HistoryExtensions;
   /** Période de la tâche qui termine les comptes Actif dont l'onboarding est complet (ms). 0 : tâche désactivée. Défaut : 5 minutes. */
   terminaisonIntervalMs: number;
+}
+
+export interface HistoryExtensions {
+  validation: string;
+  activation: string;
+  regeneration: string;
+  termine: string;
 }
 
 export interface LicenseOption {
@@ -81,6 +94,25 @@ function parseLicenses(raw: string | undefined): LicenseOption[] {
   });
 }
 
+const HISTORY_ENV = {
+  validation: 'ENTRA_HISTORY_VALIDATION_EXTENSION',
+  activation: 'ENTRA_HISTORY_ACTIVATION_EXTENSION',
+  regeneration: 'ENTRA_HISTORY_REGENERATION_EXTENSION',
+  termine: 'ENTRA_HISTORY_TERMINE_EXTENSION',
+} as const;
+
+/** Les quatre extensions de l'historique, toutes ou aucune (un historique à moitié enregistré serait trompeur). */
+function parseHistory(env: NodeJS.ProcessEnv): HistoryExtensions | undefined {
+  const entries = Object.entries(HISTORY_ENV).map(([key, name]) => [key, name, opt(env[name])] as const);
+  if (entries.every(([, , v]) => v === undefined)) return undefined;
+  const missing = entries.filter(([, , v]) => v === undefined).map(([, name]) => name);
+  if (missing.length > 0) throw new Error(`Historique : variables manquantes (${missing.join(', ')}) ; les quatre ou aucune`);
+  for (const [, name, v] of entries) {
+    if (!EXTENSION_RE.test(v as string)) throw new Error(`${name} invalide (attendu : extension_<appId sans tirets>_<nom>)`);
+  }
+  return Object.fromEntries(entries.map(([key, , v]) => [key, v])) as unknown as HistoryExtensions;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const upnDomain = opt(env.UPN_DOMAIN)?.toLowerCase();
   if (upnDomain !== undefined && !DOMAIN_RE.test(upnDomain)) {
@@ -115,6 +147,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (creatorExtension !== undefined && !EXTENSION_RE.test(creatorExtension)) {
     throw new Error('ENTRA_CREATOR_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
   }
+  const history = parseHistory(env);
   const timeZone = opt(env.TZ_METIER) ?? 'Europe/Paris';
   if (!isValidTimeZone(timeZone)) throw new Error(`TZ_METIER invalide : "${timeZone}"`);
   const terminaisonRaw = opt(env.TERMINAISON_INTERVAL_MS);
@@ -139,6 +172,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     arrivantsGroupId: arrivantsGroupRaw?.toLowerCase(),
     activationExtension,
     creatorExtension,
+    history,
     terminaisonIntervalMs,
   };
 }

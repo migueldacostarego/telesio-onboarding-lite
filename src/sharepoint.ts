@@ -19,6 +19,8 @@ export interface Library {
   ensureFolder(name: string): Promise<FolderResult>;
   /** Lecture seule, une requête paginée pour toute la racine (pas une par compte). */
   listFolderNames(): Promise<FolderNames>;
+  /** Lecture seule : l'adresse du dossier de ce nom, ou null s'il n'existe pas (ou si ce n'est pas un dossier). */
+  findFolder(name: string): Promise<{ webUrl: string | null } | null>;
 }
 
 /** Pages de 999 suivies au plus par lecture de la racine : au-delà, la liste est marquée incomplète. */
@@ -53,6 +55,17 @@ export class GraphSharePoint implements Library {
       }
     } catch (err) {
       throw wrap(err);
+    }
+  }
+
+  async findFolder(name: string): Promise<{ webUrl: string | null } | null> {
+    try {
+      const item = await this.client.api(`${this.root}:/${encodeURIComponent(name)}`).get();
+      return item.folder ? { webUrl: (item.webUrl ?? null) as string | null } : null;
+    } catch (err) {
+      const e = wrap(err);
+      if (e.kind === 'notFound') return null;
+      throw e;
     }
   }
 

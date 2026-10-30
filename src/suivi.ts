@@ -16,8 +16,8 @@ export const FENETRE_TERMINE_JOURS = 30;
  */
 export const DELAI_ACTIVATION_MAX_JOURS = 60;
 
-const STATUTS = ['EnAttente', 'Validé', 'Actif', 'Terminé'] as const;
-type Statut = (typeof STATUTS)[number];
+export const STATUTS = ['EnAttente', 'Validé', 'Actif', 'Terminé'] as const;
+export type Statut = (typeof STATUTS)[number];
 
 /** Actions proposées à la personne connectée pour une demande (calculées côté serveur, jamais déduites par l'interface). */
 export type SuiviAction = 'approuver' | 'refuser' | 'activer' | 'regenerer' | 'reprendre';
@@ -45,9 +45,9 @@ export interface SuiviItem {
 }
 
 /** Le jour J est atteint : comme la route `activer` (jour calculé dans TZ_METIER), une date d'arrivée absente ou à venir n'ouvre pas l'activation. */
-const arriveeAtteinte = (d: PendingDemande, aujourdhui: string): boolean => d.dateArrivee !== null && d.dateArrivee <= aujourdhui;
+const arriveeAtteinte = (d: Pick<PendingDemande, 'dateArrivee'>, aujourdhui: string): boolean => d.dateArrivee !== null && d.dateArrivee <= aujourdhui;
 
-function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: string, dossierManquant: boolean): SuiviAction[] {
+export function actionsFor(d: Pick<PendingDemande, 'dateArrivee'>, statut: Statut, droits: Droits, aujourdhui: string, dossierManquant: boolean): SuiviAction[] {
   if (statut === 'EnAttente') return droits.approuver ? ['approuver', 'refuser'] : [];
   if (statut === 'Validé') {
     const actions: SuiviAction[] = [];
