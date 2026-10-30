@@ -223,6 +223,8 @@ describe('envoi', () => {
     expect(ligne).toHaveAttribute('data-nouvelle', 'true');
     expect(within(ligne).getByText('En attente')).toBeInTheDocument();
     expect(within(ligne).getByText('Analyste')).toBeInTheDocument();
+    // L'adresse que le serveur vient d'attribuer est là aussi, sans attendre l'API.
+    expect(within(ligne).getByText(CREEE.userPrincipalName)).toBeInTheDocument();
     expect(within(ligne).getByText('synchronisation…')).toBeInTheDocument();
 
     // Relue toutes les 5 s ; toujours là tant que l'API ne la rend pas.

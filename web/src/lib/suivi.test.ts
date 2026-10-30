@@ -6,6 +6,7 @@ const AUJOURDHUI = '2026-10-28';
 const d = (nom: string, dateArrivee: string | null, statut: Demande['statut'] = 'EnAttente'): Demande => ({
   id: nom,
   nom,
+  upn: null,
   poste: null,
   service: null,
   dateArrivee,

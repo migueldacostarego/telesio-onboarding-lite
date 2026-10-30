@@ -172,7 +172,7 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
     const text = await res.text();
     expect(text).not.toContain(RH_ID);
     expect(text).not.toContain('createur');
-    expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut']);
+    expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut', 'upn']);
   });
 
   it('la liste ne lit plus le créateur (aucun statut) : il ne sert qu’à tracer l’auto-approbation', async () => {

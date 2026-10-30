@@ -1,4 +1,5 @@
 import { Skeleton } from '@/components/ui/skeleton';
+import { Adresse } from '@/components/demandes/Adresse';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
 import { actionsDe, occupee, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { Progression } from '@/components/demandes/Progression';
@@ -35,6 +36,7 @@ export function DemandesCartes(lignes: PropsLignes) {
               </p>
               <StatutBadge statut={d.statut} />
             </div>
+            <Adresse upn={d.upn} className="-mt-1" />
             <Synchronisation synchro={d.synchro} />
             <p className="text-sm text-muted-foreground">{poste || 'Poste non renseigné'}</p>
             <p className="text-sm">Arrivée : {formatArrivee(d.dateArrivee)}</p>

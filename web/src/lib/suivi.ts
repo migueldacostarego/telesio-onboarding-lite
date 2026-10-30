@@ -31,6 +31,8 @@ export const onboardingComplet = (o: EtatOnboarding | undefined): boolean => o !
 export interface Demande {
   id: string;
   nom: string;
+  /** Adresse professionnelle du compte (UPN) ; null si l'API ne l'a pas. */
+  upn: string | null;
   poste: string | null;
   service: string | null;
   /** AAAA-MM-JJ */

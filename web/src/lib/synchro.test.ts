@@ -4,7 +4,7 @@ import { SUIVI_KEY, type Demande, type Suivi } from '@/lib/suivi';
 import { DELAI_SYNCHRO_MS, attendre, enSynchro, fusionner } from '@/lib/synchro';
 
 const ligne = (o: Partial<Demande> = {}): Demande => ({
-  id: 'a', nom: 'Éloïse Dupont', poste: null, service: null, dateArrivee: null, statut: 'EnAttente', etape: 1, actions: ['approuver', 'refuser'], ...o,
+  id: 'a', nom: 'Éloïse Dupont', upn: 'a@exemple.test', poste: null, service: null, dateArrivee: null, statut: 'EnAttente', etape: 1, actions: ['approuver', 'refuser'], ...o,
 });
 const validee = ligne({ statut: 'Validé', etape: 2, actions: [] });
 

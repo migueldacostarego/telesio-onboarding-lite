@@ -1,7 +1,7 @@
 import { todayIn } from './dates';
 import { ServiceError } from './demandes';
 import { step, type DirectionDeps } from './direction';
-import type { OnboardingUser, PendingDemande } from './directory';
+import { sansUpn, type OnboardingUser, type SansUpn } from './directory';
 import { temporaryPassword } from './password';
 import type { MotifRegeneration } from './validation';
 
@@ -19,7 +19,7 @@ export interface OnboardingState {
   termine: boolean;
 }
 
-export interface ActivationItem extends PendingDemande {
+export interface ActivationItem extends SansUpn {
   statut: 'Validé' | 'Actif';
   /** activer : jour J atteint ; attendre : arrivée dans le futur ; regenerer : compte Actif, nouveau mot de passe temporaire (avec motif). */
   action: 'activer' | 'attendre' | 'regenerer';
@@ -87,13 +87,13 @@ export async function listActivations(
   const [valides, actifs] = await step(deps, actor, 'liste', undefined, {}, () =>
     Promise.all([directory.listByStatut(config.statusExtension, 'Validé'), directory.listByStatut(config.statusExtension, 'Actif')]),
   );
-  const suivis = (await inspectActifs(deps, actor, actifs.demandes)).map((d) => ({
+  const suivis = (await inspectActifs(deps, actor, actifs.demandes.map(sansUpn))).map((d) => ({
     ...d,
     statut: 'Actif' as const,
     action: 'regenerer' as const,
   }));
   const demandes: ActivationItem[] = [
-    ...valides.demandes.map((d) => ({
+    ...valides.demandes.map(sansUpn).map((d) => ({
       ...d,
       statut: 'Validé' as const,
       action: d.dateArrivee !== null && d.dateArrivee <= today ? ('activer' as const) : ('attendre' as const),

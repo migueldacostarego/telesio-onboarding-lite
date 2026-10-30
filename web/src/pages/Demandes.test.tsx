@@ -19,6 +19,7 @@ afterEach(() => {
 
 const demande = (o: Partial<Demande> & Pick<Demande, 'nom'>): Demande => ({
   id: o.nom,
+  upn: null,
   poste: 'Comptable',
   service: 'Finance',
   dateArrivee: '2026-11-03',

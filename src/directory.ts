@@ -94,6 +94,8 @@ export interface OnboardingProgress {
 export interface PendingDemande {
   id: string;
   nom: string;
+  /** Adresse professionnelle du compte (userPrincipalName) ; null si Graph ne la renvoie pas. */
+  upn: string | null;
   poste: string | null;
   service: string | null;
   manager: { id: string; displayName: string } | null;
@@ -103,6 +105,14 @@ export interface PendingDemande {
   prenom?: string | null;
   famille?: string | null;
 }
+
+/** Les listes qui n'affichent pas l'adresse (GET /api/demandes, /api/activations) ne la renvoient pas : seul le suivi la porte. */
+export type SansUpn = Omit<PendingDemande, 'upn'>;
+export const sansUpn = (d: PendingDemande): SansUpn => {
+  const reste: Partial<PendingDemande> = { ...d };
+  delete reste.upn;
+  return reste as SansUpn;
+};
 
 /** Disponibilité d'un SKU : prepaidUnits.enabled et consumedUnits de GET /subscribedSkus. */
 export interface SkuAvailability {
@@ -182,6 +192,7 @@ interface RawPending {
   [extension: string]: unknown;
   id: string;
   displayName: string;
+  userPrincipalName?: string | null;
   jobTitle?: string | null;
   department?: string | null;
   employeeHireDate?: string | null;
@@ -286,7 +297,7 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`${ext} eq '${statut}'`)
-        .select(`id,displayName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}`)
+        .select(`id,displayName,userPrincipalName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}`)
         .expand('manager($select=id,displayName)')
         .top(100)
         .count(true);
@@ -307,6 +318,7 @@ export class GraphDirectory implements Directory {
         .map((u) => ({
           id: u.id,
           nom: u.displayName,
+          upn: typeof u.userPrincipalName === 'string' ? u.userPrincipalName : null,
           poste: u.jobTitle ?? null,
           service: u.department ?? null,
           manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,

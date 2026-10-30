@@ -87,12 +87,13 @@ describe('panneau de détail', () => {
     expect(p.querySelectorAll('[data-fait]')).toHaveLength(0);
   });
 
-  it('n’affiche que ce que l’API fournit : pas de responsable, pas d’identifiant', async () => {
+  it('n’affiche que ce que l’API fournit : pas de responsable, pas d’identifiant (l’adresse professionnelle y est)', async () => {
     const { user } = monter({ demandes: [enAttente(ELOISE), enAttente(HUGO)], ecrire: rien });
     await screen.findByText('Hugo Lambert');
     await user.click(voir(ELOISE.nom));
     const p = await panneau(ELOISE.nom);
-    expect(p.textContent).not.toMatch(/responsable|manager|@|id-eloise/i);
+    expect(p.textContent).not.toMatch(/responsable|manager|id-eloise/i);
+    expect(p.textContent).toContain('compte.eloise@exemple.test');
   });
 
   it('les actions de la ligne y sont aussi : Valider part, spinner dans le panneau, étape Validée en échec sur erreur', async () => {

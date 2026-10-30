@@ -1,5 +1,6 @@
 import { CircleCheckIcon, CircleDotIcon, CircleIcon, CircleXIcon, type LucideIcon } from 'lucide-react';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
+import { BoutonCopier } from '@/components/demandes/Adresse';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import type { ActionNom, EtatLigne } from '@/lib/actions';
@@ -53,6 +54,19 @@ function Contenu({ demande, etat, onAction, onFermerMessage }: Omit<Props, 'dema
 
       <div className="space-y-6 px-4 pb-6">
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <div className="contents">
+            <dt className="text-muted-foreground">E-mail</dt>
+            <dd className="flex min-w-0 flex-wrap items-center gap-2">
+              {demande.upn ? (
+                <>
+                  <span className="min-w-0 break-all">{demande.upn}</span>
+                  <BoutonCopier upn={demande.upn} nom={demande.nom} />
+                </>
+              ) : (
+                <span className="text-muted-foreground">Non renseigné</span>
+              )}
+            </dd>
+          </div>
           {infos.map(([libelle, valeur]) => (
             <div key={libelle} className="contents">
               <dt className="text-muted-foreground">{libelle}</dt>

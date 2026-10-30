@@ -203,6 +203,8 @@ export class FakeGraph {
           .map((u) => ({
             id: u.id,
             displayName: u.displayName,
+            // Graph ne renvoie userPrincipalName que si $select le nomme.
+            ...(call.select?.includes('userPrincipalName') ? { userPrincipalName: u.upn } : {}),
             jobTitle: u.props.jobTitle,
             department: u.props.department,
             employeeHireDate: u.props.employeeHireDate,

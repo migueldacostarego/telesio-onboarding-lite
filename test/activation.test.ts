@@ -266,6 +266,8 @@ describe('GET /api/activations', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const out = (await res.json()) as { demandes: { nom: string; action: string; statut: string; onboarding?: unknown }[] };
+    // L'adresse n'est renvoyée que par le suivi : cette liste garde sa forme.
+    expect(JSON.stringify(out)).not.toMatch(/upn|exemple\.test/);
     expect(out.demandes.map((d) => [d.nom, d.statut, d.action, d.onboarding])).toEqual([
       ['Anna Martin', 'Validé', 'activer', undefined],
       ['Plus Tard', 'Validé', 'attendre', undefined],

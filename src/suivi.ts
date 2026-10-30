@@ -25,6 +25,8 @@ export type SuiviAction = 'approuver' | 'refuser' | 'activer' | 'regenerer' | 'r
 export interface SuiviItem {
   id: string;
   nom: string;
+  /** Adresse professionnelle du compte (userPrincipalName), null si Graph ne l'a pas renvoyée. */
+  upn: string | null;
   poste: string | null;
   service: string | null;
   /** AAAA-MM-JJ */
@@ -60,6 +62,7 @@ function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, aujourdhu
 const item = (d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: string, onboarding?: SuiviItem['onboarding'], dossierManquant = false): SuiviItem => ({
   id: d.id,
   nom: d.nom,
+  upn: d.upn,
   poste: d.poste,
   service: d.service,
   dateArrivee: d.dateArrivee,

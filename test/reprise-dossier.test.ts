@@ -93,7 +93,7 @@ describe('GET /api/suivi : action reprendre pour un compte Validé sans dossier 
     const res = await h.call('GET', '/api/suivi');
     const text = await res.text();
     expect(text).not.toMatch(/prenom|famille|givenName|surname/);
-    expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut']);
+    expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut', 'upn']);
   });
 
   it('les statuts autres que Validé n’en ont pas', async () => {

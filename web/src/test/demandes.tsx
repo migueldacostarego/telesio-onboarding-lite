@@ -28,6 +28,7 @@ export const ELOISE = { id: 'id-eloise', nom: 'Éloïse Dupont' };
 export const HUGO = { id: 'id-hugo', nom: 'Hugo Lambert' };
 export const enAttente = (p: { id: string; nom: string }, o: Partial<Demande> = {}): Demande => ({
   ...p,
+  upn: `compte.${p.id.replace('id-', '')}@exemple.test`,
   poste: 'Comptable',
   service: 'Finance',
   dateArrivee: '2026-11-03',

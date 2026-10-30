@@ -6,7 +6,7 @@ import { harness } from './helpers/harness';
 const IL_Y_A_29_JOURS = '2026-09-28T10:00:00Z';
 const IL_Y_A_31_JOURS = '2026-09-26T10:00:00Z';
 
-type Item = { id: string; nom: string; poste: string | null; service: string | null; dateArrivee: string | null; statut: string; etape: number; onboarding?: unknown };
+type Item = { id: string; nom: string; upn: string | null; poste: string | null; service: string | null; dateArrivee: string | null; statut: string; etape: number; onboarding?: unknown };
 type Suivi = { demandes: Item[]; tronque: boolean };
 
 function suite(env: Record<string, string | undefined> = {}) {
@@ -64,14 +64,30 @@ describe('GET /api/suivi', () => {
     expect((await fetch(`${h.base}/api/suivi`)).status).toBe(401);
   });
 
-  it('chaque demande ne porte que id, nom, poste, service, date d’arrivée, statut, étape, actions (et onboarding pour Actif)', async () => {
+  it('chaque demande ne porte que id, nom, upn, poste, service, date d’arrivée, statut, étape, actions (et onboarding pour Actif)', async () => {
     const manager = g().addUser('chef@exemple.test', 'Chef Secret');
     const id = g().addPending(EXT, { givenName: 'Anna', surname: 'Martin', statut: 'Validé', hireDate: '2026-10-27', managerId: manager });
     const out = await suivi();
     expect(out.demandes).toEqual([
-      { id, nom: 'Anna Martin', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-10-27', statut: 'Validé', etape: 2, actions: ['activer'] },
+      { id, nom: 'Anna Martin', upn: 'anna.martin@exemple.test', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-10-27', statut: 'Validé', etape: 2, actions: ['activer'] },
     ]);
     expect(JSON.stringify(out)).not.toContain('Chef Secret');
+  });
+
+  it('l’adresse professionnelle (UPN) est renvoyée pour chaque statut, lue avec le reste dans la même requête Graph', async () => {
+    compte('Attente', 'EnAttente');
+    compte('Valide', 'Validé');
+    compte('Actif', 'Actif');
+    termine('Fini', IL_Y_A_29_JOURS);
+    const out = await suivi();
+    expect(out.demandes.map((d) => [d.statut, d.upn])).toEqual([
+      ['EnAttente', 'attente.test@exemple.test'],
+      ['Validé', 'valide.test@exemple.test'],
+      ['Actif', 'actif.test@exemple.test'],
+      ['Terminé', 'fini.test@exemple.test'],
+    ]);
+    // Une requête par statut, aucune lecture de plus par compte pour l'adresse.
+    expect(g().calls.filter((c) => c.method === 'GET' && c.path === '/users' && c.select?.includes('userPrincipalName'))).toHaveLength(4);
   });
 
   it('Actif : onboarding calculé comme GET /activations, un échec de lecture est limité au compte concerné', async () => {

@@ -99,6 +99,7 @@ export function Demandes() {
     attendre(queryClient, {
       id: creee.id,
       nom,
+      upn: creee.userPrincipalName,
       poste: valeurs.poste,
       service: valeurs.service,
       dateArrivee: valeurs.dateArrivee,

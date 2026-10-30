@@ -2,6 +2,7 @@ import { Fragment } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
+import { Adresse } from '@/components/demandes/Adresse';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge, Synchronisation } from '@/components/demandes/StatutBadge';
 import { actionsDe, aUnMessage, occupee, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
@@ -55,6 +56,7 @@ export function DemandesTable({ tri, ...lignes }: PropsLignes & { tri: Tri }) {
                   >
                     {d.nom}
                   </button>
+                  <Adresse upn={d.upn} />
                   {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
                 </TableCell>
                 <TableCell>{d.poste ?? ABSENT}</TableCell>
