@@ -24,6 +24,8 @@ export interface ApiDeps {
   /** Attentes entre deux lectures de l'état de licence après l'ajout au groupe. */
   licensePollDelaysMs?: number[];
   sleep?: (ms: number) => Promise<void>;
+  /** Verrou par compte, partagé avec la tâche de terminaison (même instance). Défaut : un verrou propre à ce routeur. */
+  lock?: KeyedLock;
 }
 
 type Res = express.Response;
@@ -68,7 +70,7 @@ export function createApiRouter(deps: ApiDeps): Router {
   const activer = requireDroit('activer', config, guardOpts);
   const actor = (res: express.Response) => (res.locals.principal as Principal).id;
   // Double clic : une action à la fois par compte (et une création à la fois par personne RH).
-  const lock = new KeyedLock();
+  const lock = deps.lock ?? new KeyedLock();
   const key = (req: express.Request) => String(req.params.id).toLowerCase();
 
   // GET /api/moi : qui est connecté, ses rôles et ses droits (calculés ici d'après RH_ROLE et DIRECTION_ROLE), lu dans l'identité Easy Auth (aucun appel Graph, jamais mis en cache).

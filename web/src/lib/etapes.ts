@@ -69,7 +69,7 @@ export function etapesDe(d: Pick<Demande, 'etape' | 'dateArrivee' | 'onboarding'
         { libelle: 'Authenticator inscrit', fait: o.authenticator },
         { libelle: 'Mot de passe changé', fait: o.motDePasse },
       ];
-      terminee.detail = onboardingComplet(o) ? 'Tout est fait : le passage à Terminée est automatique.' : 'À la première connexion de l’arrivant.';
+      terminee.detail = onboardingComplet(o) ? 'Tout est fait : le serveur passe le compte à Terminée automatiquement (vérification toutes les 5 minutes).' : 'À la première connexion de l’arrivant.';
     }
   }
 

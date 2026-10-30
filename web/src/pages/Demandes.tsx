@@ -15,7 +15,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useActionsDemandes } from '@/hooks/useActionsDemandes';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
-import { useTerminaisonAuto } from '@/hooks/useTerminaisonAuto';
 import { useNow } from '@/hooks/useNow';
 import type { ActionAvecBoite, ActionNom } from '@/lib/actions';
 import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
@@ -55,7 +54,6 @@ export function Demandes() {
       setCible(null);
     },
   });
-  useTerminaisonAuto(donnees?.demandes, suivi.dataUpdatedAt);
   const demandeCible = cible === null ? undefined : donnees?.demandes.find((d) => d.id === cible.id);
   const etatCible = cible === null ? undefined : actions.etats[cible.id];
   const cibleEnCours = cible !== null && etatCible?.phase === 'en_cours' && etatCible.action === cible.action;

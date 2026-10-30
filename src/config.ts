@@ -28,6 +28,8 @@ export interface Config {
   activationExtension?: string;
   /** Extension qui porte l'objectId du créateur de la demande (extension_<appId>_createurOnboarding) : refus d'auto-approbation. */
   creatorExtension?: string;
+  /** Période de la tâche qui termine les comptes Actif dont l'onboarding est complet (ms). 0 : tâche désactivée. Défaut : 5 minutes. */
+  terminaisonIntervalMs: number;
 }
 
 export interface LicenseOption {
@@ -115,6 +117,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   const timeZone = opt(env.TZ_METIER) ?? 'Europe/Paris';
   if (!isValidTimeZone(timeZone)) throw new Error(`TZ_METIER invalide : "${timeZone}"`);
+  const terminaisonRaw = opt(env.TERMINAISON_INTERVAL_MS);
+  const terminaisonIntervalMs = terminaisonRaw === undefined ? 300_000 : Number(terminaisonRaw);
+  if (!Number.isInteger(terminaisonIntervalMs) || terminaisonIntervalMs < 0 || (terminaisonIntervalMs > 0 && terminaisonIntervalMs < 60_000)) {
+    throw new Error('TERMINAISON_INTERVAL_MS invalide (0 pour désactiver, sinon 60000 ms au moins)');
+  }
   // Easy Auth pose WEBSITE_AUTH_ENABLED=True. Le contournement de dev est ignoré en production.
   const easyAuth = env.WEBSITE_AUTH_ENABLED?.toLowerCase() === 'true';
   const devBypass = env.ALLOW_INSECURE_DEV_AUTH === 'true' && env.NODE_ENV !== 'production';
@@ -132,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     arrivantsGroupId: arrivantsGroupRaw?.toLowerCase(),
     activationExtension,
     creatorExtension,
+    terminaisonIntervalMs,
   };
 }
 

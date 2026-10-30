@@ -221,47 +221,19 @@ describe('Régénérer', () => {
   });
 });
 
-describe('passage à Terminé : seul, par POST /terminer', () => {
-  const complet = (o = {}) => actif(ELOISE, { onboarding: { motDePasse: true, authenticator: true, termine: true }, ...o });
-  const URL_TERMINER = '/api/demandes/id-eloise/terminer';
-
-  it('appelé une fois pour un compte Actif dont l’API dit que l’onboarding est complet, puis la liste est relue et montre Terminée', async () => {
-    const { etat, fetchMock } = monter({
-      demandes: [complet(), enAttente(HUGO, { actions: [] })],
-      ecrire: () => {
-        etat.demandes = [{ ...complet(), statut: 'Terminé', etape: 4, actions: [], onboarding: undefined }, enAttente(HUGO, { actions: [] })];
-        return reply(200, { id: ELOISE.id, statut: 'Terminé' });
-      },
-    });
+describe('passage à Terminé : l’affaire du serveur, jamais de l’écran', () => {
+  it('même quand l’API dit que l’onboarding est complet, l’écran n’appelle jamais POST /terminer ; la ligne passe à Terminée à la lecture suivante', async () => {
+    const complet = actif(ELOISE, { onboarding: { motDePasse: true, authenticator: true, termine: true } });
+    const { etat, fetchMock } = monter({ demandes: [complet, enAttente(HUGO, { actions: [] })], ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
-    await waitFor(() => expect(ecritures(fetchMock)).toEqual([{ url: URL_TERMINER, corps: {} }]));
+    await avancer(90_000);
+    expect(ecritures(fetchMock)).toEqual([]);
+
+    // Le serveur (tâche toutes les 5 minutes) a terminé le compte : l'écran le montre à l'actualisation.
+    etat.demandes = [{ ...complet, statut: 'Terminé', etape: 4, actions: [], onboarding: undefined }, enAttente(HUGO, { actions: [] })];
+    await avancer(30_000);
     const ligne = await screen.findByRole('row', { name: /Éloïse Dupont/ });
     await waitFor(() => expect(within(ligne).getByText('Terminée')).toBeInTheDocument());
-    await avancer(90_000);
-    expect(ecritures(fetchMock)).toHaveLength(1);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('pas d’appel si l’onboarding est incomplet, si la lecture a échoué, ou si l’API ne propose pas regenerer (droit activer absent)', async () => {
-    const { fetchMock } = monter({
-      demandes: [
-        actif(ELOISE),
-        actif(HUGO, { onboarding: { verification: 'echec' } }),
-        actif({ id: 'id-sans-droit', nom: 'Anna Martin' }, { actions: [], onboarding: { motDePasse: true, authenticator: true, termine: true } }),
-        valide({ id: 'id-valide', nom: 'Luc Bernard' }),
-      ],
-      ecrire: () => reply(200, {}),
-    });
-    await screen.findByText('Hugo Lambert');
-    await avancer(60_000);
-    expect(ecritures(fetchMock)).toHaveLength(0);
-  });
-
-  it('un 409 (le serveur n’est pas encore d’accord) est silencieux et retenté aux listes suivantes, sans dépasser 5 essais', async () => {
-    const { fetchMock } = monter({ demandes: [complet()], ecrire: () => reply(409, { error: 'Onboarding non terminé', code: 'onboarding_non_termine' }) });
-    await screen.findByText('Éloïse Dupont');
-    await avancer(10 * 31_000);
-    expect(ecritures(fetchMock).filter((e) => e.url === URL_TERMINER)).toHaveLength(5);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(ecritures(fetchMock)).toEqual([]);
   });
 });

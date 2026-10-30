@@ -23,7 +23,7 @@ export interface Onboarding {
 }
 export type EtatOnboarding = Onboarding | { verification: 'echec' };
 
-/** Vrai si l'API dit que le mot de passe a changé et qu'Authenticator est inscrit (la finalisation passe par POST /terminer). */
+/** Vrai si l'API dit que le mot de passe a changé et qu'Authenticator est inscrit (le passage à Terminé est fait par la tâche du serveur, toutes les 5 minutes). */
 export const onboardingComplet = (o: EtatOnboarding | undefined): boolean => o !== undefined && 'termine' in o && o.termine === true;
 
 /** Une demande de GET /api/suivi (les champs que l'écran lit). */

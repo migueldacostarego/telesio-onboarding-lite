@@ -4,6 +4,7 @@ import { createApp } from '../../src/app';
 import type { Audit, AuditEvent } from '../../src/audit';
 import { assertReady, loadConfig } from '../../src/config';
 import { GraphDirectory } from '../../src/directory';
+import type { KeyedLock } from '../../src/lock';
 import { GraphSharePoint } from '../../src/sharepoint';
 import { FakeGraph } from './fakeGraph';
 
@@ -43,7 +44,7 @@ export const principal = (roles: string[] = [], oid = RH_ID, extra: { typ: strin
     }),
   ).toString('base64');
 
-export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean; now?: () => Date; webDir?: string } = {}) {
+export function setup(env: Record<string, string | undefined> = {}, opts: { trustAuthHeaders?: boolean; withLibrary?: boolean; now?: () => Date; webDir?: string; lock?: KeyedLock } = {}) {
   const graph = new FakeGraph();
   graph.skus.set(LICENSE_SKU, { enabled: 5, consumed: 1 });
   graph.skus.set(LICENSE_SKU_B, { enabled: 3, consumed: 0 });
@@ -68,17 +69,19 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
     }),
     trustAuthHeaders: opts.trustAuthHeaders ?? true,
   });
+  const directory = new GraphDirectory(graph.asClient());
   const app = createApp({
     config,
-    directory: new GraphDirectory(graph.asClient()),
+    directory,
     library: opts.withLibrary === false ? undefined : new GraphSharePoint(graph.asClient(), SITE, DRIVE),
     audit,
+    lock: opts.lock,
     now: opts.now ?? (() => NOW),
     managerRetryDelaysMs: [0, 0],
     licensePollDelaysMs: [0, 0, 0],
     sleep: async () => {},
   }, { webDir: opts.webDir });
-  return { graph, events, app };
+  return { graph, events, app, config, directory, audit };
 }
 
 export async function listen(app: ReturnType<typeof setup>['app']): Promise<{ base: string; close: () => Promise<void> }> {
