@@ -17,24 +17,6 @@ describe('Direction : droit approuver, porté par le rôle Direction', () => {
   afterAll(() => h.stop());
   const pending = (given = 'Anna') => h.ctx.graph.addPending(EXT, { givenName: given, surname: 'Martin', managerId, extras: { [EXT_LIC]: LICENSE_SKU } });
 
-  it('tout porteur du rôle Direction accède à la liste, pas seulement une personne désignée', async () => {
-    for (const oid of [DIR_ID, AUTRE_DIRECTION_ID]) {
-      expect((await h.callAs(['Direction'], oid, 'GET', '/api/demandes')).status).toBe(200);
-    }
-    expect((await h.callAs(['RH', 'Direction'], RH_ID, 'GET', '/api/demandes')).status).toBe(200);
-  });
-
-  it('refuse RH seul, un rôle étranger et l’absence de rôle : 403 droit_manquant, refus tracé avec le droit', async () => {
-    for (const roles of [['RH'], ['Autre'], []]) {
-      const res = await h.callAs(roles, RH_ID, 'GET', '/api/demandes');
-      expect(res.status).toBe(403);
-      expect(await res.json()).toEqual({ error: 'Accès refusé', code: 'droit_manquant' });
-    }
-    expect(h.ctx.events.filter((e) => e.action === 'acces.refuse')).toEqual(
-      Array.from({ length: 3 }, () => ({ action: 'acces.refuse', outcome: 'refuse', route: 'GET /api/demandes', actor: RH_ID, reason: 'droit_manquant', droit: 'approuver' })),
-    );
-  });
-
   it('valider et refuser : n’importe quelle personne Direction, une autre que celle des tests habituels comprise', async () => {
     const aValider = pending('Valide');
     expect((await h.callAs(['Direction'], AUTRE_DIRECTION_ID, 'POST', `/api/demandes/${aValider}/valider`)).status).toBe(200);
@@ -56,17 +38,16 @@ describe('Direction : droit approuver, porté par le rôle Direction', () => {
   });
 
   it('aucune vérification d’appartenance à un groupe de valideurs : plus d’appel checkMemberGroups', async () => {
-    await h.call('GET', '/api/demandes');
     await h.call('POST', `/api/demandes/${pending()}/valider`);
     expect(h.ctx.graph.calls.some((c) => c.path.endsWith('/checkMemberGroups'))).toBe(false);
   });
 
   it('401 sans identité', async () => {
-    expect((await h.call('GET', '/api/demandes', DIR_ID, {}, { 'x-ms-client-principal': '' })).status).toBe(401);
+    expect((await h.call('POST', `/api/demandes/${pending()}/valider`, DIR_ID, {}, { 'x-ms-client-principal': '' })).status).toBe(401);
   });
 });
 
-describe('GET /api/demandes, valider, refuser', () => {
+describe('valider, refuser', () => {
   const h = harness();
   let managerId: string;
   beforeEach(async () => {
@@ -78,29 +59,6 @@ describe('GET /api/demandes, valider, refuser', () => {
 
   const pending = (given = 'Anna', sur = 'Martin', statut = 'EnAttente', licence: string | null = LICENSE_SKU) =>
     h.ctx.graph.addPending(EXT, { givenName: given, surname: sur, statut, managerId, extras: licence ? { [EXT_LIC]: licence } : {} });
-
-  it('liste uniquement les EnAttente, avec les champs utiles', async () => {
-    const id = pending();
-    pending('Luc', 'Valide', 'Validé');
-    const res = await h.call('GET', '/api/demandes');
-    expect(await res.json()).toEqual({
-      demandes: [
-        {
-          id,
-          nom: 'Anna Martin',
-          poste: 'Comptable',
-          service: 'Finance',
-          typeContrat: null,
-          manager: { id: managerId, displayName: 'Camille Responsable' },
-          dateArrivee: '2026-11-03',
-        },
-      ],
-      tronque: false,
-    });
-    const call = h.ctx.graph.calls.find((c) => c.filter?.includes(EXT))!;
-    expect(call.filter).toBe(`${EXT} eq 'EnAttente'`);
-    expect(call.headers.ConsistencyLevel).toBe('eventual');
-  });
 
   it('valide : statut Validé puis dossier « {nom} {prenom} »', async () => {
     const id = pending();

@@ -1,6 +1,6 @@
 import type { Audit } from './audit';
 import type { ReadyConfig } from './config';
-import { graphFailureProps, sansUpn, type Directory, type OnboardingUser, type SansUpn } from './directory';
+import { graphFailureProps, type Directory, type OnboardingUser } from './directory';
 import { buildFolderName } from './folder';
 import type { Library } from './sharepoint';
 import { ServiceError } from './demandes';
@@ -79,17 +79,6 @@ async function loadForAction(
     deps.audit.track({ action: 'demande.auto_approbation', actor, outcome: 'ok', cible: id, operation: action });
   }
   return user;
-}
-
-export async function listDemandes(
-  deps: DirectionDeps,
-  actor: string,
-): Promise<{ demandes: SansUpn[]; tronque: boolean }> {
-  const res = await step(deps, actor, 'liste', undefined, {}, () =>
-    deps.directory.listByStatut(deps.config.statusExtension, 'EnAttente'),
-  );
-  deps.audit.track({ action: 'demande.liste', actor, outcome: 'ok', resultats: res.demandes.length, tronque: res.tronque });
-  return { demandes: res.demandes.map(sansUpn), tronque: res.tronque };
 }
 
 export interface Validation {

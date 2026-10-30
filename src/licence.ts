@@ -1,6 +1,6 @@
 import type { LicenseOption } from './config';
 import { ServiceError } from './demandes';
-import type { LicenseRead, SkuAvailability } from './directory';
+import type { LicenseRead } from './directory';
 import { step, type DirectionDeps } from './direction';
 
 /** Attentes entre deux lectures de l'état de licence : le traitement par groupe est asynchrone (quelques secondes à une minute). */
@@ -14,60 +14,6 @@ export interface LicenseDeps extends DirectionDeps {
 export const PENDING_MESSAGE = 'Licence en cours d’attribution, revalidez dans une minute';
 
 const NO_LICENSE = { error: 'Aucune licence disponible', code: 'licence_indisponible' } as const;
-
-export interface LicenceDisponible {
-  skuId: string;
-  libelle: string;
-  disponibles: number;
-}
-
-export const SKU_CACHE_TTL_MS = 60_000;
-
-/**
- * Cache mémoire de GET /subscribedSkus, réservé à l'affichage du formulaire RH (listLicences).
- * La création de demande et la validation direction relisent toujours en direct : ne jamais les brancher ici.
- * Une lecture en échec n'est pas conservée (la suivante réessaie).
- */
-export class SkuAvailabilityCache {
-  private entry?: { at: number; value: Promise<Map<string, SkuAvailability>> };
-
-  constructor(
-    private readonly now: () => number,
-    private readonly ttlMs = SKU_CACHE_TTL_MS,
-  ) {}
-
-  get(load: () => Promise<Map<string, SkuAvailability>>): Promise<Map<string, SkuAvailability>> {
-    if (this.entry && this.now() - this.entry.at < this.ttlMs) return this.entry.value;
-    const value = load();
-    const entry = { at: this.now(), value };
-    this.entry = entry;
-    value.catch(() => {
-      if (this.entry === entry) this.entry = undefined;
-    });
-    return value;
-  }
-
-  /** Après une écriture qui change les unités libres (validation) ou un refus pour manque de licence. */
-  invalidate(): void {
-    this.entry = undefined;
-  }
-}
-
-/** Licences proposées à RH avec le nombre d'unités libres (enabled - consumedUnits, jamais négatif). */
-export async function listLicences(
-  deps: DirectionDeps,
-  actor: string,
-  cache?: SkuAvailabilityCache,
-): Promise<{ licences: LicenceDisponible[] }> {
-  const load = () => deps.directory.listSkuAvailability();
-  const units = await step(deps, actor, 'licence_disponibilite', undefined, {}, () => (cache ? cache.get(load) : load()));
-  const licences = deps.config.licenses.map((l) => {
-    const u = units.get(l.skuId);
-    return { skuId: l.skuId, libelle: l.libelle, disponibles: u ? Math.max(0, u.enabled - u.consumed) : 0 };
-  });
-  deps.audit.track({ action: 'licence.liste', actor, outcome: 'ok', resultats: licences.length });
-  return { licences };
-}
 
 /**
  * Garantit que le compte porte la licence du SKU choisi (option : SKU et groupe de licence), AVANT toute écriture de statut.

@@ -1,7 +1,7 @@
 import { todayIn } from './dates';
 import { ServiceError } from './demandes';
 import { step, type DirectionDeps } from './direction';
-import { sansUpn, type OnboardingProgress, type OnboardingUser, type SansUpn } from './directory';
+import type { OnboardingProgress, OnboardingUser } from './directory';
 import { decoderEvenement, encoderEvenement } from './history';
 import { temporaryPassword } from './password';
 import type { MotifRegeneration } from './validation';
@@ -20,14 +20,6 @@ export interface OnboardingState {
   authenticator: boolean;
   /** Les deux : l'onboarding est terminé (la finalisation passe par POST /terminer). */
   termine: boolean;
-}
-
-export interface ActivationItem extends SansUpn {
-  statut: 'Validé' | 'Actif';
-  /** activer : jour J atteint ; attendre : arrivée dans le futur ; regenerer : compte Actif, nouveau mot de passe temporaire (avec motif). */
-  action: 'activer' | 'attendre' | 'regenerer';
-  /** Comptes Actif seulement ; { verification: 'echec' } si la lecture Graph a échoué pour ce compte. */
-  onboarding?: OnboardingState | { verification: 'echec' };
 }
 
 /** Exécute fn sur chaque élément, au plus `limit` à la fois, en gardant l'ordre. */
@@ -73,38 +65,6 @@ export async function inspectActifs<T extends { id: string }>(
     ...d,
     onboarding: await inspectOnboarding(deps, actor, d.id).catch(() => ({ verification: 'echec' as const })),
   }));
-}
-
-/**
- * Comptes Validé, et tous les Actif tant que l'onboarding n'est pas Terminé (avec l'état du mot de passe et d'Authenticator).
- * Lecture seule : les transitions (Terminé) passent par POST /terminer, jamais par une liste.
- */
-export async function listActivations(
-  deps: ActivationDeps,
-  actor: string,
-  now: Date,
-): Promise<{ demandes: ActivationItem[]; tronque: boolean }> {
-  const { config, directory, audit } = deps;
-  activationConfig(deps);
-  const today = todayIn(config.timeZone, now);
-  const [valides, actifs] = await step(deps, actor, 'liste', undefined, {}, () =>
-    Promise.all([directory.listByStatut(config.statusExtension, 'Validé'), directory.listByStatut(config.statusExtension, 'Actif')]),
-  );
-  const suivis = (await inspectActifs(deps, actor, actifs.demandes.map(sansUpn))).map((d) => ({
-    ...d,
-    statut: 'Actif' as const,
-    action: 'regenerer' as const,
-  }));
-  const demandes: ActivationItem[] = [
-    ...valides.demandes.map(sansUpn).map((d) => ({
-      ...d,
-      statut: 'Validé' as const,
-      action: d.dateArrivee !== null && d.dateArrivee <= today ? ('activer' as const) : ('attendre' as const),
-    })),
-    ...suivis,
-  ];
-  audit.track({ action: 'activation.liste', actor, outcome: 'ok', resultats: demandes.length });
-  return { demandes, tronque: valides.tronque || actifs.tronque };
 }
 
 /** Le mot de passe a changé après la dernière remise (date d'activation, à défaut création du compte) et la marge de la remise elle-même. */

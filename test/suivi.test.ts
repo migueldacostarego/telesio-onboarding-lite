@@ -99,7 +99,7 @@ describe('GET /api/suivi', () => {
     expect(Object.fromEntries(out.demandes.map((d) => [d.nom, d.typeContrat]))).toEqual({ 'Eva Employee': 'Employé', 'Carl Contractor': 'Contractor', 'Old Compte': null, 'Max Autre': null });
   });
 
-  it('Actif : onboarding calculé comme GET /activations, un échec de lecture est limité au compte concerné', async () => {
+  it('Actif : onboarding calculé (mot de passe changé après l’activation, Authenticator), un échec de lecture est limité au compte concerné', async () => {
     compte('Complet', 'Actif', { extras: { [EXT_ACT]: '2026-10-26T10:00:00Z', lastPasswordChangeDateTime: '2026-10-26T12:00:00Z' }, authenticator: true });
     compte('Partiel', 'Actif', { extras: { [EXT_ACT]: '2026-10-26T10:00:00Z', lastPasswordChangeDateTime: '2026-10-26T10:00:05Z' } });
     const out = await suivi();
@@ -107,8 +107,6 @@ describe('GET /api/suivi', () => {
       ['Complet Test', { motDePasse: true, authenticator: true, termine: true }],
       ['Partiel Test', { motDePasse: false, authenticator: false, termine: false }],
     ]);
-    const activations = (await (await h.callRh('GET', '/api/activations')).json()) as { demandes: { nom: string; onboarding: unknown }[] };
-    expect(activations.demandes.map((d) => [d.nom, d.onboarding])).toEqual(out.demandes.map((d) => [d.nom, d.onboarding]));
 
     g().failOn.authenticator = 403;
     const degrade = await suivi();

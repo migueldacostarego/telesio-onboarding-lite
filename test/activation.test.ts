@@ -249,92 +249,6 @@ describe('POST /api/demandes/:id/regenerer', () => {
   });
 });
 
-describe('GET /api/activations', () => {
-  const { h, g, account, actif, writes } = suite();
-
-  it('liste les Validé (activer ou attendre) et tous les Actif avec l’état de l’onboarding, réservé RH', async () => {
-    account('Validé', TODAY);
-    g().addPending(EXT, { givenName: 'Plus', surname: 'Tard', statut: 'Validé', hireDate: '2026-11-15' });
-    // Mot de passe changé après l'activation, Authenticator absent : non terminé.
-    actif({ [EXT_ACT]: '2026-10-26T10:00:00Z', lastPasswordChangeDateTime: '2026-10-26T12:00:00Z' });
-    // Très ancien : toujours listé tant que l'onboarding n'est pas Terminé.
-    g().addPending(EXT, { givenName: 'Ancien', surname: 'Actif', statut: 'Actif', hireDate: '2026-06-01', enabled: true, extras: { [EXT_ACT]: '2026-06-01T10:00:00Z', lastPasswordChangeDateTime: '2026-05-01T10:00:00Z' } });
-    g().addPending(EXT, { givenName: 'En', surname: 'Attente', statut: 'EnAttente' });
-    g().addPending(EXT, { givenName: 'Fini', surname: 'Terminé', statut: 'Terminé', enabled: true });
-
-    const res = await h.callRh('GET', '/api/activations');
-    expect(res.status).toBe(200);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    const out = (await res.json()) as { demandes: { nom: string; action: string; statut: string; onboarding?: unknown }[] };
-    // L'adresse n'est renvoyée que par le suivi : cette liste garde sa forme.
-    expect(JSON.stringify(out)).not.toMatch(/upn|exemple\.test/);
-    expect(out.demandes.map((d) => [d.nom, d.statut, d.action, d.onboarding])).toEqual([
-      ['Anna Martin', 'Validé', 'activer', undefined],
-      ['Plus Tard', 'Validé', 'attendre', undefined],
-      ['Anna Martin', 'Actif', 'regenerer', { motDePasse: true, authenticator: false, termine: false }],
-      ['Ancien Actif', 'Actif', 'regenerer', { motDePasse: false, authenticator: false, termine: false }],
-    ]);
-    expect((await h.callAs(['Autre'], DIR_ID, 'GET', '/api/activations')).status).toBe(403);
-  });
-
-  it('lecture seule : aucune écriture Graph, même quand l’onboarding est complet (la finalisation est un POST)', async () => {
-    actif({ [EXT_ACT]: '2026-10-26T10:00:00Z', lastPasswordChangeDateTime: '2026-10-26T12:00:00Z' }, { authenticator: true });
-    const out = (await (await h.callRh('GET', '/api/activations')).json()) as { demandes: { onboarding: unknown }[] };
-    expect(out.demandes[0]!.onboarding).toEqual({ motDePasse: true, authenticator: true, termine: true });
-    expect(writes()).toEqual([]);
-    expect(h.ctx.events.map((e) => e.action)).toEqual(['activation.liste']);
-  });
-
-  it('un échec de lecture pour un compte ne fait pas échouer la liste', async () => {
-    actif({ [EXT_ACT]: '2026-10-26T10:00:00Z', lastPasswordChangeDateTime: '2026-10-26T12:00:00Z' });
-    account('Validé', TODAY);
-    g().failOn.authenticator = 403;
-    const res = await h.callRh('GET', '/api/activations');
-    expect(res.status).toBe(200);
-    const out = (await res.json()) as { demandes: { statut: string; onboarding?: unknown }[] };
-    expect(out.demandes.map((d) => [d.statut, d.onboarding])).toEqual([['Validé', undefined], ['Actif', { verification: 'echec' }]]);
-    expect(h.ctx.events.some((e) => e.action === 'demande.echec' && e.etape === 'onboarding_authenticator')).toBe(true);
-  });
-
-  it('ne filtre côté Graph que sur le statut : statut + date + $expand est refusé (400 Request_UnsupportedQuery)', async () => {
-    g().addPending(EXT, { givenName: 'Recent', surname: 'Actif', statut: 'Actif', hireDate: '2026-10-25', enabled: true });
-    g().addPending(EXT, { givenName: 'Ancien', surname: 'Actif', statut: 'Actif', hireDate: '2026-06-01', enabled: true });
-
-    const res = await h.callRh('GET', '/api/activations');
-    expect(res.status).toBe(200);
-    const out = (await res.json()) as { demandes: { nom: string }[] };
-    expect(out.demandes.map((d) => d.nom)).toEqual(['Recent Actif', 'Ancien Actif']);
-
-    const lists = g().calls.filter((c) => c.method === 'GET' && c.path === '/users');
-    expect(lists.length).toBeGreaterThan(0);
-    for (const c of lists) {
-      expect(c.filter).toMatch(/^extension_\w+ eq '[^']+'$/);
-      expect(c.filter).not.toContain('employeeHireDate');
-      expect(c.headers.ConsistencyLevel).toBe('eventual');
-    }
-  });
-
-  it('suit les pages Graph : aucun compte n’est manqué', async () => {
-    g().pageSize = 2;
-    for (let i = 0; i < 5; i++) g().addPending(EXT, { givenName: `Vieux${i}`, surname: 'Actif', statut: 'Actif', hireDate: '2026-01-01', enabled: true });
-    g().addPending(EXT, { givenName: 'Recent', surname: 'Actif', statut: 'Actif', hireDate: '2026-10-26', enabled: true });
-    for (let i = 0; i < 3; i++) g().addPending(EXT, { givenName: `Valide${i}`, surname: 'Test', statut: 'Validé', hireDate: TODAY });
-
-    const out = (await (await h.callRh('GET', '/api/activations')).json()) as { demandes: { nom: string; statut: string }[]; tronque: boolean };
-    expect(out.tronque).toBe(false);
-    expect(out.demandes).toHaveLength(9);
-  });
-
-  it('plafonne le nombre de pages et signale tronque', async () => {
-    g().pageSize = 1;
-    for (let i = 0; i < 12; i++) g().addPending(EXT, { givenName: `V${i}`, surname: 'Test', statut: 'Validé', hireDate: TODAY });
-
-    const out = (await (await h.callRh('GET', '/api/activations')).json()) as { demandes: unknown[]; tronque: boolean };
-    expect(out.tronque).toBe(true);
-    expect(out.demandes).toHaveLength(10);
-  });
-});
-
 describe('POST /api/demandes/:id/terminer', () => {
   const { h, g, account, actif, writes } = suite();
   const terminer = (id: string) => h.callRh('POST', `/api/demandes/${id}/terminer`);
@@ -425,7 +339,6 @@ describe('Activation non configurée', () => {
       const { h, g, account } = suite(env);
       it('toutes les routes d’activation répondent 503 sans rien écrire', async () => {
         const id = account();
-        expect((await h.callRh('GET', '/api/activations')).status).toBe(503);
         expect((await h.callRh('POST', `/api/demandes/${id}/activer`)).status).toBe(503);
         expect((await h.callRh('POST', `/api/demandes/${id}/regenerer`, { motif: 'autre' })).status).toBe(503);
         expect((await h.callRh('POST', `/api/demandes/${id}/terminer`)).status).toBe(503);
@@ -433,51 +346,6 @@ describe('Activation non configurée', () => {
       });
     });
   }
-});
-
-describe('pages HTML', () => {
-  const h = harness();
-  beforeEach(async () => {
-    if (h.ctx) await h.stop();
-    await h.start();
-  });
-  afterAll(() => h.stop());
-
-  it.each(['/demande', '/direction', '/activation'])('%s : CSP à nonce, no-store, pas de innerHTML', async (path) => {
-    const res = await fetch(`${h.base}${path}`);
-    expect(res.status).toBe(200);
-    const csp = res.headers.get('content-security-policy') ?? '';
-    const nonce = /script-src 'nonce-([^']+)'/.exec(csp)?.[1];
-    expect(nonce).toBeTruthy();
-    const html = await res.text();
-    expect(html).toContain(`<script nonce="${nonce}">`);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(csp).toContain("default-src 'none'");
-    expect(html).not.toMatch(/innerHTML|localStorage|sessionStorage/);
-    expect(html).not.toMatch(/[—]/); // pas de tiret cadratin dans l'interface
-  });
-
-  it('/activation : script valide, mot de passe temporaire, nouveau mot de passe avec motif, finalisation par POST, plus de TAP', async () => {
-    const html = await (await fetch(`${h.base}/activation`)).text();
-    const script = /<script nonce="[^"]+">([\s\S]*)<\/script>/.exec(html)![1]!;
-    expect(() => new Function(script)).not.toThrow();
-    expect(script).toContain('Mot de passe temporaire pour ');
-    expect(script).toContain('Nouveau mot de passe');
-    expect(script).toContain("'/regenerer'");
-    expect(script).toContain("'/terminer'");
-    expect(script).toContain('Onboarding non terminé');
-    expect(script).not.toContain('TAP');
-    expect(html).toContain('<th>Onboarding</th>');
-  });
-
-  it('/direction : le 202 « licence en cours » s’affiche en avertissement, le script reste valide', async () => {
-    const html = await (await fetch(`${h.base}/direction`)).text();
-    const script = /<script nonce="[^"]+">([\s\S]*)<\/script>/.exec(html)![1]!;
-    expect(() => new Function(script)).not.toThrow();
-    expect(script).toContain("r.status === 202 && r.data && r.data.code === 'licence_en_cours'");
-    expect(script).toContain("'warn'");
-    expect(html).toContain('.msg.warn{');
-  });
 });
 
 describe('fuseau et config', () => {

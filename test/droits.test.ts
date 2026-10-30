@@ -88,21 +88,20 @@ describe('POST /api/demandes : extension du créateur absente', () => {
   });
 });
 
-describe('GET /api/annuaire et /api/licences : droit creer (Direction saisit aussi)', () => {
+describe('GET /api/annuaire : droit creer (Direction saisit aussi)', () => {
   const { h, refus } = suite();
 
   it('RH et Direction y accèdent', async () => {
     for (const roles of [['RH'], ['Direction']]) {
-      expect((await h.callAs(roles, RH_ID, 'GET', '/api/licences')).status).toBe(200);
       expect((await h.callAs(roles, RH_ID, 'GET', '/api/annuaire?q=ca')).status).toBe(200);
     }
   });
 
   it('sans droit : 403 tracé avec le droit manquant', async () => {
-    expect((await h.callAs(['Autre'], ADMIN_ID, 'GET', '/api/licences')).status).toBe(403);
+    expect((await h.callAs(['Autre'], ADMIN_ID, 'GET', '/api/annuaire?q=ca')).status).toBe(403);
     expect((await h.callAs([], ADMIN_ID, 'GET', '/api/annuaire?q=ca')).status).toBe(403);
     expect(refus().map((e) => [e.route, e.droit, e.actor])).toEqual([
-      ['GET /api/licences', 'creer', ADMIN_ID],
+      ['GET /api/annuaire', 'creer', ADMIN_ID],
       ['GET /api/annuaire', 'creer', ADMIN_ID],
     ]);
   });
@@ -319,10 +318,9 @@ describe('valider et refuser : extension du créateur absente', () => {
   });
 });
 
-describe('activer, régénérer, terminer et la liste des activations : droit activer', () => {
+describe('activer, régénérer et terminer : droit activer', () => {
   const { h, g, compte, ecritures, refus } = suite();
   const routes = (id: string): [string, string, object][] => [
-    ['GET', '/api/activations', {}],
     ['POST', `/api/demandes/${id}/activer`, {}],
     ['POST', `/api/demandes/${id}/regenerer`, { motif: 'code_perdu' }],
     ['POST', `/api/demandes/${id}/terminer`, {}],
@@ -341,16 +339,15 @@ describe('activer, régénérer, terminer et la liste des activations : droit ac
     }
     expect(refus()).toHaveLength(n);
     expect(refus().every((e) => e.droit === 'activer' && e.reason === 'droit_manquant')).toBe(true);
-    expect(refus().map((e) => e.route).slice(0, 4)).toEqual(['GET /api/activations', `POST /api/demandes/${id}/activer`, `POST /api/demandes/${id}/regenerer`, `POST /api/demandes/${id}/terminer`]);
+    expect(refus().map((e) => e.route).slice(0, 3)).toEqual([`POST /api/demandes/${id}/activer`, `POST /api/demandes/${id}/regenerer`, `POST /api/demandes/${id}/terminer`]);
     expect(g().users.get(id)!.props[EXT]).toBe('Validé');
     expect(ecritures()).toEqual([]);
     expect(g().passwords.size).toBe(0);
   });
 
-  it('RH, Direction, ou les deux : accès (activer rend le mot de passe, la liste répond)', async () => {
+  it('RH, Direction, ou les deux : accès (activer rend le mot de passe)', async () => {
     for (const roles of [['RH'], ['Direction'], ['RH', 'Direction']]) {
       const id = compte(`Valide${roles.length}`, 'Validé', { hireDate: '2026-10-27' });
-      expect((await h.callAs(roles, AUTRE_ID, 'GET', '/api/activations')).status).toBe(200);
       const res = await h.callAs(roles, AUTRE_ID, 'POST', `/api/demandes/${id}/activer`);
       expect(res.status).toBe(200);
       expect(((await res.json()) as { statut: string }).statut).toBe('Actif');

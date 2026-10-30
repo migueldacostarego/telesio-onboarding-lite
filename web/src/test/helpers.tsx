@@ -25,7 +25,7 @@ export function mockApi(
   o: {
     moi?: object | (() => Response | Promise<Response>);
     suivi?: object | (() => Response | Promise<Response>);
-    /** Autres lectures (GET) : annuaire, licences… Sans réponse, 404. */
+    /** Autres lectures (GET) : annuaire, disponibilité… Sans réponse, 404. */
     lire?: (url: string) => Response | Promise<Response> | undefined;
     /** Vérification d'une adresse (POST /api/annuaire/disponibilite) : l'adresse demandée ; sans elle, toujours libre. Ce n'est pas une écriture (`ecritures` l'ignore). */
     disponibilite?: (email: string) => Response | Promise<Response>;
