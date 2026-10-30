@@ -261,6 +261,10 @@ L'environnement `test` utilise `false` ([envs/test.tfvars](infra/envs/test.tfvar
 
 L'apply de prod re-planifie après approbation : relire le plan de la PR avant de merger.
 
+### Extensions Entra : création séquentielle
+
+**Graph bloque la création de plusieurs extensions d'attribut en parallèle sur la même application** (constaté sur `test` le 2026-10-30 : trois créations restées bloquées 20 minutes, puis réussies une par une). Les huit extensions de [infra/graph.tf](infra/graph.tf) (`status`, `activation`, `license`, `creator`, puis `history_validation`, `history_activation`, `history_regeneration`, `history_termine`) forment donc **une chaîne `depends_on`** : chacune attend la précédente. Cela vaut pour tous les environnements et pour le CI comme pour un apply manuel, sans option particulière (`-parallelism=1` n'est pas nécessaire, et il ralentirait aussi les ressources sans rapport). **Ne pas regrouper les extensions dans un `for_each`** (elles seraient créées ensemble) ; pour en ajouter une, la chaîner à la dernière (`depends_on`). Les quatre extensions de l'historique ont été créées avec un `for_each` avant ce correctif : des blocs `moved` les rattachent aux nouvelles adresses sans rien recréer (`terraform plan` : 0 à ajouter, 0 à modifier, 0 à détruire, quatre déplacements ; l'apply met seulement l'état à jour). Une fois appliqués partout (`test`, `dev`, `prod`), les blocs `moved` peuvent être retirés.
+
 ### Limites connues
 
 `terraform fmt` et `terraform validate` passent. `plan` et `apply` ont été exécutés sur l'environnement `test` seulement (`dev` et `prod` : jamais ; `dev` est configuré pour le tenant de test, `prod` n'est pas configuré). Le zip deploy fonctionne avec l'authentification de base désactivée. La relecture Graph de l'extension d'attribut renvoie le nom complet : `ignore_changes = [body]` évite une dérive permanente. À surveiller sur `dev` et `prod` : la relecture Graph du grant de site (si `manage_sharepoint_grant = true`) et le délai de propagation du credential fédéré avant la première connexion.

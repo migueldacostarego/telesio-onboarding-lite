@@ -81,10 +81,10 @@ locals {
     ENTRA_ACTIVATION_EXTENSION = msgraph_resource.activation_extension.output.name
     ENTRA_CREATOR_EXTENSION    = msgraph_resource.creator_extension.output.name
 
-    ENTRA_HISTORY_VALIDATION_EXTENSION   = msgraph_resource.history_extension["validation"].output.name
-    ENTRA_HISTORY_ACTIVATION_EXTENSION   = msgraph_resource.history_extension["activation"].output.name
-    ENTRA_HISTORY_REGENERATION_EXTENSION = msgraph_resource.history_extension["regeneration"].output.name
-    ENTRA_HISTORY_TERMINE_EXTENSION      = msgraph_resource.history_extension["termine"].output.name
+    ENTRA_HISTORY_VALIDATION_EXTENSION   = msgraph_resource.history_validation.output.name
+    ENTRA_HISTORY_ACTIVATION_EXTENSION   = msgraph_resource.history_activation.output.name
+    ENTRA_HISTORY_REGENERATION_EXTENSION = msgraph_resource.history_regeneration.output.name
+    ENTRA_HISTORY_TERMINE_EXTENSION      = msgraph_resource.history_termine.output.name
 
     SHAREPOINT_SITE_ID        = var.sharepoint_site_id
     SHAREPOINT_DRIVE_ID       = var.sharepoint_drive_id

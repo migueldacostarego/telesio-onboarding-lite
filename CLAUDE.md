@@ -22,6 +22,7 @@ MVP d'onboarding : RH saisit une demande → la direction valide → compte Entr
 - Charte Telesio : seul le logo est au dépôt (`web/src/assets/telesio.svg`, en-tête sur fond sombre car son texte est quasi blanc). Autres jetons : neutres de shadcn (`web/src/index.css`), à remplacer dès réception de la charte.
 
 ## Règles
+- Extensions Entra (`infra/graph.tf`) : **créées une par une** (chaîne `depends_on`), Graph bloque les créations parallèles sur la même application (3 créations bloquées 20 min sur `test`). Jamais de `for_each` sur les extensions ; en ajouter une = la chaîner à la dernière. Voir README, « Extensions Entra : création séquentielle ».
 - Zéro secret dans le code : identité managée partout (Graph, Key Vault).
 - Permissions Graph minimales et justifiées (SharePoint en Sites.Selected).
 - Dépendances publiées depuis plus de 7 jours, en version exacte (pas de `^`). Racine : `npm install --before=<date du jour - 7 j>`. `web/` : `web/.npmrc` impose `save-exact` ; ajouter avec `--before` aussi. Composants shadcn : `cd web && npm_config_before=<date> npm_config_save_exact=true npx shadcn@4.22.1 add <composant>` (le paquet `shadcn` n'est pas une dépendance : avis `npm audit`), puis vérifier `grep '[\^~]' package.json` et `npm audit --prefix web` (0 attendu). `react-hook-form` 7.90.0, zod 4.6.7 et `@hookform/resolvers` 5.9.2 sont installés (écran Nouvelle demande).

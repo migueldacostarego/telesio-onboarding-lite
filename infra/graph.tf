@@ -66,6 +66,9 @@ resource "msgraph_resource" "activation_extension" {
     name = "name"
   }
 
+  # Graph bloque la création de plusieurs extensions en parallèle sur la même application : une à la fois (voir README).
+  depends_on = [msgraph_resource.status_extension]
+
   lifecycle {
     prevent_destroy = true
     ignore_changes  = [body]
@@ -84,6 +87,9 @@ resource "msgraph_resource" "license_extension" {
   response_export_values = {
     name = "name"
   }
+
+  # Graph bloque la création de plusieurs extensions en parallèle sur la même application : une à la fois (voir README).
+  depends_on = [msgraph_resource.activation_extension]
 
   lifecycle {
     prevent_destroy = true
@@ -106,6 +112,9 @@ resource "msgraph_resource" "creator_extension" {
     name = "name"
   }
 
+  # Graph bloque la création de plusieurs extensions en parallèle sur la même application : une à la fois (voir README).
+  depends_on = [msgraph_resource.license_extension]
+
   lifecycle {
     prevent_destroy = true
     ignore_changes  = [body]
@@ -117,22 +126,14 @@ resource "msgraph_resource" "creator_extension" {
 # et d'Authenticator viennent d'Entra. Aucune permission Graph de plus : User.ReadWrite.All écrit déjà les extensions du compte.
 # Même mécanique que statutOnboarding (nom complet extension_<appId>_<nom> renvoyé par Graph). Les noms sont injectés dans
 # ENTRA_HISTORY_*_EXTENSION (main.tf) : sans ces réglages l'app n'enregistre pas l'historique (jamais de 503).
-locals {
-  history_extensions = {
-    validation   = "validationOnboarding"
-    activation   = "premiereActivationOnboarding"
-    regeneration = "regenerationOnboarding"
-    termine      = "termineOnboarding"
-  }
-}
-
-resource "msgraph_resource" "history_extension" {
-  for_each = local.history_extensions
-
+# Création **séquentielle** : Graph bloque (jusqu'à 20 minutes constatées sur test) quand plusieurs extensions sont créées en parallèle
+# sur la même application. Chaque extension dépend de la précédente (toute la chaîne : statut, activation, licence, créateur, puis
+# les quatre de l'historique) ; ne pas passer ces ressources en for_each, qui les créerait ensemble.
+resource "msgraph_resource" "history_validation" {
   url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
 
   body = {
-    name          = each.value
+    name          = "validationOnboarding"
     dataType      = "String"
     targetObjects = ["User"]
   }
@@ -141,11 +142,99 @@ resource "msgraph_resource" "history_extension" {
     name = "name"
   }
 
+  depends_on = [msgraph_resource.creator_extension]
+
   # Détruire l'extension efface cette étape de l'historique de tous les comptes.
   lifecycle {
     prevent_destroy = true
     ignore_changes  = [body]
   }
+}
+
+moved {
+  from = msgraph_resource.history_extension["validation"]
+  to   = msgraph_resource.history_validation
+}
+
+resource "msgraph_resource" "history_activation" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "premiereActivationOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  depends_on = [msgraph_resource.history_validation]
+
+  # Détruire l'extension efface cette étape de l'historique de tous les comptes.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
+moved {
+  from = msgraph_resource.history_extension["activation"]
+  to   = msgraph_resource.history_activation
+}
+
+resource "msgraph_resource" "history_regeneration" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "regenerationOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  depends_on = [msgraph_resource.history_activation]
+
+  # Détruire l'extension efface cette étape de l'historique de tous les comptes.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
+moved {
+  from = msgraph_resource.history_extension["regeneration"]
+  to   = msgraph_resource.history_regeneration
+}
+
+resource "msgraph_resource" "history_termine" {
+  url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
+
+  body = {
+    name          = "termineOnboarding"
+    dataType      = "String"
+    targetObjects = ["User"]
+  }
+
+  response_export_values = {
+    name = "name"
+  }
+
+  depends_on = [msgraph_resource.history_regeneration]
+
+  # Détruire l'extension efface cette étape de l'historique de tous les comptes.
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [body]
+  }
+}
+
+moved {
+  from = msgraph_resource.history_extension["termine"]
+  to   = msgraph_resource.history_termine
 }
 
 # Sites.Selected n'ouvre aucun site tant qu'un grant explicite n'existe pas : rôle write sur le seul
