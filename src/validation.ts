@@ -1,4 +1,4 @@
-import type { LicenseOption } from './config';
+import { estTypeContrat, TYPES_CONTRAT, type TypeContrat } from './typeContrat';
 import { MAX_LOCAL_BASE, normalizePart, upnBase } from './upn';
 
 /** Motifs de régénération du mot de passe temporaire : codes fixes, tracés tels quels (un texte libre pourrait contenir un nom). */
@@ -13,8 +13,10 @@ export interface DemandeInput {
   poste: string;
   service: string;
   managerId: string;
-  /** skuId (en minuscules) choisi parmi les licences proposées. */
-  licence: string;
+  /** Type de contrat (`employeeType`) : il détermine la licence (LICENCES_PAR_TYPE), qui ne se choisit plus. */
+  typeContrat: TypeContrat;
+  /** Adresse professionnelle voulue (UPN), en minuscules, sur le domaine de l'application. Absente : l'identifiant prenom.nom est attribué, avec un suffixe en cas d'homonyme. */
+  email?: string;
 }
 
 export type Validation =
@@ -42,8 +44,25 @@ function isRealDate(s: string): boolean {
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
 }
 
-/** `today` : AAAA-MM-JJ dans le fuseau métier (voir todayIn). */
-export function validateDemande(body: unknown, today: string, licenses: readonly LicenseOption[]): Validation {
+/** Partie locale d'une adresse : lettres minuscules, chiffres, `.` et `-` entre deux caractères alphanumériques ; 64 au plus (limite de mailNickname). */
+const LOCAL_RE = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+const MAX_LOCAL = 64;
+
+/** Adresse sur le domaine `domain` : renvoie l'adresse en minuscules, ou le message d'erreur. Sert à la création et à la vérification de disponibilité. */
+export function validerEmail(raw: unknown, domain: string): { ok: true; email: string } | { ok: false; message: string } {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  const at = s.indexOf('@');
+  if (at < 1 || at !== s.lastIndexOf('@')) return { ok: false, message: `adresse en @${domain} requise` };
+  const local = s.slice(0, at);
+  if (s.slice(at + 1) !== domain) return { ok: false, message: `le domaine doit être ${domain}` };
+  if (local.length > MAX_LOCAL || !LOCAL_RE.test(local)) {
+    return { ok: false, message: `avant @ : lettres sans accent, chiffres, points et tirets (${MAX_LOCAL} caractères max)` };
+  }
+  return { ok: true, email: s };
+}
+
+/** `today` : AAAA-MM-JJ dans le fuseau métier (voir todayIn) ; `domain` : domaine des adresses (UPN_DOMAIN). */
+export function validateDemande(body: unknown, today: string, domain: string): Validation {
   const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const details: Record<string, string> = {};
 
@@ -71,14 +90,22 @@ export function validateDemande(body: unknown, today: string, licenses: readonly
   const managerId = typeof b.managerId === 'string' ? b.managerId.trim() : '';
   if (!GUID_RE.test(managerId)) details.managerId = 'objectId Entra (GUID) requis';
 
-  const choix = typeof b.licence === 'string' ? b.licence.trim().toLowerCase() : '';
-  const licence = licenses.find((l) => l.skuId === choix)?.skuId;
-  if (!licence) details.licence = 'licence non proposée (choisir dans la liste)';
+  const typeContrat = estTypeContrat(b.typeContrat) ? b.typeContrat : undefined;
+  if (!typeContrat) details.typeContrat = `requis, parmi : ${TYPES_CONTRAT.join(', ')}`;
+  // La licence découle du type : un client qui l'envoie encore (formulaire d'avant) est refusé plutôt qu'ignoré en silence.
+  if (b.licence !== undefined) details.licence = 'ne se choisit plus : elle dépend du type de contrat (typeContrat)';
 
-  if (Object.keys(details).length > 0 || !licence || !prenom || !nom || !poste || !service) {
+  let email: string | undefined;
+  if (b.email !== undefined) {
+    const e = validerEmail(b.email, domain);
+    if (e.ok) email = e.email;
+    else details.email = e.message;
+  }
+
+  if (Object.keys(details).length > 0 || !typeContrat || !prenom || !nom || !poste || !service) {
     return { ok: false, details };
   }
-  return { ok: true, value: { prenom, nom, dateArrivee, poste, service, managerId, licence } };
+  return { ok: true, value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, ...(email ? { email } : {}) } };
 }
 
 export type MotifValidation = { ok: true; motif: string } | { ok: false; details: Record<string, string> };

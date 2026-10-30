@@ -1,11 +1,14 @@
 import { todayIn } from './dates';
 import { ServiceError } from './demandes';
 import { step, type DirectionDeps } from './direction';
-import type { OnboardingUser, PendingDemande } from './directory';
+import { sansUpn, type OnboardingProgress, type OnboardingUser, type SansUpn } from './directory';
+import { decoderEvenement, encoderEvenement } from './history';
 import { temporaryPassword } from './password';
 import type { MotifRegeneration } from './validation';
 
-export type ActivationDeps = Pick<DirectionDeps, 'config' | 'directory' | 'audit'>;
+export type ActivationDeps = Pick<DirectionDeps, 'config' | 'directory' | 'audit' | 'now'>;
+
+const maintenant = (deps: Pick<ActivationDeps, 'now'>): Date => (deps.now ?? (() => new Date()))();
 
 /** Parallélisme des lectures Graph de contrôle d'onboarding (deux appels par compte Actif). */
 const INSPECT_CONCURRENCY = 5;
@@ -19,7 +22,7 @@ export interface OnboardingState {
   termine: boolean;
 }
 
-export interface ActivationItem extends PendingDemande {
+export interface ActivationItem extends SansUpn {
   statut: 'Validé' | 'Actif';
   /** activer : jour J atteint ; attendre : arrivée dans le futur ; regenerer : compte Actif, nouveau mot de passe temporaire (avec motif). */
   action: 'activer' | 'attendre' | 'regenerer';
@@ -43,7 +46,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 }
 
 /** Groupe des arrivants et extension de la date d'activation : sans eux, les routes d'activation répondent 503. */
-function activationConfig(deps: ActivationDeps): { groupId: string; activationExt: string } {
+export function activationConfig(deps: ActivationDeps): { groupId: string; activationExt: string } {
   const { arrivantsGroupId, activationExtension } = deps.config;
   if (!arrivantsGroupId || !activationExtension) {
     throw new ServiceError(503, { error: 'Activation non configurée (ARRIVANTS_GROUP_ID, ENTRA_ACTIVATION_EXTENSION)' });
@@ -56,6 +59,21 @@ function activationConfig(deps: ActivationDeps): { groupId: string; activationEx
  * d'activation écrite juste avant. Seul un changement postérieur à cette marge compte comme le changement de l'arrivant.
  */
 export const MARGE_REMISE_MS = 60_000;
+
+/**
+ * Ajoute l'état d'onboarding à chaque compte Actif. Un échec de lecture pour un compte (déjà tracé par step)
+ * donne { verification: 'echec' } pour ce compte seulement : il ne fait pas échouer toute la liste.
+ */
+export async function inspectActifs<T extends { id: string }>(
+  deps: ActivationDeps,
+  actor: string,
+  demandes: T[],
+): Promise<Array<T & { onboarding: OnboardingState | { verification: 'echec' } }>> {
+  return mapLimit(demandes, INSPECT_CONCURRENCY, async (d) => ({
+    ...d,
+    onboarding: await inspectOnboarding(deps, actor, d.id).catch(() => ({ verification: 'echec' as const })),
+  }));
+}
 
 /**
  * Comptes Validé, et tous les Actif tant que l'onboarding n'est pas Terminé (avec l'état du mot de passe et d'Authenticator).
@@ -72,15 +90,13 @@ export async function listActivations(
   const [valides, actifs] = await step(deps, actor, 'liste', undefined, {}, () =>
     Promise.all([directory.listByStatut(config.statusExtension, 'Validé'), directory.listByStatut(config.statusExtension, 'Actif')]),
   );
-  // Un échec de lecture pour un compte (déjà tracé par step) ne fait pas échouer toute la liste.
-  const suivis = await mapLimit(actifs.demandes, INSPECT_CONCURRENCY, async (d) => ({
+  const suivis = (await inspectActifs(deps, actor, actifs.demandes.map(sansUpn))).map((d) => ({
     ...d,
     statut: 'Actif' as const,
     action: 'regenerer' as const,
-    onboarding: await inspectOnboarding(deps, actor, d.id).catch(() => ({ verification: 'echec' as const })),
   }));
   const demandes: ActivationItem[] = [
-    ...valides.demandes.map((d) => ({
+    ...valides.demandes.map(sansUpn).map((d) => ({
       ...d,
       statut: 'Validé' as const,
       action: d.dateArrivee !== null && d.dateArrivee <= today ? ('activer' as const) : ('attendre' as const),
@@ -89,6 +105,14 @@ export async function listActivations(
   ];
   audit.track({ action: 'activation.liste', actor, outcome: 'ok', resultats: demandes.length });
   return { demandes, tronque: valides.tronque || actifs.tronque };
+}
+
+/** Le mot de passe a changé après la dernière remise (date d'activation, à défaut création du compte) et la marge de la remise elle-même. */
+export function motDePasseChange(progress: OnboardingProgress): boolean {
+  // Les formats diffèrent (millisecondes, décalage) : comparaison numérique, jamais de chaînes.
+  const reference = Date.parse(progress.activation ?? progress.createdDateTime ?? '');
+  const dernier = Date.parse(progress.lastPasswordChange ?? '');
+  return Number.isFinite(reference) && Number.isFinite(dernier) && dernier > reference + MARGE_REMISE_MS;
 }
 
 /**
@@ -102,10 +126,7 @@ export async function inspectOnboarding(deps: ActivationDeps, actor: string, id:
     step(deps, actor, 'onboarding_lecture', id, {}, () => directory.getOnboardingProgress(id, activationExt)),
     step(deps, actor, 'onboarding_authenticator', id, {}, () => directory.hasAuthenticator(id)),
   ]);
-  // Les formats diffèrent (millisecondes, décalage) : comparaison numérique, jamais de chaînes.
-  const reference = Date.parse(progress.activation ?? progress.createdDateTime ?? '');
-  const dernier = Date.parse(progress.lastPasswordChange ?? '');
-  const motDePasse = Number.isFinite(reference) && Number.isFinite(dernier) && dernier > reference + MARGE_REMISE_MS;
+  const motDePasse = motDePasseChange(progress);
   return { motDePasse, authenticator, termine: motDePasse && authenticator };
 }
 
@@ -118,9 +139,9 @@ export interface Activation {
   motDePasseTemporaire: string;
 }
 
-async function loadUser(deps: ActivationDeps, actor: string, id: string): Promise<OnboardingUser> {
+async function loadUser(deps: ActivationDeps, actor: string, id: string, extra: readonly string[] = []): Promise<OnboardingUser> {
   const { config, directory, audit } = deps;
-  const user = await step(deps, actor, 'lecture', id, {}, () => directory.getOnboardingUser(id, config.statusExtension));
+  const user = await step(deps, actor, 'lecture', id, {}, () => directory.getOnboardingUser(id, config.statusExtension, undefined, undefined, extra));
   if (!user) {
     audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
     throw new ServiceError(404, { error: 'Demande introuvable' });
@@ -138,9 +159,11 @@ function conflict(deps: ActivationDeps, actor: string, user: OnboardingUser, id:
  * cette dernière pose (lastPasswordChangeDateTime) tombe donc après la référence, mais dans la marge MARGE_REMISE_MS.
  * Puis mot de passe temporaire, changement imposé à la première connexion. Il n'est ni tracé ni conservé.
  */
-async function issuePassword(deps: ActivationDeps, actor: string, id: string, now: Date, activationExt: string, fail: Record<string, unknown>) {
+async function issuePassword(deps: ActivationDeps, actor: string, id: string, now: Date, activationExt: string, fail: Record<string, unknown>, historique: Record<string, string> = {}) {
   const { directory, audit } = deps;
-  await step(deps, actor, 'activation_date', id, fail, () => directory.setExtension(id, activationExt, now.toISOString()));
+  // La régénération s'enregistre ici, avec la date de remise et avant le mot de passe : une écriture séparée après la remise qui
+  // échouerait ferait répondre 502 alors que le mot de passe est déjà posé (et perdu).
+  await step(deps, actor, 'activation_date', id, fail, () => directory.setExtensions(id, { [activationExt]: now.toISOString(), ...historique }));
   const motDePasseTemporaire = temporaryPassword();
   await step(deps, actor, 'mot_de_passe', id, fail, () => directory.resetPassword(id, motDePasseTemporaire));
   audit.track({ action: 'demande.mdp_temporaire', actor, outcome: 'ok', cible: id });
@@ -175,7 +198,9 @@ export async function activerDemande(deps: ActivationDeps, actor: string, id: st
 
   const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail);
   // Échec ici : 502 sans mot de passe dans la réponse ; le compte reste Validé et RH clique à nouveau sur « Activer ».
-  await step(deps, actor, 'statut', id, fail, () => directory.setExtension(id, config.statusExtension, 'Actif'));
+  // Statut et auteur de l'activation dans le même PATCH. Une régénération ne l'écrase pas (elle a sa propre extension).
+  const historique = config.history ? { [config.history.activation]: encoderEvenement(actor, now) } : {};
+  await step(deps, actor, 'statut', id, fail, () => directory.setExtensions(id, { [config.statusExtension]: 'Actif', ...historique }));
   audit.track({ action: 'demande.activee', actor, outcome: 'ok', cible: id });
   return { id, statut: 'Actif', regeneration: false, motDePasseTemporaire };
 }
@@ -188,7 +213,8 @@ export async function activerDemande(deps: ActivationDeps, actor: string, id: st
 export async function regenererMotDePasse(deps: ActivationDeps, actor: string, id: string, motif: MotifRegeneration, now: Date): Promise<Activation> {
   const { directory, audit } = deps;
   const { groupId, activationExt } = activationConfig(deps);
-  const user = await loadUser(deps, actor, id);
+  const { config } = deps;
+  const user = await loadUser(deps, actor, id, config.history ? [config.history.regeneration] : []);
   const refuse = (raison: string) => conflict(deps, actor, user, id, raison);
 
   if (user.statut === 'Terminé') refuse('onboarding_termine');
@@ -197,7 +223,10 @@ export async function regenererMotDePasse(deps: ActivationDeps, actor: string, i
 
   const fail = { statut: 'Actif' };
   await step(deps, actor, 'groupe_arrivants', id, fail, () => directory.addGroupMember(groupId, id));
-  const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail);
+  // Dernière régénération (auteur, date) et nombre de remises depuis l'activation.
+  const precedent = config.history ? decoderEvenement(user.extensions[config.history.regeneration] ?? null) : null;
+  const historique = config.history ? { [config.history.regeneration]: encoderEvenement(actor, now, (precedent?.nombre ?? 0) + 1) } : {};
+  const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail, historique);
   audit.track({ action: 'demande.mdp_regenere', actor, outcome: 'ok', cible: id, motif });
   return { id, statut: 'Actif', regeneration: true, motDePasseTemporaire };
 }
@@ -235,7 +264,9 @@ export async function terminerOnboarding(deps: ActivationDeps, actor: string, id
   });
   if (retire) audit.track({ action: 'onboarding.arrivants_retrait', actor, outcome: 'ok', cible: id, groupe: groupId });
 
-  await step(deps, actor, 'statut', id, fail, () => directory.setExtension(id, config.statusExtension, 'Terminé'));
+  // Statut et date de fin dans le même PATCH ; l'auteur est `systeme` pour la tâche de terminaison.
+  const historique = config.history ? { [config.history.termine]: encoderEvenement(actor, maintenant(deps)) } : {};
+  await step(deps, actor, 'statut', id, fail, () => directory.setExtensions(id, { [config.statusExtension]: 'Terminé', ...historique }));
   audit.track({ action: 'onboarding.termine', actor, outcome: 'ok', cible: id });
   return { id, statut: 'Terminé', deja: false };
 }

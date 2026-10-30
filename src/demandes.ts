@@ -37,7 +37,8 @@ export interface DemandeCreee {
 }
 
 /**
- * Crée le compte désactivé avec statutOnboarding=EnAttente et le choix de licence dans le même POST (aucun compte
+ * Crée le compte désactivé avec statutOnboarding=EnAttente, le type de contrat (employeeType), la licence qui en découle
+ * (LICENCES_PAR_TYPE) et l'objectId du créateur dans le même POST (aucun compte
  * fantôme sans statut), puis affecte le manager. Un manager impossible à poser n'annule pas la demande, déjà visible
  * par la direction : la réponse le signale (avertissement) plutôt qu'un 502 qui pousserait RH à recréer un doublon.
  * Le mot de passe est aléatoire, jamais stocké, jamais loggé.
@@ -52,13 +53,24 @@ export async function createDemande(
   const delays = deps.managerRetryDelaysMs ?? DEFAULT_RETRY_DELAYS;
   let step = 'manager_verification';
   let targetId: string | undefined;
+  // Avant toute écriture : sans l'extension du créateur, l'auto-approbation ne pourrait pas être tracée.
+  const creatorExt = config.creatorExtension;
+  if (!creatorExt) throw new ServiceError(503, { error: 'Créateur de la demande non configuré (ENTRA_CREATOR_EXTENSION)' });
+  // La licence découle du type de contrat : elle n'est plus choisie, mais l'extension licenceOnboarding reste écrite (la validation la lit).
+  if (!config.licenseByType) throw new ServiceError(503, { error: 'Licences par type de contrat non configurées (LICENCES_PAR_TYPE)' });
+  const licence = config.licenseByType[input.typeContrat];
+  if (!licence) {
+    // Type sans licence prévue (par exemple Contractor tant que Business Basic n'est pas acheté) : même refus qu'une licence épuisée, avant toute lecture ou écriture.
+    audit.track({ action: 'licence.indisponible', actor, outcome: 'refuse', typeContrat: input.typeContrat, raison: 'non_prevue', phase: 'demande' });
+    throw new ServiceError(409, { error: 'Aucune licence disponible pour ce type de contrat', code: 'licence_indisponible' });
+  }
 
   try {
     // Avant toute écriture : la licence choisie doit encore avoir une unité libre (la réservation se fait à la validation).
     step = 'licence_disponibilite';
-    const units = (await directory.listSkuAvailability()).get(input.licence);
+    const units = (await directory.listSkuAvailability()).get(licence);
     if (!units || units.enabled - units.consumed <= 0) {
-      audit.track({ action: 'licence.indisponible', actor, outcome: 'refuse', sku: input.licence, phase: 'demande' });
+      audit.track({ action: 'licence.indisponible', actor, outcome: 'refuse', sku: licence, typeContrat: input.typeContrat, phase: 'demande' });
       throw new ServiceError(409, { error: 'Aucune licence disponible', code: 'licence_indisponible' });
     }
 
@@ -72,10 +84,12 @@ export async function createDemande(
 
     step = 'upn_attribution';
     const base = upnBase(input.prenom, input.nom);
+    // Adresse choisie par RH : une seule tentative, jamais de suffixe ajouté en silence (l'adresse est celle que la personne recevra).
+    const explicite = input.email;
     let upn = '';
     let attempt = 0;
-    for (let n = 1; n <= MAX_UPN_ATTEMPTS && !targetId; n++) {
-      const candidate = upnCandidate(base, config.upnDomain, n);
+    for (let n = 1; n <= (explicite ? 1 : MAX_UPN_ATTEMPTS) && !targetId; n++) {
+      const candidate = explicite ?? upnCandidate(base, config.upnDomain, n);
       if (await directory.upnTaken(candidate)) continue;
       step = 'compte_creation';
       try {
@@ -89,10 +103,13 @@ export async function createDemande(
           employeeHireDate: `${input.dateArrivee}T00:00:00Z`,
           jobTitle: input.poste,
           department: input.service,
+          employeeType: input.typeContrat,
           usageLocation: USAGE_LOCATION,
           passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
         }, {
-          [config.licenseExtension as string]: input.licence,
+          [config.licenseExtension as string]: licence,
+          // objectId de la personne qui saisit la demande : elle ne pourra ni la valider ni la refuser.
+          [creatorExt]: actor,
           [config.statusExtension]: 'EnAttente',
         });
         upn = candidate;
@@ -103,11 +120,15 @@ export async function createDemande(
       }
       step = 'upn_attribution';
     }
+    if (!targetId && explicite) {
+      audit.track({ action: 'demande.email_pris', actor, outcome: 'refuse' });
+      throw new ServiceError(409, { error: 'Cette adresse est déjà utilisée', code: 'email_pris' });
+    }
     if (!targetId) {
       audit.track({ action: 'demande.upn_indisponible', actor, outcome: 'erreur', tentatives: MAX_UPN_ATTEMPTS });
       throw new ServiceError(409, { error: 'Aucun identifiant disponible pour ce nom' });
     }
-    audit.track({ action: 'demande.compte_cree', actor, outcome: 'ok', cible: targetId, suffixe: attempt, statut: 'EnAttente', sku: input.licence });
+    audit.track({ action: 'demande.compte_cree', actor, outcome: 'ok', cible: targetId, suffixe: attempt, statut: 'EnAttente', sku: licence, typeContrat: input.typeContrat });
 
     step = 'manager_affectation';
     try {

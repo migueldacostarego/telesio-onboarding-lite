@@ -74,18 +74,24 @@ locals {
     UPN_DOMAIN             = var.upn_domain
     ENTRA_STATUS_EXTENSION = msgraph_resource.status_extension.output.name
     RH_ROLE                = var.rh_role
+    DIRECTION_ROLE         = var.direction_role
     TZ_METIER              = var.time_zone
 
     ARRIVANTS_GROUP_ID         = lower(azuread_group.arrivants.object_id)
     ENTRA_ACTIVATION_EXTENSION = msgraph_resource.activation_extension.output.name
+    ENTRA_CREATOR_EXTENSION    = msgraph_resource.creator_extension.output.name
 
-    DIRECTION_TYPE            = var.direction_type
-    DIRECTION_OBJECT_ID       = var.direction_object_id
+    ENTRA_HISTORY_VALIDATION_EXTENSION   = msgraph_resource.history_validation.output.name
+    ENTRA_HISTORY_ACTIVATION_EXTENSION   = msgraph_resource.history_activation.output.name
+    ENTRA_HISTORY_REGENERATION_EXTENSION = msgraph_resource.history_regeneration.output.name
+    ENTRA_HISTORY_TERMINE_EXTENSION      = msgraph_resource.history_termine.output.name
+
     SHAREPOINT_SITE_ID        = var.sharepoint_site_id
     SHAREPOINT_DRIVE_ID       = var.sharepoint_drive_id
     SHAREPOINT_FOLDER_PATTERN = var.sharepoint_folder_pattern
 
     LICENSES                = local.licenses_json
+    LICENCES_PAR_TYPE       = local.licenses_by_type_json
     ENTRA_LICENSE_EXTENSION = msgraph_resource.license_extension.output.name
   }
 

@@ -14,6 +14,11 @@ export interface AuditEvent {
 
 export interface Audit {
   track(event: AuditEvent): void;
+  /**
+   * Mesure numérique (Application Insights : table customMetrics), hors du journal d'audit : pour ce qui se répète sans
+   * raconter une action (bilan d'un passage périodique). Un nom et un nombre, jamais de donnée de compte.
+   */
+  metric(name: string, value: number): void;
   flush(): Promise<void>;
 }
 
@@ -27,6 +32,7 @@ export function createAudit(env: NodeJS.ProcessEnv = process.env): Audit {
   if (!connectionString) {
     return {
       track: (e) => console.log(JSON.stringify({ at: new Date().toISOString(), ...e })),
+      metric: (name, value) => console.log(JSON.stringify({ at: new Date().toISOString(), metric: name, value })),
       flush: async () => {},
     };
   }
@@ -37,6 +43,7 @@ export function createAudit(env: NodeJS.ProcessEnv = process.env): Audit {
       for (const [k, v] of Object.entries(props)) if (v !== undefined) properties[k] = String(v);
       client.trackEvent({ name: action, properties });
     },
+    metric: (name, value) => client.trackMetric({ name, value }),
     flush: () => client.flush(),
   };
 }

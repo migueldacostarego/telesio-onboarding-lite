@@ -103,10 +103,10 @@ describe('POST /api/demandes/:id/activer', () => {
     expect(g().passwords.size).toBe(0);
   });
 
-  it('401 sans identité, 403 sans rôle RH (le valideur seul ne peut pas activer)', async () => {
+  it('401 sans identité, 403 avec un rôle étranger (RH et Direction activent)', async () => {
     const id = account();
     expect((await fetch(`${h.base}/api/demandes/${id}/activer`, { method: 'POST' })).status).toBe(401);
-    expect((await h.call('POST', `/api/demandes/${id}/activer`, DIR_ID)).status).toBe(403);
+    expect((await h.callAs(['Autre'], DIR_ID, 'POST', `/api/demandes/${id}/activer`)).status).toBe(403);
     expect(writes()).toEqual([]);
   });
 
@@ -242,9 +242,9 @@ describe('POST /api/demandes/:id/regenerer', () => {
     expect(writes()).toEqual([]);
   });
 
-  it('403 sans rôle RH', async () => {
+  it('403 avec un rôle étranger', async () => {
     const id = actif();
-    expect((await h.call('POST', `/api/demandes/${id}/regenerer`, DIR_ID, { motif: 'code_perdu' })).status).toBe(403);
+    expect((await h.callAs(['Autre'], DIR_ID, 'POST', `/api/demandes/${id}/regenerer`, { motif: 'code_perdu' })).status).toBe(403);
     expect(writes()).toEqual([]);
   });
 });
@@ -266,13 +266,15 @@ describe('GET /api/activations', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const out = (await res.json()) as { demandes: { nom: string; action: string; statut: string; onboarding?: unknown }[] };
+    // L'adresse n'est renvoyée que par le suivi : cette liste garde sa forme.
+    expect(JSON.stringify(out)).not.toMatch(/upn|exemple\.test/);
     expect(out.demandes.map((d) => [d.nom, d.statut, d.action, d.onboarding])).toEqual([
       ['Anna Martin', 'Validé', 'activer', undefined],
       ['Plus Tard', 'Validé', 'attendre', undefined],
       ['Anna Martin', 'Actif', 'regenerer', { motDePasse: true, authenticator: false, termine: false }],
       ['Ancien Actif', 'Actif', 'regenerer', { motDePasse: false, authenticator: false, termine: false }],
     ]);
-    expect((await h.call('GET', '/api/activations', DIR_ID)).status).toBe(403);
+    expect((await h.callAs(['Autre'], DIR_ID, 'GET', '/api/activations')).status).toBe(403);
   });
 
   it('lecture seule : aucune écriture Graph, même quand l’onboarding est complet (la finalisation est un POST)', async () => {
@@ -404,13 +406,13 @@ describe('POST /api/demandes/:id/terminer', () => {
     expect(g().users.get(id)!.props[EXT]).toBe('Terminé');
   });
 
-  it('déjà Terminé : 200 sans écriture ; hors Actif : 409 ; sans rôle RH : 403', async () => {
+  it('déjà Terminé : 200 sans écriture ; hors Actif : 409 ; rôle étranger : 403', async () => {
     const fini = account('Terminé', TODAY, true);
     const res = await terminer(fini);
     expect(await res.json()).toEqual({ id: fini, statut: 'Terminé', deja: true });
     expect(writes()).toEqual([]);
     expect((await terminer(account('Validé'))).status).toBe(409);
-    expect((await h.call('POST', `/api/demandes/${complet()}/terminer`, DIR_ID)).status).toBe(403);
+    expect((await h.callAs(['Autre'], DIR_ID, 'POST', `/api/demandes/${complet()}/terminer`)).status).toBe(403);
   });
 });
 

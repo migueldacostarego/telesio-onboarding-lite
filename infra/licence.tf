@@ -1,5 +1,5 @@
-# Licence par groupe : RH choisit une licence dans la liste (var.licenses) ; à la validation direction l'app
-# ajoute le compte au groupe de CE SKU, et Entra attribue la licence du groupe (traitement asynchrone).
+# Licence par groupe : RH choisit le type de contrat, l'app en déduit la licence (var.license_by_type, parmi var.licenses) ; à la
+# validation direction l'app ajoute le compte au groupe de CE SKU, et Entra attribue la licence du groupe (traitement asynchrone).
 # Exige Entra ID P1 (ou un SKU qui l'inclut). var.licenses vide : aucune licence proposée, l'app répond 503.
 
 locals {
@@ -16,6 +16,14 @@ locals {
       groupId = lower(local.license_group_ids[k])
     }
   ])
+
+  # LICENCES_PAR_TYPE (lu par src/config.ts) : { "Employé": skuId, "Contractor": skuId }, un type sans licence (null) en est absent. Les clés sont
+  # les valeurs d'employeeType posées par l'application (src/typeContrat.ts). Variable null : réglage vide, la création de demande répond 503 ;
+  # aucun type configuré : "{}", la création répond 409 pour tous les types.
+  licenses_by_type_json = var.license_by_type == null ? "" : jsonencode({
+    for type, key in { "Employé" = var.license_by_type.employe, "Contractor" = var.license_by_type.contractor } :
+    type => lower(var.licenses[key].sku_id) if key != null
+  })
 }
 
 # Groupes de sécurité à appartenance affectée (pas dynamique), jamais assignables à un rôle : ajouter un

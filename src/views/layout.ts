@@ -100,19 +100,6 @@ function describe(r) {
 
 export const DEMANDE_SCRIPT = `
 let timer;
-async function loadLicences() {
-  const r = await api('GET', '/api/licences');
-  if (!r.ok) return say(describe(r), 'err');
-  const sel = $('licence');
-  sel.replaceChildren(el('option', { value: '', text: 'Choisir une licence' }));
-  for (const l of r.data.licences) {
-    const text = l.libelle + ' : ' + (l.disponibles > 0 ? l.disponibles + ' disponible' + (l.disponibles > 1 ? 's' : '') : 'aucune disponible');
-    const props = { value: l.skuId, text };
-    if (l.disponibles === 0) props.disabled = '';
-    sel.append(el('option', props));
-  }
-}
-loadLicences();
 $('q').addEventListener('input', () => {
   clearTimeout(timer);
   timer = setTimeout(search, 300);
@@ -137,9 +124,9 @@ $('form').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   say('');
   const f = new FormData($('form'));
-  const body = Object.fromEntries(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'licence'].map((k) => [k, String(f.get(k) || '')]));
+  const body = Object.fromEntries(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'typeContrat'].map((k) => [k, String(f.get(k) || '')]));
   const r = await api('POST', '/api/demandes', body);
-  if (!r.ok && r.data && r.data.code === 'licence_indisponible') { loadLicences(); return say('Aucune licence disponible pour ce choix : choisissez une autre licence.', 'err', 'lic'); }
+  if (!r.ok && r.data && r.data.code === 'licence_indisponible') return say('Aucune licence disponible pour ce type de contrat : libérez ou commandez une licence, puis renvoyez la demande.', 'err', 'lic');
   if (!r.ok) return say(describe(r), 'err');
   if (r.data.avertissement === 'manager_non_affecte') {
     say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + ', mais le manager n’a pas pu être affecté : posez-le dans Entra. Ne renvoyez pas la demande.', 'warn');
@@ -147,7 +134,6 @@ $('form').addEventListener('submit', async (ev) => {
     say('Demande enregistrée : identifiant ' + r.data.userPrincipalName + '. Elle attend la validation de la direction (visible chez elle d’ici une minute).', 'ok');
   }
   $('form').reset(); $('manager').textContent = 'aucun';
-  loadLicences();
 });
 `;
 

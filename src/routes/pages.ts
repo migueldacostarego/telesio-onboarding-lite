@@ -32,7 +32,7 @@ pages.get('/demande', (_req, res) => {
   <ul id="results"></ul>
   <p>Manager choisi : <strong id="manager">aucun</strong></p>
   <input type="hidden" id="managerId" name="managerId" required>
-  <label>Licence <select id="licence" name="licence" required><option value="">Chargement…</option></select></label>
+  <label>Type de contrat <select name="typeContrat" required><option value="Employé">Employé</option><option value="Contractor">Contractor</option></select></label>
   <button type="submit">Envoyer pour validation</button>
 </form>`,
       nonce(res),

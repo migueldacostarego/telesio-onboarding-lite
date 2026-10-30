@@ -7,10 +7,7 @@ upn_domain = ""
 # L'identité d'apply de la CI (Application.ReadWrite.OwnedBy) est propriétaire d'office de l'inscription.
 manage_app_owner = false
 
-# Valideur et SharePoint : vides tant que non décidés (routes Direction fermées, pas de grant).
-direction_type      = ""
-direction_object_id = ""
-
+# SharePoint : vide tant que non décidé (pas de grant).
 sharepoint_site_id        = ""
 sharepoint_drive_id       = ""
 sharepoint_folder_pattern = "{nom} {prenom}"

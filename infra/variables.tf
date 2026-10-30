@@ -57,26 +57,9 @@ variable "rh_role" {
 }
 
 variable "direction_role" {
-  description = "Valeur du rôle d'application Direction (défini sur l'inscription ; non exigé par l'API)."
+  description = "Valeur du rôle d'application Direction (défini sur l'inscription). L'API s'en sert pour les droits : tous ceux de RH (creer, activer) plus approuver (valider ou refuser, y compris ses propres demandes, tracées)."
   type        = string
   default     = "Direction"
-}
-
-variable "direction_type" {
-  description = "Valideur : user ou group. Vide : routes Direction fermées (503)."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = contains(["", "user", "group"], var.direction_type)
-    error_message = "direction_type doit être vide, user ou group."
-  }
-}
-
-variable "direction_object_id" {
-  description = "objectId Entra de la personne ou du groupe valideur."
-  type        = string
-  default     = ""
 }
 
 variable "sharepoint_site_id" {
@@ -147,6 +130,22 @@ variable "licenses" {
   }
 }
 
+variable "license_by_type" {
+  description = "Licence de chaque type de contrat (attribut natif employeeType), par clé de var.licenses : employe (« Employé ») et contractor (« Contractor »). RH ne choisit plus la licence : l'application la déduit du type. Chaque entrée est facultative : null (ou absente) = pas de licence prévue pour ce type, la création d'un tel type répond 409 « aucune licence disponible pour ce type de contrat ». Variable null : LICENCES_PAR_TYPE absent, la création de demande répond 503."
+  type = object({
+    employe    = optional(string)
+    contractor = optional(string)
+  })
+  default = null
+
+  validation {
+    condition = var.license_by_type == null || alltrue([
+      for k in [var.license_by_type.employe, var.license_by_type.contractor] : k == null || contains(keys(var.licenses), k)
+    ])
+    error_message = "employe et contractor doivent être null ou des clés de var.licenses."
+  }
+}
+
 variable "time_zone" {
   description = "Fuseau qui définit le jour J."
   type        = string
@@ -162,7 +161,7 @@ variable "rh_principal_object_ids" {
 }
 
 variable "direction_principal_object_ids" {
-  description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle Direction."
+  description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle Direction : tout porteur peut créer, activer, valider et refuser des demandes (y compris les siennes, tracées)."
   type        = list(string)
   default     = []
 }
