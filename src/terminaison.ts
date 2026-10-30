@@ -76,6 +76,10 @@ export function demarrerTerminaisonAuto(deps: ActivationDeps, lock: KeyedLock, {
   const passage = async () => {
     try {
       const bilan = await terminerComptesAcheves(deps, lock);
+      // Un passage s'est déroulé, même s'il n'y avait rien à faire : trois mesures, pas d'événement d'audit (toutes les 5 minutes).
+      deps.audit.metric('terminaison.lus', bilan.lus);
+      deps.audit.metric('terminaison.termines', bilan.termines);
+      deps.audit.metric('terminaison.ignores', bilan.ignores);
       if (bilan.termines > 0 || bilan.ignores > 0) {
         deps.audit.track({ action: 'terminaison.passage', actor: ACTEUR_TERMINAISON, outcome: 'ok', ...bilan });
       }

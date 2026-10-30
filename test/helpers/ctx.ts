@@ -53,7 +53,8 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
   graph.licenseGroups.set(LICENSE_GROUP_B, LICENSE_SKU_B);
   graph.licenseGroups.set(LICENSE_GROUP_ZERO, LICENSE_SKU_ZERO);
   const events: AuditEvent[] = [];
-  const audit: Audit = { track: (e) => void events.push(e), flush: async () => {} };
+  const metrics: { name: string; value: number }[] = [];
+  const audit: Audit = { track: (e) => void events.push(e), metric: (name, value) => void metrics.push({ name, value }), flush: async () => {} };
   const config = assertReady({
     ...loadConfig({
       UPN_DOMAIN: 'exemple.test',
@@ -81,7 +82,7 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
     licensePollDelaysMs: [0, 0, 0],
     sleep: async () => {},
   }, { webDir: opts.webDir });
-  return { graph, events, app, config, directory, audit };
+  return { graph, events, metrics, app, config, directory, audit };
 }
 
 export async function listen(app: ReturnType<typeof setup>['app']): Promise<{ base: string; close: () => Promise<void> }> {

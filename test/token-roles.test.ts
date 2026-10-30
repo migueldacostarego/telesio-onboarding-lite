@@ -13,7 +13,7 @@ const credentialOf = (...tokens: string[]): TokenCredential => {
 };
 const recorder = () => {
   const events: AuditEvent[] = [];
-  return { events, audit: { track: (e: AuditEvent) => void events.push(e), flush: async () => {} } };
+  return { events, audit: { track: (e: AuditEvent) => void events.push(e), metric: () => {}, flush: async () => {} } };
 };
 
 afterEach(() => recordTokenInfo(undefined));

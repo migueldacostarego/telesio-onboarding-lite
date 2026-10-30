@@ -200,6 +200,42 @@ describe('demarrerTerminaisonAuto : un passage toutes les 5 minutes', () => {
     expect(ctx.events.filter((e) => e.action === 'terminaison.passage')).toEqual([{ action: 'terminaison.passage', actor: ACTEUR_TERMINAISON, outcome: 'ok', lus: 1, termines: 1, ignores: 0 }]);
     stop();
   });
+
+  it('chaque passage dépose trois mesures (lus, termines, ignores), même sans rien à faire, et aucune n\u2019entre dans le journal d\u2019audit', async () => {
+    const { ctx, deps, actif, lock } = monter();
+    const stop = demarrerTerminaisonAuto(deps, lock, { intervalleMs: 60_000, premierDelaiMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(ctx.metrics).toEqual([
+      { name: 'terminaison.lus', value: 0 },
+      { name: 'terminaison.termines', value: 0 },
+      { name: 'terminaison.ignores', value: 0 },
+    ]);
+    expect(ctx.events).toEqual([]); // rien à faire : le journal d'audit reste vide
+
+    actif('Alice');
+    actif('Bob', { authenticator: false });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ctx.metrics.slice(3)).toEqual([
+      { name: 'terminaison.lus', value: 2 },
+      { name: 'terminaison.termines', value: 1 },
+      { name: 'terminaison.ignores', value: 0 },
+    ]);
+    // Un seul passage de mesures par période : pas de doublon.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(ctx.metrics).toHaveLength(9);
+    expect(JSON.stringify(ctx.metrics)).not.toMatch(/Alice|Bob|exemple\.test|-/);
+    stop();
+  });
+
+  it('un passage en erreur ne dépose pas de mesures (l’événement d’erreur le dit)', async () => {
+    const { ctx, deps, lock } = monter();
+    ctx.graph.failOn.list = 403;
+    const stop = demarrerTerminaisonAuto(deps, lock, { intervalleMs: 60_000, premierDelaiMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(ctx.metrics).toEqual([]);
+    expect(ctx.events.find((e) => e.action === 'terminaison.passage')).toMatchObject({ outcome: 'erreur' });
+    stop();
+  });
 });
 
 describe('TERMINAISON_INTERVAL_MS', () => {
