@@ -34,7 +34,7 @@ export async function step<T>(
   }
 }
 
-/** Extension du créateur : sans elle, impossible de contrôler l'auto-approbation (fail closed, 503). */
+/** Extension du créateur : sans elle, l'auto-approbation ne pourrait pas être tracée (fail closed, 503). */
 export function creatorExtensionOf(deps: Pick<DirectionDeps, 'config'>): string {
   const ext = deps.config.creatorExtension;
   if (!ext) throw new ServiceError(503, { error: 'Créateur de la demande non configuré (ENTRA_CREATOR_EXTENSION)' });
@@ -65,16 +65,15 @@ async function loadForAction(
     deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
     throw new ServiceError(404, { error: 'Demande introuvable' });
   }
-  // Personne ne valide ni ne refuse sa propre demande. Une demande sans créateur (antérieure à l'extension) n'est pas contrôlable.
-  // Reprendre le dossier n'approuve rien (la validation a déjà eu lieu) : la règle ne s'y applique pas.
-  if (action !== 'reprendre' && isCreator(user.createur, actor)) {
-    deps.audit.track({ action: 'demande.auto_approbation', actor, outcome: 'refuse', cible: id, operation: action });
-    throw new ServiceError(403, { error: 'Vous ne pouvez pas valider ni refuser une demande que vous avez créée', code: 'auto_approbation' });
-  }
   if (user.accountEnabled || user.statut === null || !allowed.includes(user.statut)) {
     const statut = user.accountEnabled || user.statut === null ? 'inconnu' : user.statut;
     deps.audit.track({ action: 'demande.conflit', actor, outcome: 'refuse', cible: id, statut });
     throw new ServiceError(409, { error: 'Action impossible dans le statut actuel', statut });
+  }
+  // L'auto-approbation est autorisée, mais tracée (objectIds seulement). Reprendre le dossier n'approuve rien : pas de trace.
+  // Une demande sans créateur (antérieure à l'extension) n'est pas concernée.
+  if (action !== 'reprendre' && isCreator(user.createur, actor)) {
+    deps.audit.track({ action: 'demande.auto_approbation', actor, outcome: 'ok', cible: id, operation: action });
   }
   return user;
 }

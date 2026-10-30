@@ -10,7 +10,7 @@ export interface Config {
   statusExtension?: string;
   /** Rôle d'application (Easy Auth) qui donne accès aux routes RH. */
   rhRole: string;
-  /** Rôle d'application Direction : donne les droits `creer` et `approuver` (valider ou refuser, hors ses propres demandes). */
+  /** Rôle d'application Direction : donne tous les droits de RH (`creer`, `activer`) plus `approuver` (valider ou refuser, y compris ses propres demandes : tracé). */
   directionRole: string;
   /** Fuseau qui définit « aujourd'hui » (jour J, date d'arrivée dans le passé). */
   timeZone: string;
@@ -26,7 +26,7 @@ export interface Config {
   arrivantsGroupId?: string;
   /** Extension qui porte la date d'activation : extension_<appId sans tirets>_activationOnboarding. Absente : activation fermée (503). */
   activationExtension?: string;
-  /** Extension qui porte l'objectId du créateur de la demande (extension_<appId>_createurOnboarding) : refus d'auto-approbation. */
+  /** Extension qui porte l'objectId du créateur de la demande (extension_<appId>_createurOnboarding) : écrite à la création, lue pour tracer l'auto-approbation (demande.auto_approbation). */
   creatorExtension?: string;
   /** Période de la tâche qui termine les comptes Actif dont l'onboarding est complet (ms). 0 : tâche désactivée. Défaut : 5 minutes. */
   terminaisonIntervalMs: number;

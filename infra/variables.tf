@@ -57,7 +57,7 @@ variable "rh_role" {
 }
 
 variable "direction_role" {
-  description = "Valeur du rôle d'application Direction (défini sur l'inscription). L'API s'en sert pour les droits : creer, et approuver (valider ou refuser, hors ses propres demandes)."
+  description = "Valeur du rôle d'application Direction (défini sur l'inscription). L'API s'en sert pour les droits : tous ceux de RH (creer, activer) plus approuver (valider ou refuser, y compris ses propres demandes, tracées)."
   type        = string
   default     = "Direction"
 }
@@ -145,7 +145,7 @@ variable "rh_principal_object_ids" {
 }
 
 variable "direction_principal_object_ids" {
-  description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle Direction : tout porteur peut créer, valider et refuser des demandes (sauf les siennes)."
+  description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle Direction : tout porteur peut créer, activer, valider et refuser des demandes (y compris les siennes, tracées)."
   type        = list(string)
   default     = []
 }

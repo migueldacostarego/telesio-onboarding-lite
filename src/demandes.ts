@@ -52,7 +52,7 @@ export async function createDemande(
   const delays = deps.managerRetryDelaysMs ?? DEFAULT_RETRY_DELAYS;
   let step = 'manager_verification';
   let targetId: string | undefined;
-  // Avant toute écriture : sans l'extension du créateur, l'auto-approbation ne serait pas contrôlable.
+  // Avant toute écriture : sans l'extension du créateur, l'auto-approbation ne pourrait pas être tracée.
   const creatorExt = config.creatorExtension;
   if (!creatorExt) throw new ServiceError(503, { error: 'Créateur de la demande non configuré (ENTRA_CREATOR_EXTENSION)' });
 

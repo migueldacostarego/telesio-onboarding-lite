@@ -134,27 +134,26 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
     expect(actions(await suivi(['RH', 'Direction'], AUTRE_ID), id)).toEqual(['approuver', 'refuser']);
   });
 
-  it('EnAttente créée par la personne connectée : ni approuver ni refuser, même avec le droit (casse de l’objectId ignorée)', async () => {
+  it('EnAttente créée par la personne connectée : approuver et refuser sont proposés comme aux autres (auto-approbation autorisée)', async () => {
     const id = compte('Propre', 'EnAttente', { createur: DIR_ID.toUpperCase() });
-    expect(actions(await suivi(['Direction'], DIR_ID), id)).toEqual([]);
-    // Une autre personne de la direction les voit.
+    expect(actions(await suivi(['Direction'], DIR_ID), id)).toEqual(['approuver', 'refuser']);
     expect(actions(await suivi(['Direction'], AUTRE_ID), id)).toEqual(['approuver', 'refuser']);
   });
 
-  it('EnAttente sans créateur (antérieure à l’extension) : proposée, le contrôle n’est pas possible', async () => {
+  it('EnAttente sans créateur (antérieure à l’extension) : proposée', async () => {
     const id = compte('Ancienne', 'EnAttente');
     expect(actions(await suivi(['Direction'], DIR_ID), id)).toEqual(['approuver', 'refuser']);
   });
 
-  it('Validé : activer pour RH seulement, y compris pour le créateur', async () => {
+  it('Validé : activer pour RH et Direction, y compris pour le créateur', async () => {
     const id = compte('Valide', 'Validé', { createur: RH_ID, hireDate: '2026-10-27' });
     g().folders.set('Test Valide', { id: 'dossier', folder: {} }); // le dossier existe : aucune reprise à proposer
     expect(actions(await suivi(['RH'], RH_ID), id)).toEqual(['activer']);
-    expect(actions(await suivi(['Direction'], DIR_ID), id)).toEqual([]);
+    expect(actions(await suivi(['Direction'], DIR_ID), id)).toEqual(['activer']);
     expect(actions(await suivi(['RH', 'Direction'], AUTRE_ID), id)).toEqual(['activer']);
   });
 
-  it('Actif : regenerer pour RH seulement (nouveau mot de passe temporaire) ; Terminé : aucune action', async () => {
+  it('Actif : regenerer pour RH et Direction (nouveau mot de passe temporaire) ; Terminé : aucune action', async () => {
     const actif = compte('Actif', 'Actif');
     g().groups.set(ARRIVANTS_GROUP, new Set([actif]));
     const fini = g().addPending(EXT, { givenName: 'Fini', surname: 'Test', statut: 'Terminé', hireDate: '2026-10-20', enabled: true, extras: { extension_0123456789abcdef0123456789abcdef_activationOnboarding: '2026-10-25T10:00:00Z' } });
@@ -162,7 +161,7 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
     expect(actions(out, actif)).toEqual(['regenerer']);
     expect(actions(out, fini)).toEqual([]);
     const direction = await suivi(['Direction'], DIR_ID);
-    expect(actions(direction, actif)).toEqual([]);
+    expect(actions(direction, actif)).toEqual(['regenerer']);
     expect(actions(direction, fini)).toEqual([]);
     expect(actions(await suivi(['RH'], RH_ID), actif)).toEqual(['regenerer']);
   });
@@ -176,57 +175,77 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
     expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut']);
   });
 
-  it('lit le créateur des EnAttente dans Graph (extension dans $select), pas celui des autres statuts', async () => {
+  it('la liste ne lit plus le créateur (aucun statut) : il ne sert qu’à tracer l’auto-approbation', async () => {
     compte('Attente', 'EnAttente', { createur: RH_ID });
     await suivi(['Direction'], DIR_ID);
     const lists = g().calls.filter((c) => c.method === 'GET' && c.path === '/users');
-    const select = (statut: string) => lists.find((c) => c.filter?.endsWith(`'${statut}'`))?.select ?? '';
-    expect(select('EnAttente')).toContain(EXT_CREATOR);
-    for (const s of ['Validé', 'Actif', 'Terminé']) expect(select(s)).not.toContain(EXT_CREATOR);
+    expect(lists.length).toBeGreaterThan(0);
+    for (const c of lists) expect(c.select ?? '').not.toContain(EXT_CREATOR);
   });
 });
 
 describe('GET /api/suivi : extension du créateur absente', () => {
-  const { h, g } = suite({ ENTRA_CREATOR_EXTENSION: undefined });
-  it('503 sans lecture Graph', async () => {
-    expect((await h.callAs(['RH'], RH_ID, 'GET', '/api/suivi')).status).toBe(503);
-    expect(g().calls).toEqual([]);
+  const { h } = suite({ ENTRA_CREATOR_EXTENSION: undefined });
+  it('répond normalement : le suivi n’a pas besoin du créateur', async () => {
+    expect((await h.callAs(['RH'], RH_ID, 'GET', '/api/suivi')).status).toBe(200);
   });
 });
 
-describe('valider et refuser : jamais sa propre demande', () => {
+describe('valider et refuser : l’auto-approbation est autorisée et tracée', () => {
   const { h, g, compte, ecritures } = suite();
   const valider = (id: string, oid = DIR_ID) => h.call('POST', `/api/demandes/${id}/valider`, oid);
   const refuser = (id: string, oid = DIR_ID) => h.call('POST', `/api/demandes/${id}/refuser`, oid, { motif: 'Dossier incomplet' });
-  const AUTO = { error: 'Vous ne pouvez pas valider ni refuser une demande que vous avez créée', code: 'auto_approbation' };
+  const traces = () => h.ctx.events.filter((e) => e.action === 'demande.auto_approbation');
 
-  it('le créateur, porteur du rôle Direction, reçoit 403 auto_approbation : rien n’est écrit, le compte reste EnAttente', async () => {
+  it('le créateur, porteur du rôle Direction, valide sa propre demande : 200, le compte passe Validé, l’approbation est tracée', async () => {
     const id = compte('Propre', 'EnAttente', { createur: DIR_ID });
-    for (const appel of [valider, refuser]) {
-      const res = await appel(id);
-      expect(res.status).toBe(403);
-      expect(await res.json()).toEqual(AUTO);
-    }
-    expect(ecritures()).toEqual([]);
-    expect(g().users.get(id)!.props[EXT]).toBe('EnAttente');
-    expect(g().deleted).toEqual([]);
+    const res = await valider(id);
+    expect(res.status).toBe(200);
+    expect(g().users.get(id)!.props[EXT]).toBe('Validé');
+    expect(ecritures().length).toBeGreaterThan(0);
   });
 
-  it('refus tracé : objectId de l’acteur et du compte, opération, sans nom', async () => {
+  it('le créateur refuse sa propre demande : 200, le compte est supprimé, le refus est tracé', async () => {
     const id = compte('Propre', 'EnAttente', { createur: DIR_ID });
-    await valider(id);
-    await refuser(id);
-    const traces = h.ctx.events.filter((e) => e.action === 'demande.auto_approbation');
-    expect(traces).toEqual([
-      { action: 'demande.auto_approbation', actor: DIR_ID, outcome: 'refuse', cible: id, operation: 'valider' },
-      { action: 'demande.auto_approbation', actor: DIR_ID, outcome: 'refuse', cible: id, operation: 'refuser' },
+    expect((await refuser(id)).status).toBe(200);
+    expect(g().deleted).toEqual([id]);
+    expect(traces()).toEqual([{ action: 'demande.auto_approbation', actor: DIR_ID, outcome: 'ok', cible: id, operation: 'refuser' }]);
+  });
+
+  it('trace : objectId de l’acteur et du compte, opération, sans nom ni motif', async () => {
+    const a = compte('Propre', 'EnAttente', { createur: DIR_ID });
+    const b = compte('Propre', 'EnAttente', { createur: DIR_ID });
+    await valider(a);
+    await refuser(b);
+    expect(traces()).toEqual([
+      { action: 'demande.auto_approbation', actor: DIR_ID, outcome: 'ok', cible: a, operation: 'valider' },
+      { action: 'demande.auto_approbation', actor: DIR_ID, outcome: 'ok', cible: b, operation: 'refuser' },
     ]);
     expect(JSON.stringify(h.ctx.events)).not.toMatch(/Propre|Test|exemple\.test|Dossier incomplet/);
   });
 
   it('la comparaison ignore la casse de l’objectId', async () => {
     const id = compte('Propre', 'EnAttente', { createur: DIR_ID.toUpperCase() });
-    expect((await valider(id)).status).toBe(403);
+    expect((await valider(id)).status).toBe(200);
+    expect(traces()).toHaveLength(1);
+  });
+
+  it('pas de trace quand la demande vient de quelqu’un d’autre, ou n’a pas de créateur (antérieure à l’extension)', async () => {
+    expect((await valider(compte('Autre', 'EnAttente', { createur: RH_ID }))).status).toBe(200);
+    expect((await valider(compte('Ancienne', 'EnAttente'))).status).toBe(200);
+    expect(traces()).toEqual([]);
+  });
+
+  it('pas de trace quand l’action n’a pas lieu (409 hors EnAttente) : rien n’est approuvé', async () => {
+    const actif = compte('Actif', 'Actif', { createur: DIR_ID });
+    expect((await refuser(actif)).status).toBe(409);
+    expect(traces()).toEqual([]);
+  });
+
+  it('reprendre le dossier n’approuve rien : pas de trace, même pour le créateur', async () => {
+    const id = compte('Reprise', 'Validé', { createur: DIR_ID });
+    expect((await h.call('POST', `/api/demandes/${id}/reprendre`, DIR_ID)).status).toBe(200);
+    expect(traces()).toEqual([]);
   });
 
   it('la direction garde ses contrôles : demande créée par quelqu’un d’autre, ou sans créateur (antérieure), validée ou refusée normalement', async () => {
@@ -266,7 +285,7 @@ describe('valider et refuser : jamais sa propre demande', () => {
 describe('les actions proposées par le suivi sont celles que les routes acceptent', () => {
   const { h, compte } = suite();
 
-  it('approuver proposé : valider aboutit ; non proposé au créateur : valider répond 403 auto_approbation', async () => {
+  it('approuver proposé : valider aboutit, y compris sur une demande dont la personne est le créateur', async () => {
     const id = compte('Attente', 'EnAttente', { createur: RH_ID });
     const propres = compte('Propre', 'EnAttente', { createur: AUTRE_ID });
     const offre = async (oid: string, cible: string) => {
@@ -276,10 +295,8 @@ describe('les actions proposées par le suivi sont celles que les routes accepte
     expect(await offre(AUTRE_ID, id)).toEqual(['approuver', 'refuser']);
     expect((await h.callAs(['Direction'], AUTRE_ID, 'POST', `/api/demandes/${id}/valider`)).status).toBe(200);
 
-    expect(await offre(AUTRE_ID, propres)).toEqual([]);
-    const refus = await h.callAs(['Direction'], AUTRE_ID, 'POST', `/api/demandes/${propres}/valider`);
-    expect(refus.status).toBe(403);
-    expect(((await refus.json()) as { code: string }).code).toBe('auto_approbation');
+    expect(await offre(AUTRE_ID, propres)).toEqual(['approuver', 'refuser']);
+    expect((await h.callAs(['Direction'], AUTRE_ID, 'POST', `/api/demandes/${propres}/valider`)).status).toBe(200);
   });
 
   it('RH seul : aucune action sur les EnAttente, et valider répond 403', async () => {
@@ -292,7 +309,7 @@ describe('les actions proposées par le suivi sont celles que les routes accepte
 
 describe('valider et refuser : extension du créateur absente', () => {
   const { h, g, compte } = suite({ ENTRA_CREATOR_EXTENSION: undefined });
-  it('503 sans lecture ni écriture : le contrôle d’auto-approbation ne peut pas s’appliquer', async () => {
+  it('503 sans lecture ni écriture : l’auto-approbation ne pourrait pas être tracée', async () => {
     const id = compte('Attente', 'EnAttente', { createur: RH_ID });
     g().calls.length = 0;
     expect((await h.call('POST', `/api/demandes/${id}/valider`, DIR_ID)).status).toBe(503);
@@ -311,10 +328,10 @@ describe('activer, régénérer, terminer et la liste des activations : droit ac
     ['POST', `/api/demandes/${id}/terminer`, {}],
   ];
 
-  it('Direction seule, rôle étranger ou aucun rôle : 403 droit_manquant, compte inchangé, refus tracés avec le droit', async () => {
+  it('rôle étranger ou aucun rôle : 403 droit_manquant, compte inchangé, refus tracés avec le droit', async () => {
     const id = compte('Valide', 'Validé', { hireDate: '2026-10-27' });
     let n = 0;
-    for (const [roles, oid] of [[['Direction'], DIR_ID], [['Autre'], ADMIN_ID], [[], ADMIN_ID]] as const) {
+    for (const [roles, oid] of [[['Autre'], ADMIN_ID], [[], ADMIN_ID]] as const) {
       for (const [method, path, payload] of routes(id)) {
         const res = await h.callAs([...roles], oid, method, path, payload);
         expect(res.status).toBe(403);
@@ -330,8 +347,8 @@ describe('activer, régénérer, terminer et la liste des activations : droit ac
     expect(g().passwords.size).toBe(0);
   });
 
-  it('RH, seul ou avec Direction : accès (activer rend le mot de passe, la liste répond)', async () => {
-    for (const roles of [['RH'], ['RH', 'Direction']]) {
+  it('RH, Direction, ou les deux : accès (activer rend le mot de passe, la liste répond)', async () => {
+    for (const roles of [['RH'], ['Direction'], ['RH', 'Direction']]) {
       const id = compte(`Valide${roles.length}`, 'Validé', { hireDate: '2026-10-27' });
       expect((await h.callAs(roles, AUTRE_ID, 'GET', '/api/activations')).status).toBe(200);
       const res = await h.callAs(roles, AUTRE_ID, 'POST', `/api/demandes/${id}/activer`);
@@ -340,7 +357,7 @@ describe('activer, régénérer, terminer et la liste des activations : droit ac
     }
   });
 
-  it('le créateur de la demande peut l’activer : l’auto-approbation ne concerne que valider et refuser', async () => {
+  it('le créateur de la demande peut l’activer : l’auto-approbation ne concerne que valider et refuser (et n’est tracée que là)', async () => {
     const id = compte('Valide', 'Validé', { createur: RH_ID, hireDate: '2026-10-27' });
     expect((await h.callRh('POST', `/api/demandes/${id}/activer`)).status).toBe(200);
   });
@@ -358,8 +375,10 @@ describe('noms de rôle configurables : les routes suivent RH_ROLE et DIRECTION_
   it('activation et suivi suivent les mêmes noms', async () => {
     const id = compte('Valide', 'Validé', { hireDate: '2026-10-27' });
     expect((await h.callAs(['RH'], RH_ID, 'POST', `/api/demandes/${id}/activer`)).status).toBe(403);
-    expect((await h.callAs(['Dirigeants'], DIR_ID, 'POST', `/api/demandes/${id}/activer`)).status).toBe(403);
-    expect((await h.callAs(['RessourcesHumaines'], RH_ID, 'POST', `/api/demandes/${id}/activer`)).status).toBe(200);
+    expect((await h.callAs(['Direction'], DIR_ID, 'POST', `/api/demandes/${id}/activer`)).status).toBe(403);
+    expect((await h.callAs(['Dirigeants'], DIR_ID, 'POST', `/api/demandes/${id}/activer`)).status).toBe(200);
+    const id2 = compte('Valide2', 'Validé', { hireDate: '2026-10-27' });
+    expect((await h.callAs(['RessourcesHumaines'], RH_ID, 'POST', `/api/demandes/${id2}/activer`)).status).toBe(200);
     expect((await h.callAs(['RH'], RH_ID, 'GET', '/api/suivi')).status).toBe(403);
     expect((await h.callAs(['Dirigeants'], DIR_ID, 'GET', '/api/suivi')).status).toBe(200);
   });

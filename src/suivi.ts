@@ -1,6 +1,6 @@
 import type { Droits } from './auth';
 import { addDays, todayIn } from './dates';
-import { creatorExtensionOf, isCreator, step, type DirectionDeps } from './direction';
+import { step, type DirectionDeps } from './direction';
 import { buildFolderName } from './folder';
 import { graphFailureProps, type PendingDemande } from './directory';
 import { activationConfig, inspectActifs, type ActivationDeps, type OnboardingState } from './activation';
@@ -35,8 +35,8 @@ export interface SuiviItem {
   /** Comptes Actif seulement ; { verification: 'echec' } si la lecture Graph a échoué pour ce compte. */
   onboarding?: OnboardingState | { verification: 'echec' };
   /**
-   * Actions disponibles pour la personne connectée : approuver et refuser (droit approuver, EnAttente, jamais sur sa propre
-   * demande), activer (droit activer, Validé, date d'arrivée atteinte dans TZ_METIER), regenerer (droit activer, Actif : l'onboarding n'est pas Terminé, sinon le statut
+   * Actions disponibles pour la personne connectée : approuver et refuser (droit approuver, EnAttente, y compris sa propre
+   * demande : l'auto-approbation est autorisée et tracée), activer (droit activer, Validé, date d'arrivée atteinte dans TZ_METIER), regenerer (droit activer, Actif : l'onboarding n'est pas Terminé, sinon le statut
    * serait Terminé), reprendre (droit approuver, Validé dont le dossier SharePoint manque : recrée le dossier seulement). Vide sinon : l'interface ne propose que ce qui figure ici.
    */
   actions: SuiviAction[];
@@ -45,8 +45,8 @@ export interface SuiviItem {
 /** Le jour J est atteint : comme la route `activer` (jour calculé dans TZ_METIER), une date d'arrivée absente ou à venir n'ouvre pas l'activation. */
 const arriveeAtteinte = (d: PendingDemande, aujourdhui: string): boolean => d.dateArrivee !== null && d.dateArrivee <= aujourdhui;
 
-function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, actor: string, aujourdhui: string, dossierManquant: boolean): SuiviAction[] {
-  if (statut === 'EnAttente') return droits.approuver && !isCreator(d.createur, actor) ? ['approuver', 'refuser'] : [];
+function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: string, dossierManquant: boolean): SuiviAction[] {
+  if (statut === 'EnAttente') return droits.approuver ? ['approuver', 'refuser'] : [];
   if (statut === 'Validé') {
     const actions: SuiviAction[] = [];
     if (droits.activer && arriveeAtteinte(d, aujourdhui)) actions.push('activer');
@@ -57,7 +57,7 @@ function actionsFor(d: PendingDemande, statut: Statut, droits: Droits, actor: st
   return [];
 }
 
-const item = (d: PendingDemande, statut: Statut, droits: Droits, actor: string, aujourdhui: string, onboarding?: SuiviItem['onboarding'], dossierManquant = false): SuiviItem => ({
+const item = (d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: string, onboarding?: SuiviItem['onboarding'], dossierManquant = false): SuiviItem => ({
   id: d.id,
   nom: d.nom,
   poste: d.poste,
@@ -66,14 +66,14 @@ const item = (d: PendingDemande, statut: Statut, droits: Droits, actor: string, 
   statut,
   etape: (STATUTS.indexOf(statut) + 1) as SuiviItem['etape'],
   ...(onboarding ? { onboarding } : {}),
-  actions: actionsFor(d, statut, droits, actor, aujourdhui, dossierManquant),
+  actions: actionsFor(d, statut, droits, aujourdhui, dossierManquant),
 });
 
 /**
  * Suivi RH : demandes EnAttente, Validé, Actif (avec l'état d'onboarding, comme /activations) et Terminé activées
  * depuis moins de 30 jours. Lecture seule, aucune permission Graph de plus (listByStatut, getOnboardingProgress,
  * inspectOnboarding). Les Terminé sont triés de l'activation la plus récente à la plus ancienne. `actions` est calculé pour
- * `actor` d'après ses `droits`. L'objectId du créateur sert à ce calcul et n'est jamais renvoyé.
+ * `actor` d'après ses `droits` (le créateur d'une demande n'en est pas exclu).
  */
 export async function listSuivi(
   deps: ActivationDeps & Pick<DirectionDeps, 'library'>,
@@ -83,7 +83,6 @@ export async function listSuivi(
 ): Promise<{ demandes: SuiviItem[]; tronque: boolean }> {
   const { config, directory, audit } = deps;
   const { activationExt } = activationConfig(deps);
-  const creatorExt = creatorExtensionOf(deps);
   const ext = config.statusExtension;
   const aujourdhui = todayIn(config.timeZone, now);
   const arriveeMin = addDays(aujourdhui, -(FENETRE_TERMINE_JOURS + DELAI_ACTIVATION_MAX_JOURS));
@@ -91,9 +90,9 @@ export async function listSuivi(
 
   const [attente, valides, actifs, termines] = await step(deps, actor, 'liste', undefined, {}, () =>
     Promise.all([
-      directory.listByStatut(ext, 'EnAttente', undefined, creatorExt),
+      directory.listByStatut(ext, 'EnAttente'),
       // Prénom et nom : seulement pour calculer le nom du dossier (jamais renvoyés). Utile à la direction seule.
-      directory.listByStatut(ext, 'Validé', undefined, undefined, droits.approuver && deps.library !== undefined),
+      directory.listByStatut(ext, 'Validé', undefined, droits.approuver && deps.library !== undefined),
       directory.listByStatut(ext, 'Actif'),
       directory.listByStatut(ext, 'Terminé', arriveeMin),
     ]),
@@ -127,10 +126,10 @@ export async function listSuivi(
   const manquants = await dossiersManquants(deps, actor, gardes.valides, droits);
 
   const demandes: SuiviItem[] = [
-    ...gardes.attente.map((d) => item(d, 'EnAttente', droits, actor, aujourdhui)),
-    ...gardes.valides.map((d) => item(d, 'Validé', droits, actor, aujourdhui, undefined, manquants.has(d.id))),
-    ...(await inspectActifs(deps, actor, gardes.actifs)).map((d) => item(d, 'Actif', droits, actor, aujourdhui, d.onboarding)),
-    ...gardes.termines.map((d) => item(d, 'Terminé', droits, actor, aujourdhui)),
+    ...gardes.attente.map((d) => item(d, 'EnAttente', droits, aujourdhui)),
+    ...gardes.valides.map((d) => item(d, 'Validé', droits, aujourdhui, undefined, manquants.has(d.id))),
+    ...(await inspectActifs(deps, actor, gardes.actifs)).map((d) => item(d, 'Actif', droits, aujourdhui, d.onboarding)),
+    ...gardes.termines.map((d) => item(d, 'Terminé', droits, aujourdhui)),
   ];
   audit.track({ action: 'suivi.liste', actor, outcome: 'ok', resultats: demandes.length, tronque });
   return { demandes, tronque };

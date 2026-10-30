@@ -21,6 +21,6 @@ licenses = {
 }
 
 # Affectation des rôles d'application (objectIds d'utilisateurs ou de groupes). Tout porteur du rôle Direction peut créer,
-# valider et refuser des demandes (sauf les siennes) : le compte directeur de test le porte, comme sur test.
+# valider et refuser des demandes (y compris les siennes, tracées), et activer : le compte directeur de test le porte, comme sur test.
 rh_principal_object_ids        = ["1ec27e9b-ae17-43a4-98e6-2be67f1dcaad"]
 direction_principal_object_ids = ["3f972282-b072-4c41-9fd5-5bace4f6e059"]

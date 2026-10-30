@@ -42,9 +42,10 @@ describe('GET /api/suivi : action reprendre pour un compte Validé sans dossier 
     dossier('Avec');
     g().folders.set('TEST CASSE', { id: 'x', folder: {} });
     const out = await suivi('dir');
-    expect(actions(out, sans)).toEqual(['reprendre']);
-    expect(actions(out, avec)).toEqual([]);
-    expect(actions(out, casse)).toEqual([]);
+    // La date d'arrivée est passée : la direction (qui a aussi le droit activer) voit activer en plus.
+    expect(actions(out, sans)).toEqual(['activer', 'reprendre']);
+    expect(actions(out, avec)).toEqual(['activer']);
+    expect(actions(out, casse)).toEqual(['activer']);
   });
 
   it('une seule lecture de la racine pour toute la liste (pas une par compte), pages suivies', async () => {
@@ -58,7 +59,7 @@ describe('GET /api/suivi : action reprendre pour un compte Validé sans dossier 
     expect(out.demandes.filter((d) => d.actions.includes('reprendre')).map((d) => d.id)).toEqual([sans]);
   });
 
-  it('RH seul : jamais proposée, et la bibliothèque n’est pas lue (droit approuver requis)', async () => {
+  it('RH seul : jamais proposée, et la bibliothèque n’est pas lue (droit approuver requis, que Direction seule porte en plus d’activer)', async () => {
     const id = compte('Sans', 'Validé', { hireDate: '2026-10-27' });
     const out = await suivi('rh');
     expect(actions(out, id)).toEqual(['activer']);
@@ -82,7 +83,7 @@ describe('GET /api/suivi : action reprendre pour un compte Validé sans dossier 
     const id = compte('Sans');
     g().failOn.folderList = 403;
     const out = await suivi('dir');
-    expect(actions(out, id)).toEqual([]);
+    expect(actions(out, id)).toEqual(['activer']);
     expect(h.ctx.events.find((e) => e.action === 'demande.echec')).toMatchObject({ etape: 'suivi_dossiers', http: 403 });
     expect(JSON.stringify(h.ctx.events)).not.toContain('Test');
   });
@@ -101,7 +102,7 @@ describe('GET /api/suivi : action reprendre pour un compte Validé sans dossier 
     g().groups.set(ARRIVANTS_GROUP, new Set([actif]));
     const out = await suivi('dir');
     expect(actions(out, attente)).toEqual(['approuver', 'refuser']);
-    expect(actions(out, actif)).toEqual([]);
+    expect(actions(out, actif)).toEqual(['regenerer']);
   });
 });
 
@@ -109,7 +110,7 @@ describe('GET /api/suivi sans SharePoint configuré', () => {
   const { g, compte, suivi, actions } = suite({ withLibrary: false });
   it('aucune action reprendre, aucune lecture', async () => {
     const id = compte('Sans');
-    expect(actions(await suivi('dir'), id)).toEqual([]);
+    expect(actions(await suivi('dir'), id)).toEqual(['activer']);
     expect(g().folderListings).toBe(0);
   });
 });
@@ -119,7 +120,7 @@ describe('POST /api/demandes/:id/reprendre', () => {
 
   it('recrée le dossier seulement : ni licence, ni groupe, ni statut ; la reprise disparaît de la liste', async () => {
     const id = compte('Sans');
-    expect(actions(await suivi('dir'), id)).toEqual(['reprendre']);
+    expect(actions(await suivi('dir'), id)).toEqual(['activer', 'reprendre']);
     const res = await h.call('POST', `/api/demandes/${id}/reprendre`);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ id, statut: 'Validé', dossier: { cree: true } });
@@ -127,7 +128,7 @@ describe('POST /api/demandes/:id/reprendre', () => {
     // Une seule écriture : le dossier. Pas de groupe de licence, pas de groupe des arrivants, pas d'écriture de statut.
     expect(ecritures().map((c) => `${c.method} ${c.path.replace(/sites\/.*\/root/, 'sites/…/root')}`)).toEqual(['POST /sites/…/root/children']);
     expect(g().users.get(id)!.props[EXT]).toBe('Validé');
-    expect(actions(await suivi('dir'), id)).toEqual([]);
+    expect(actions(await suivi('dir'), id)).toEqual(['activer']);
   });
 
   it('trace la reprise et le dossier avec l’objectId seulement', async () => {

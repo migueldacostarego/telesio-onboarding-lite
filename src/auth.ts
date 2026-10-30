@@ -97,19 +97,19 @@ export interface Droits {
   acces: boolean;
   /** Saisir une demande d'onboarding : RH et Direction. */
   creer: boolean;
-  /** Valider ou refuser une demande : Direction. */
+  /** Valider ou refuser une demande : Direction (y compris ses propres demandes, tracées). */
   approuver: boolean;
-  /** Activer un compte, régénérer le mot de passe, finaliser l'onboarding : RH. */
+  /** Activer un compte, régénérer le mot de passe, finaliser l'onboarding : RH et Direction. */
   activer: boolean;
 }
 
-/** Calculé côté serveur pour que l'interface n'ait aucun nom de rôle en dur (rh_role et direction_role sont configurables). */
+/** Direction a tous les droits de RH (creer, activer) plus approuver. Calculé côté serveur pour que l'interface n'ait aucun nom de rôle en dur (rh_role et direction_role sont configurables). */
 export function droitsDe(roles: readonly string[], names: { rhRole: string; directionRole: string }): Droits {
   const rh = roles.includes(names.rhRole);
   const direction = roles.includes(names.directionRole);
   const creer = rh || direction;
   const approuver = direction;
-  const activer = rh;
+  const activer = rh || direction;
   return { acces: creer || approuver || activer, creer, approuver, activer };
 }
 

@@ -143,7 +143,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     }
   });
 
-  // Valider et refuser (droit approuver, jamais sur sa propre demande) passent par le même contrôle d'id et n'acceptent que du JSON (CSRF).
+  // Valider et refuser (droit approuver) passent par le même contrôle d'id et n'acceptent que du JSON (CSRF).
   const badId: RequestHandler = (req, res, next) => {
     if (!GUID_RE.test(String(req.params.id))) {
       res.status(400).json({ error: 'Entrée invalide', details: { id: 'objectId Entra (GUID) requis' } });

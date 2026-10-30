@@ -77,7 +77,7 @@ export interface OnboardingUser {
   dateArrivee: string | null;
   /** skuId choisi par RH (extension licenceOnboarding) ; null si absent (demande antérieure au choix de licence). */
   licence: string | null;
-  /** objectId du créateur de la demande (extension createurOnboarding) ; null si absent (demande antérieure ou extension non lue). */
+  /** objectId du créateur de la demande (extension createurOnboarding) ; null si absent (demande antérieure ou extension non lue). Sert à tracer l'auto-approbation. */
   createur: string | null;
 }
 
@@ -99,8 +99,6 @@ export interface PendingDemande {
   manager: { id: string; displayName: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
-  /** objectId du créateur, présent seulement si la liste a été demandée avec l'extension du créateur ; null si la demande n'en porte pas. */
-  createur?: string | null;
   /** Prénom et nom de famille (nom du dossier SharePoint), présents seulement si la liste les a demandés (`withNames`) ; jamais renvoyés tels quels par l'API. */
   prenom?: string | null;
   famille?: string | null;
@@ -137,12 +135,11 @@ export interface Directory {
   addGroupMember(groupId: string, userId: string): Promise<void>;
   /** Idempotent : un utilisateur absent du groupe n'est pas une erreur. */
   removeGroupMember(groupId: string, userId: string): Promise<void>;
-  /** hiredSince : AAAA-MM-JJ, ne garde que les arrivées à partir de cette date. creatorExt : lit aussi l'objectId du créateur (champ `createur`). */
+  /** hiredSince : AAAA-MM-JJ, ne garde que les arrivées à partir de cette date. */
   listByStatut(
     ext: string,
     statut: string,
     hiredSince?: string,
-    creatorExt?: string,
     withNames?: boolean,
   ): Promise<{ demandes: PendingDemande[]; tronque: boolean }>;
   setAccountEnabled(id: string, enabled: boolean): Promise<void>;
@@ -280,7 +277,7 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async listByStatut(ext: string, statut: string, hiredSince?: string, creatorExt?: string, withNames = false) {
+  async listByStatut(ext: string, statut: string, hiredSince?: string, withNames = false) {
     // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
     // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
     // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
@@ -289,7 +286,7 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`${ext} eq '${statut}'`)
-        .select(`id,displayName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}${creatorExt ? `,${creatorExt}` : ''}`)
+        .select(`id,displayName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}`)
         .expand('manager($select=id,displayName)')
         .top(100)
         .count(true);
@@ -314,7 +311,6 @@ export class GraphDirectory implements Directory {
           service: u.department ?? null,
           manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
           dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
-          ...(creatorExt ? { createur: typeof u[creatorExt] === 'string' ? (u[creatorExt] as string) : null } : {}),
           ...(withNames ? { prenom: typeof u.givenName === 'string' ? u.givenName : null, famille: typeof u.surname === 'string' ? u.surname : null } : {}),
         }))
         .filter((d) => !hiredSince || (d.dateArrivee !== null && d.dateArrivee >= hiredSince));

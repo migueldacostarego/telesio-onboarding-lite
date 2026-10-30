@@ -40,7 +40,7 @@ describe('Valider', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('ne propose que ce que l’API propose : rien sans `actions` (créateur de la demande, droit manquant)', async () => {
+  it('ne propose que ce que l’API propose : rien sans `actions` (droit manquant)', async () => {
     monter({ demandes: [enAttente(ELOISE, { actions: [] }), enAttente(HUGO)], ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
     expect(screen.queryByRole('button', { name: /^(Valider|Refuser) la demande de Éloïse Dupont/ })).not.toBeInTheDocument();
@@ -284,7 +284,7 @@ describe('Refuser', () => {
 
 describe('erreurs de l’API : ApiErrorAlert dans la ligne', () => {
   const cas: [string, Response, RegExp[]][] = [
-    ['403 auto_approbation', reply(403, { error: 'Vous ne pouvez pas valider ni refuser une demande que vous avez créée', code: 'auto_approbation' }), [/Accès refusé/, /demande que vous avez créée/]],
+    ['403 droit_manquant', reply(403, { error: 'Accès refusé', code: 'droit_manquant' }), [/Accès refusé/]],
     ['409', reply(409, { error: 'Action impossible dans le statut actuel', statut: 'Validé' }), [/Action impossible dans l’état actuel/, /Action impossible dans le statut actuel/]],
     ['502 avec étape', reply(502, { error: 'Le service a échoué ; l’action n’a pas abouti', etape: 'dossier' }), [/Une étape a échoué/, /Étape : dossier/]],
   ];
@@ -321,13 +321,13 @@ describe('erreurs de l’API : ApiErrorAlert dans la ligne', () => {
   });
 
   it('une erreur du refus ferme la boîte et s’affiche dans la ligne', async () => {
-    const { user } = monter({ ecrire: () => reply(403, { error: 'Vous ne pouvez pas valider ni refuser une demande que vous avez créée', code: 'auto_approbation' }) });
+    const { user } = monter({ ecrire: () => reply(403, { error: 'Accès refusé', code: 'droit_manquant' }) });
     await screen.findByText('Hugo Lambert');
     await user.click(refuser(ELOISE.nom));
     await user.type(await screen.findByRole('textbox', { name: /Motif du refus/ }), 'Raison');
     await user.click(screen.getByRole('button', { name: 'Confirmer le refus' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(await screen.findByRole('alert')).toHaveTextContent('demande que vous avez créée');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Accès refusé');
   });
 });
 

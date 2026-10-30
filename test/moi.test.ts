@@ -88,11 +88,11 @@ describe('GET /api/moi : droits calculés côté serveur', () => {
     expect(await droits(['RH'])).toEqual({ acces: true, creer: true, approuver: false, activer: true });
   });
 
-  it('Direction : créer et approuver, pas activer', async () => {
-    expect(await droits(['Direction'])).toEqual({ acces: true, creer: true, approuver: true, activer: false });
+  it('Direction : tous les droits de RH (créer, activer) plus approuver', async () => {
+    expect(await droits(['Direction'])).toEqual({ acces: true, creer: true, approuver: true, activer: true });
   });
 
-  it('RH et Direction : tous les droits', async () => {
+  it('RH et Direction ensemble : les mêmes droits que Direction seule', async () => {
     expect(await droits(['RH', 'Direction'])).toEqual({ acces: true, creer: true, approuver: true, activer: true });
   });
 
@@ -123,7 +123,7 @@ describe('GET /api/moi : noms de rôle configurables (RH_ROLE, DIRECTION_ROLE)',
 
   it('les droits suivent les noms configurés ; les noms par défaut ne comptent plus', async () => {
     expect((await moi(['RessourcesHumaines'])).droits).toEqual({ acces: true, creer: true, approuver: false, activer: true });
-    expect((await moi(['Dirigeants'])).droits).toEqual({ acces: true, creer: true, approuver: true, activer: false });
+    expect((await moi(['Dirigeants'])).droits).toEqual({ acces: true, creer: true, approuver: true, activer: true });
     expect((await moi(['RH', 'Direction'])).droits).toEqual(AUCUN);
   });
 

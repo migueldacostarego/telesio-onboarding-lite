@@ -92,7 +92,7 @@ resource "msgraph_resource" "license_extension" {
 }
 
 # objectId de la personne qui a saisi la demande (créateur), écrit à la création du compte, dans le même POST que le statut :
-# elle ne peut ni valider ni refuser sa propre demande (403 auto_approbation). Même mécanique que statutOnboarding.
+# sert à tracer l'auto-approbation (demande.auto_approbation) quand elle valide ou refuse sa propre demande. Même mécanique que statutOnboarding.
 resource "msgraph_resource" "creator_extension" {
   url = "/applications/${azuread_application_registration.web.object_id}/extensionProperties"
 

@@ -15,7 +15,7 @@ export const DIR_ID = 'bbbbbbbb-0000-4000-8000-000000000002';
 export const EXT_ACT = 'extension_0123456789abcdef0123456789abcdef_activationOnboarding';
 /** Groupe des arrivants : ajouté à la validation (rejoué à l'activation), retiré à Terminé. */
 export const ARRIVANTS_GROUP = 'ffffffff-0000-4000-8000-0000000000a1';
-/** Extension qui porte l'objectId du créateur de la demande (refus d'auto-approbation). */
+/** Extension qui porte l'objectId du créateur de la demande (trace de l'auto-approbation). */
 export const EXT_CREATOR = 'extension_0123456789abcdef0123456789abcdef_createurOnboarding';
 export const EXT_LIC = 'extension_0123456789abcdef0123456789abcdef_licenceOnboarding';
 /** Trois licences proposées : A (5 unités, 1 consommée), B (3 unités libres), ZERO (2 unités, 2 consommées). */

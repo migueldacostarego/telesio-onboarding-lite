@@ -91,7 +91,7 @@ resource "azuread_app_role_assignment" "rh" {
 }
 
 locals {
-  # Tout porteur du rôle Direction peut créer, valider et refuser des demandes (sauf les siennes) : c'est cette affectation
+  # Tout porteur du rôle Direction peut créer, activer, valider et refuser des demandes (y compris les siennes, tracées) : c'est cette affectation
   # qui désigne les personnes de la direction. Avec app_role_assignment_required, quiconque n'a aucun rôle est de toute façon
   # refusé à la connexion. Un groupe ne reçoit le rôle que s'il est direct (pas d'imbrication) et exige Entra ID P1.
   direction_role_principals = toset(compact(var.direction_principal_object_ids))
