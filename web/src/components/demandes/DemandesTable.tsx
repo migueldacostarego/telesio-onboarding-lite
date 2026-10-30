@@ -1,11 +1,12 @@
 import { Fragment } from 'react';
+import { Link } from 'react-router';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
 import { Adresse } from '@/components/demandes/Adresse';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge, Synchronisation } from '@/components/demandes/StatutBadge';
-import { actionsDe, aUnMessage, occupee, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
+import { actionsDe, aUnMessage, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { formatArrivee, type Tri } from '@/lib/suivi';
 
 const COLONNES = 7;
@@ -57,21 +58,19 @@ export function DemandesTable({ tri, ...lignes }: PropsLignes & { tri: Tri }) {
               <TableRow
                 id={`demande-${d.id}`}
                 data-nouvelle={lignes.surlignee === d.id || undefined}
-                className={`${LIGNE} ${occupee(lignes, d) ? '' : 'cursor-pointer'} ${lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : ''}`}
-                onClick={occupee(lignes, d) ? undefined : (e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
+                className={`${LIGNE} cursor-pointer ${lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : ''}`}
+                onClick={(e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
               >
                 <TableCell className="overflow-hidden font-medium">
-                  {/* Le nom est le bouton accessible (clavier, lecteur d'écran) ; la ligne entière est cliquable à la souris. */}
-                  <button
-                    type="button"
-                    disabled={occupee(lignes, d)}
+                  {/* Le nom est un vrai lien (clavier, lecteur d'écran, ouvrir dans un nouvel onglet) ; la ligne entière est cliquable à la souris. */}
+                  <Link
+                    to={`/demandes/${d.id}`}
                     aria-label={`Voir le détail de la demande de ${d.nom}`}
-                    onClick={() => lignes.onOuvrir(d)}
                     title={d.nom}
-                    className="block max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 disabled:no-underline"
+                    className="block max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
                   >
                     {d.nom}
-                  </button>
+                  </Link>
                   <Adresse upn={d.upn} />
                   {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
                 </TableCell>

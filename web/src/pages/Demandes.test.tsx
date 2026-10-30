@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQueryClient } from '@/lib/query';
 import type { Demande } from '@/lib/suivi';
 import { Demandes } from '@/pages/Demandes';
+import { FournisseurDemandes } from '@/pages/FournisseurDemandes';
 import { lecturesSuivi, mockApi, reply, stubBureau } from '@/test/helpers';
 
 /** « À venir » dépend du jour : on fige la date (28 octobre 2026) pour que l'ordre ne change pas avec le calendrier. */
@@ -42,7 +43,9 @@ function rendre() {
   const vue = render(
     <QueryClientProvider client={client}>
       <BrowserRouter>
-        <Demandes />
+        <FournisseurDemandes>
+          <Demandes />
+        </FournisseurDemandes>
       </BrowserRouter>
     </QueryClientProvider>,
   );
@@ -109,7 +112,8 @@ describe('tableau (bureau)', () => {
       'Valider la demande de Éloïse Dupont',
       'Refuser la demande de Éloïse Dupont',
     ]);
-    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    // Seuls liens : le nom de chaque demande, vers sa page (l'objectId, rien d'autre, dans l'adresse).
+    expect(screen.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(EXEMPLES.map((d) => `/demandes/${d.id}`).sort((a, b) => ['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit'].indexOf(a.slice(10)) - ['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit'].indexOf(b.slice(10))));
     expect(document.querySelector('form')).toBeNull();
   });
 });

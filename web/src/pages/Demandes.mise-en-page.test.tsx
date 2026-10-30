@@ -69,20 +69,20 @@ describe('mise en page du tableau', () => {
     }
     expect(within(ligne).getByText(LONG).closest('td')).toHaveClass('truncate');
     expect(within(ligne).getByText('compte.anna@exemple.test')).toHaveClass('truncate');
-    const bouton = within(ligne).getByRole('button', { name: 'Voir le détail de la demande de Anna Martin' });
+    const bouton = within(ligne).getByRole('link', { name: 'Voir le détail de la demande de Anna Martin' });
     expect(bouton).toHaveClass('truncate');
     expect(bouton).toHaveAttribute('title', 'Anna Martin');
   });
 
-  it('colonne Actions : les boutons restent sur une ligne dans le tableau, passent à la ligne dans le panneau étroit', async () => {
+  it('colonne Actions : les boutons restent sur une ligne dans le tableau, passent à la ligne sur la page de détail', async () => {
     stubBureau(true);
     const { user } = monter({ demandes: [valide(HUGO, { actions: ['activer', 'reprendre'] })], ecrire: rien });
     const ligne = await screen.findByRole('row', { name: /Hugo Lambert/ });
     const groupe = within(ligne).getByRole('button', { name: /Activer le compte/ }).parentElement as HTMLElement;
     expect(groupe).toHaveClass('flex-nowrap');
-    await user.click(within(ligne).getByRole('button', { name: 'Voir le détail de la demande de Hugo Lambert' }));
-    const panneau = await screen.findByRole('dialog', { name: 'Hugo Lambert' });
-    expect(within(panneau).getByRole('button', { name: /Activer le compte/ }).parentElement).toHaveClass('flex-wrap');
+    await user.click(within(ligne).getByRole('link', { name: 'Voir le détail de la demande de Hugo Lambert' }));
+    await screen.findByText('Historique');
+    expect(screen.getByRole('button', { name: /Activer le compte/ }).parentElement).toHaveClass('flex-wrap');
   });
 
   it('le squelette a les mêmes colonnes et la même hauteur de ligne que les données', async () => {

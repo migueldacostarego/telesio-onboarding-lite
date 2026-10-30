@@ -1,7 +1,8 @@
+import { Link } from 'react-router';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Adresse } from '@/components/demandes/Adresse';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
-import { actionsDe, occupee, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
+import { actionsDe, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge, Synchronisation } from '@/components/demandes/StatutBadge';
 import { formatArrivee } from '@/lib/suivi';
@@ -18,20 +19,18 @@ export function DemandesCartes(lignes: PropsLignes) {
             key={d.id}
             id={`demande-${d.id}`}
             data-nouvelle={lignes.surlignee === d.id || undefined}
-            className={`space-y-1.5 rounded-lg border p-3 text-card-foreground ${occupee(lignes, d) ? '' : 'cursor-pointer'} ${lignes.surlignee === d.id ? 'border-ring bg-accent ring-2 ring-ring/40' : 'bg-card'}`}
-            onClick={occupee(lignes, d) ? undefined : (e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
+            className={`space-y-1.5 rounded-lg border p-3 text-card-foreground cursor-pointer ${lignes.surlignee === d.id ? 'border-ring bg-accent ring-2 ring-ring/40' : 'bg-card'}`}
+            onClick={(e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
           >
             <div className="flex items-start justify-between gap-2">
               <p className="min-w-0 font-medium break-words">
-                <button
-                  type="button"
-                  disabled={occupee(lignes, d)}
+                <Link
+                  to={`/demandes/${d.id}`}
                   aria-label={`Voir le détail de la demande de ${d.nom}`}
-                  onClick={() => lignes.onOuvrir(d)}
                   className="rounded-sm text-left font-medium break-words outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
                   {d.nom}
-                </button>
+                </Link>
                 {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
               </p>
               <StatutBadge statut={d.statut} />

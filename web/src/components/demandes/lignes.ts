@@ -9,7 +9,7 @@ export interface PropsLignes {
   /** Un bouton de ligne a été cliqué (valider part tout de suite ; les autres ouvrent d'abord une boîte de dialogue). */
   onAction: (d: Demande, action: ActionNom) => void;
   onFermer: (d: Demande) => void;
-  /** Ouvre le panneau de détail (clic sur la ligne ou sur le nom). */
+  /** Ouvre la page de la demande (clic sur la ligne ; le nom est un vrai lien). */
   onOuvrir: (d: Demande) => void;
   /** Demande qui vient d'être créée : mise en évidence. */
   surlignee?: string | null;
@@ -27,7 +27,7 @@ export const aUnMessage = (p: PropsLignes, d: Demande): boolean => {
   return phase === 'erreur' || phase === 'licence_lente';
 };
 
-/** Une action tourne pour cette ligne : rien d'autre n'y est cliquable, l'ouverture du détail comprise. */
+/** Une action tourne pour cette ligne : ses boutons sont inactifs (la page de détail reste ouvrable : l'état est partagé, rien ne se perd). */
 export const occupee = (p: PropsLignes, d: Demande): boolean => verrouille(p.etats[d.id]);
 
 /** Clic sur la ligne : ouvre le détail, sauf quand il vient d'un bouton ou d'un champ de la ligne. */

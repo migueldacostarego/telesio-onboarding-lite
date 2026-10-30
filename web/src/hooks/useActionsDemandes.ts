@@ -14,6 +14,7 @@ import {
   type Remise,
 } from '@/lib/actions';
 import { isSessionExpiredError } from '@/lib/session';
+import { DETAIL_KEY } from '@/lib/detail';
 import { SUIVI_KEY, type Demande } from '@/lib/suivi';
 import { attendre } from '@/lib/synchro';
 
@@ -67,7 +68,10 @@ function nettoyer(etats: Etats, demandes: readonly Demande[] | undefined): Etats
  * ni une erreur, et sans permettre un second clic. Les écritures passent par une mutation TanStack (session expirée, `gcTime: 0`,
  * jamais rejouée par la bibliothèque) ; les deux seuls rejeux sont ceux, bornés, décrits dans `lib/actions.ts`.
  */
-export function useActionsDemandes(demandes: readonly Demande[] | undefined, { onRemise }: { onRemise?: (remise: Remise) => void } = {}) {
+export function useActionsDemandes(
+  demandes: readonly Demande[] | undefined,
+  { onRemise, onSucces }: { onRemise?: (remise: Remise) => void; /** Une écriture a abouti (le serveur a répondu avec succès) : l'écran de détail revient à la liste après un refus. */ onSucces?: (id: string, action: ActionNom) => void } = {},
+) {
   const queryClient = useQueryClient();
   const [etats, setEtats] = useState<Etats>({});
   // Mise à jour de l'état d'après de nouvelles données, pendant le rendu (modèle de React) : pas de rendu intermédiaire fautif.
@@ -95,9 +99,11 @@ export function useActionsDemandes(demandes: readonly Demande[] | undefined, { o
     }
   };
   const surRemise = useRef(onRemise);
+  const surSucces = useRef(onSucces);
   useEffect(() => {
     surRemise.current = onRemise;
-  }, [onRemise]);
+    surSucces.current = onSucces;
+  }, [onRemise, onSucces]);
 
   const poser = useCallback((id: string, etat?: EtatLigne) => {
     if (!vivant.current) return;
@@ -118,7 +124,8 @@ export function useActionsDemandes(demandes: readonly Demande[] | undefined, { o
       }, ms),
     );
   };
-  const rafraichir = () => queryClient.invalidateQueries({ queryKey: SUIVI_KEY });
+  // La liste et les pages de détail ouvertes ou en cache : après une action, aucune ne doit garder l'ancien état.
+  const rafraichir = () => Promise.all([queryClient.invalidateQueries({ queryKey: SUIVI_KEY }), queryClient.invalidateQueries({ queryKey: DETAIL_KEY })]);
 
   // Données rafraîchies : une attente automatique dont la demande n'offre plus `approuver` (ou a disparu) est abandonnée.
   useEffect(() => {
@@ -194,6 +201,7 @@ export function useActionsDemandes(demandes: readonly Demande[] | undefined, { o
     const apres = avant && statutApres(avant, action);
     if (apres) attendre(queryClient, apres);
     poser(id, { phase: 'en_cours', action });
+    surSucces.current?.(id, action);
     void rafraichir().finally(() => poser(id));
   };
 

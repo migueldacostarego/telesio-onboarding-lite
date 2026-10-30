@@ -8,6 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useMoi } from '@/lib/moi';
 import { useSessionExpired } from '@/lib/session';
 import { Demandes } from '@/pages/Demandes';
+import { DetailDemande } from '@/pages/DetailDemande';
+import { FournisseurDemandes } from '@/pages/FournisseurDemandes';
 import { SessionExpired } from '@/pages/SessionExpired';
 import { Unauthorized } from '@/pages/Unauthorized';
 
@@ -77,10 +79,14 @@ export function App() {
   }
   return (
     <Frame menu={<UserMenu user={moi.data} />}>
-      <Routes>
-        <Route index element={<Demandes />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      {/* Liste, actions et boîtes de dialogue au-dessus des routes : la navigation ne perd aucun état (lib/contexteDemandes.ts). */}
+      <FournisseurDemandes>
+        <Routes>
+          <Route index element={<Demandes />} />
+          <Route path="demandes/:id" element={<DetailDemande />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </FournisseurDemandes>
     </Frame>
   );
 }

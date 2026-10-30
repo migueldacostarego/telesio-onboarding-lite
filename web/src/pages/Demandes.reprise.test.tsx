@@ -8,8 +8,8 @@ tempsSimule();
 const sansDossier = (o = {}) => valide(ELOISE, { actions: ['reprendre'], ...o });
 const reessayer = (nom = ELOISE.nom) => screen.getByRole('button', { name: `Réessayer la création du dossier de ${nom}` });
 const URL_REPRENDRE = '/api/demandes/id-eloise/reprendre';
-const voir = (nom: string) => screen.getByRole('button', { name: `Voir le détail de la demande de ${nom}` });
-const etape = (p: HTMLElement, cle: string) => p.querySelector(`[data-etape="${cle}"]`) as HTMLElement;
+const voir = (nom: string) => screen.getByRole('link', { name: `Voir le détail de la demande de ${nom}` });
+const etape = (p: HTMLElement, cle: string) => p.querySelector(`[data-jalon="${cle}"]`) as HTMLElement;
 
 describe('Réessayer : reprise du dossier SharePoint manquant', () => {
   it('bouton seulement quand l’API propose `reprendre`', async () => {
@@ -66,7 +66,8 @@ describe('Réessayer : reprise du dossier SharePoint manquant', () => {
     const { fetchMock, user } = monter({ demandes: [sansDossier(), enAttente(HUGO, { actions: [] })], ecrire: () => new Promise<Response>((r) => (finir = r)) });
     await screen.findByText('Hugo Lambert');
     await user.click(voir(ELOISE.nom));
-    const p = await screen.findByRole('dialog', { name: ELOISE.nom });
+    const p = await screen.findByRole('heading', { name: ELOISE.nom }).then(() => document.body);
+    await screen.findByText('Historique');
     expect(etape(p, 'validee')).toHaveAttribute('data-etat', 'echec');
     expect(etape(p, 'validee')).toHaveTextContent('Le dossier SharePoint n’a pas été créé');
 
@@ -84,8 +85,9 @@ describe('Réessayer : reprise du dossier SharePoint manquant', () => {
     const { user } = monter({ demandes: [valide(ELOISE), enAttente(HUGO, { actions: [] })], ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
     await user.click(voir(ELOISE.nom));
-    const p = await screen.findByRole('dialog', { name: ELOISE.nom });
-    expect(etape(p, 'validee')).toHaveAttribute('data-etat', 'reussie');
+    const p = await screen.findByRole('heading', { name: ELOISE.nom }).then(() => document.body);
+    await screen.findByText('Historique');
+    expect(etape(p, 'validee')).toHaveAttribute('data-etat', 'fait');
     expect(within(p).queryByRole('button', { name: /Réessayer/ })).not.toBeInTheDocument();
   });
 

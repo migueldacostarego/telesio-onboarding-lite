@@ -1,25 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Actualisation } from '@/components/demandes/Actualisation';
 import { Barre } from '@/components/demandes/Barre';
-import { DialogueActivation } from '@/components/demandes/DialogueActivation';
-import { DialogueMotDePasse } from '@/components/demandes/DialogueMotDePasse';
-import { PanneauDetail } from '@/components/demandes/PanneauDetail';
 import { NouvelleDemande } from '@/components/demandes/NouvelleDemande';
-import { DialogueRefus } from '@/components/demandes/DialogueRefus';
-import { DialogueRegeneration } from '@/components/demandes/DialogueRegeneration';
 import { DemandesCartes, DemandesCartesSquelette } from '@/components/demandes/DemandesCartes';
 import { DemandesTable, DemandesTableSquelette } from '@/components/demandes/DemandesTable';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { useActionsDemandes } from '@/hooks/useActionsDemandes';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { useNow } from '@/hooks/useNow';
-import type { ActionAvecBoite, ActionNom } from '@/lib/actions';
+import { useDemandes } from '@/lib/contexteDemandes';
 import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
 import { useMoi } from '@/lib/moi';
-import { SUIVI_KEY, aujourdhui, filtrerDemandes, useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
+import { SUIVI_KEY, aujourdhui, filtrerDemandes, type Demande } from '@/lib/suivi';
 import { attendre, enSynchro } from '@/lib/synchro';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
@@ -30,12 +25,11 @@ const SURLIGNAGE_MS = 30_000;
 const RELECTURE_SYNCHRO_MS = 5_000;
 
 export function Demandes() {
-  const suivi = useSuivi();
-  const bureau = useIsDesktop();
+  // Liste, actions, recherche, filtre et tri vivent au-dessus des routes (lib/contexteDemandes.ts) : « retour » depuis une demande les retrouve.
   // Rien de tout cela ne va dans l'URL ni dans le stockage du navigateur (le terme est un nom).
-  const [terme, setTerme] = useState('');
-  const [statut, setStatut] = useState<FiltreStatut>('tous');
-  const [tri, setTri] = useState<Tri>('avenir');
+  const { suivi, actions, surAction, terme, setTerme, statut, setStatut, tri, setTri } = useDemandes();
+  const bureau = useIsDesktop();
+  const navigate = useNavigate();
   // « À venir » dépend du jour : recalculé quand il change (passage de minuit), sans re-trier le reste du temps.
   const jour = aujourdhui(new Date(useNow(60_000)));
 
@@ -47,33 +41,9 @@ export function Demandes() {
   const [nouvelle, setNouvelle] = useState<{ id: string; nom: string; avertissement?: string } | null>(null);
   const idNouvelle = nouvelle?.id || undefined; // '' : le surlignage est terminé, le message reste
   const nouvelleVisible = idNouvelle !== undefined && donnees?.demandes.some((d) => d.id === idNouvelle) === true;
-  // Le mot de passe temporaire n'existe qu'ici et dans la boîte qui l'affiche : état React seulement (ni URL, ni stockage, ni cache).
-  const [remise, setRemise] = useState<{ nom: string; motDePasse: string; regeneration: boolean } | null>(null);
-  // La boîte de dialogue ouverte vise une demande par son id (état de la page : elle survit aux filtres et au tri).
-  const [cible, setCible] = useState<{ action: ActionAvecBoite; id: string } | null>(null);
-  const actions = useActionsDemandes(donnees?.demandes, {
-    onRemise: ({ id, motDePasse, regeneration }) => {
-      setRemise({ nom: donnees?.demandes.find((d) => d.id === id)?.nom ?? '', motDePasse, regeneration });
-      setCible(null);
-    },
-  });
-  const demandeCible = cible === null ? undefined : donnees?.demandes.find((d) => d.id === cible.id);
-  const etatCible = cible === null ? undefined : actions.etats[cible.id];
-  const cibleEnCours = cible !== null && etatCible?.phase === 'en_cours' && etatCible.action === cible.action;
-  // La demande n'offre plus l'action (traitée ailleurs, ou disparue) : la boîte se ferme, sauf si l'action est déjà partie.
-  const ouverte = cible !== null && demandeCible && (demandeCible.actions.includes(cible.action) || cibleEnCours) ? demandeCible : undefined;
-  const boite = (action: ActionAvecBoite) => (cible?.action === action ? ouverte : undefined);
-  // Panneau de détail : une demande par son id (état de la page : il survit aux filtres, au tri et au passage tableau / cartes).
-  const [detailId, setDetailId] = useState<string | null>(null);
-  const detail = detailId === null ? undefined : donnees?.demandes.find((d) => d.id === detailId);
-  const surAction = (d: Demande, action: ActionNom) => {
-    if (action === 'valider') actions.valider(d.id);
-    else if (action === 'reprendre') actions.reprendre(d.id);
-    else setCible({ action, id: d.id });
-  };
   const lignes = {
     etats: actions.etats,
-    onOuvrir: (d: Demande) => setDetailId(d.id),
+    onOuvrir: (d: Demande) => void navigate(`/demandes/${d.id}`),
     onAction: surAction,
     onFermer: (d: Demande) => actions.fermer(d.id),
     surlignee: idNouvelle || null,
@@ -222,32 +192,6 @@ export function Demandes() {
         </>
       )}
 
-      <PanneauDetail
-        demande={detail}
-        etat={detail ? actions.etats[detail.id] : undefined}
-        onAction={(action) => detail && surAction(detail, action)}
-        onFermerMessage={() => detail && actions.fermer(detail.id)}
-        onFermer={() => setDetailId(null)}
-      />
-      <DialogueRefus
-        demande={boite('refuser')}
-        enCours={cibleEnCours}
-        onFermer={() => setCible(null)}
-        onConfirmer={(motif) => cible && void actions.refuser(cible.id, motif).then(() => setCible(null))}
-      />
-      <DialogueActivation
-        demande={boite('activer')}
-        enCours={cibleEnCours}
-        onFermer={() => setCible(null)}
-        onConfirmer={() => cible && void actions.activer(cible.id).then(() => setCible(null))}
-      />
-      <DialogueRegeneration
-        demande={boite('regenerer')}
-        enCours={cibleEnCours}
-        onFermer={() => setCible(null)}
-        onConfirmer={(motif) => cible && void actions.regenerer(cible.id, motif).then(() => setCible(null))}
-      />
-      <DialogueMotDePasse remise={remise} onFermer={() => setRemise(null)} />
     </section>
   );
 }

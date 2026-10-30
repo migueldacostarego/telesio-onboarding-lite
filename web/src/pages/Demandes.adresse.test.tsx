@@ -6,7 +6,6 @@ import { ELOISE, HUGO, actif, avancer, enAttente, monter, tempsSimule } from '@/
 tempsSimule();
 
 const rien = () => reply(200, {});
-const voir = (nom: string) => screen.getByRole('button', { name: `Voir le détail de la demande de ${nom}` });
 const UPN_ELOISE = 'compte.eloise@exemple.test';
 
 afterEach(() => vi.restoreAllMocks());
@@ -35,18 +34,16 @@ describe('adresse professionnelle (UPN)', () => {
     const { user } = monter({ demandes: [enAttente(ELOISE, { upn: null })], ecrire: rien });
     await screen.findByText('Éloïse Dupont');
     expect(screen.queryByText(/@/)).not.toBeInTheDocument();
-    await user.click(voir(ELOISE.nom));
-    const panneau = await screen.findByRole('dialog', { name: ELOISE.nom });
-    expect(within(panneau).getByText('E-mail').nextElementSibling).toHaveTextContent('Non renseigné');
-    expect(within(panneau).queryByRole('button', { name: /Copier/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: /Voir le détail de la demande de Éloïse Dupont/ }));
+    const identite = await screen.findByRole('region', { name: 'Identité' });
+    expect(within(identite).getByText('E-mail').nextElementSibling).toHaveTextContent('Non renseigné');
+    expect(within(identite).queryByRole('button', { name: /Copier/ })).not.toBeInTheDocument();
   });
 
   it('détail : l’adresse et un bouton Copier qui la met dans le presse-papiers, confirmé puis rétabli', async () => {
     stubBureau(true);
-    const { user } = monter({ demandes: [enAttente(ELOISE)], ecrire: rien });
-    await screen.findByText('Éloïse Dupont');
-    await user.click(voir(ELOISE.nom));
-    const panneau = await screen.findByRole('dialog', { name: ELOISE.nom });
+    const { user } = monter({ demandes: [enAttente(ELOISE)], ecrire: rien, chemin: `/demandes/${ELOISE.id}` });
+    const panneau = await screen.findByRole('region', { name: 'Identité' });
     expect(within(panneau).getByText(UPN_ELOISE)).toBeInTheDocument();
 
     const bouton = within(panneau).getByRole('button', { name: 'Copier l’adresse e-mail de Éloïse Dupont' });
@@ -63,10 +60,8 @@ describe('adresse professionnelle (UPN)', () => {
 
   it('presse-papiers refusé : message dans le panneau, l’adresse reste affichée, rien n’est cassé', async () => {
     stubBureau(true);
-    const { user } = monter({ demandes: [enAttente(ELOISE)], ecrire: rien });
-    await screen.findByText('Éloïse Dupont');
-    await user.click(voir(ELOISE.nom));
-    const panneau = await screen.findByRole('dialog', { name: ELOISE.nom });
+    const { user } = monter({ demandes: [enAttente(ELOISE)], ecrire: rien, chemin: `/demandes/${ELOISE.id}` });
+    const panneau = await screen.findByRole('region', { name: 'Identité' });
     vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('refusé'));
     await user.click(within(panneau).getByRole('button', { name: /Copier l’adresse/ }));
     await waitFor(() => expect(within(panneau).getByText(/Copie impossible/)).toBeInTheDocument());
@@ -78,9 +73,11 @@ describe('adresse professionnelle (UPN)', () => {
     stubBureau(true);
     const { user } = monter({ demandes: [enAttente(ELOISE)], ecrire: rien });
     await screen.findByText('Éloïse Dupont');
-    await user.click(voir(ELOISE.nom));
+    await user.click(screen.getByRole('link', { name: /Voir le détail de la demande de Éloïse Dupont/ }));
     await user.click(await screen.findByRole('button', { name: /Copier l’adresse/ }));
+    expect(window.location.pathname).toBe(`/demandes/${ELOISE.id}`);
     expect(window.location.href).not.toContain('exemple.test');
+    expect(window.location.search + window.location.hash).toBe('');
     expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain('exemple.test');
   });
 });
