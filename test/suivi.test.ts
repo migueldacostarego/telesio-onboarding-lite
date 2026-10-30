@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_ACT, RH_ID } from './helpers/ctx';
+import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_ACT, HISTORY, HISTORY_ENV, RH_ID } from './helpers/ctx';
 import { harness } from './helpers/harness';
 
 // NOW (ctx) = 2026-10-27 10:00 UTC. Fenêtre des Terminé : activation après le 2026-09-27 10:00 UTC.
@@ -252,5 +252,63 @@ describe('GET /api/suivi : activer seulement à partir de la date d’arrivée (
       expect(await actionsDe(h, '2026-10-27')).toEqual([]);
       expect(await actionsDe(h, '2026-10-26')).toEqual(['activer']);
     });
+  });
+});
+
+describe('GET /api/suivi : Terminé ce mois-ci (calendrier de Paris)', () => {
+  const { h, g, compte, suivi } = suite(HISTORY_ENV);
+  type Fin = Item & { termineCeMois?: boolean | null };
+  const termine = (prenom: string, o: { fin?: string; activation?: string; hireDate?: string }) =>
+    compte(prenom, 'Terminé', { hireDate: o.hireDate ?? '2026-09-20', extras: { ...(o.activation ? { [EXT_ACT]: o.activation } : {}), ...(o.fin ? { [HISTORY.termine]: `${DIR_ID}|${o.fin}` } : {}) } });
+  const mois = async () => Object.fromEntries(((await suivi()).demandes as Fin[]).filter((d) => d.statut === 'Terminé').map((d) => [d.nom.split(' ')[0], d.termineCeMois]));
+
+  it('la date de fin (extension d’historique, lue dans la même requête) décide ; le mois est celui de Paris, pas celui d’UTC', async () => {
+    termine('FinOct', { fin: '2026-10-05T10:00:00Z', activation: '2026-10-01T10:00:00Z' });
+    termine('FinSept', { fin: '2026-09-28T10:00:00Z', activation: '2026-09-27T12:00:00Z' });
+    // 30 sept. 22:30 UTC = 1er oct. 00:30 à Paris (UTC+2) : ce mois-ci ; 21:30 UTC = 30 sept. 23:30 à Paris : le mois dernier.
+    termine('LimiteOct', { fin: '2026-09-30T22:30:00Z', activation: '2026-09-28T10:00:00Z' });
+    termine('LimiteSept', { fin: '2026-09-30T21:30:00Z', activation: '2026-09-28T10:00:00Z' });
+    expect(await mois()).toEqual({ FinOct: true, FinSept: false, LimiteOct: true, LimiteSept: false });
+    // Une seule requête de liste pour les Terminé : la date de fin est dans le $select, aucune lecture de plus par compte.
+    const listeTermine = g().calls.filter((c) => c.path === '/users' && c.filter?.includes("'Terminé'"));
+    expect(listeTermine).toHaveLength(1);
+    expect(listeTermine[0]!.select).toContain(HISTORY.termine);
+  });
+
+  it('sans date de fin : activé ce mois-ci = terminé ce mois-ci ; activé avant = inconnu (null), jamais deviné', async () => {
+    termine('ActiveOct', { activation: '2026-10-02T10:00:00Z' });
+    termine('ActiveSept', { activation: '2026-09-28T12:00:00Z' });
+    expect(await mois()).toEqual({ ActiveOct: true, ActiveSept: null });
+  });
+
+  it('fenêtre : un compte activé il y a plus de 30 jours mais terminé ce mois-ci est listé ; sans date de fin, il ne l’est pas', async () => {
+    termine('Long', { fin: '2026-10-03T10:00:00Z', activation: '2026-08-20T10:00:00Z', hireDate: '2026-08-15' });
+    termine('Ancien', { activation: '2026-08-20T10:00:00Z', hireDate: '2026-08-15' });
+    termine('AncienFini', { fin: '2026-09-02T10:00:00Z', activation: '2026-08-20T10:00:00Z', hireDate: '2026-08-15' });
+    expect(await mois()).toEqual({ Long: true });
+  });
+
+  it('seuls les Terminé portent `termineCeMois` ; la date de fin elle-même n’est pas renvoyée', async () => {
+    compte('Attente', 'EnAttente');
+    compte('Valide', 'Validé');
+    termine('FinOct', { fin: '2026-10-05T10:00:00Z', activation: '2026-10-01T10:00:00Z' });
+    const out = (await suivi()).demandes;
+    expect(out.filter((d) => 'termineCeMois' in d).map((d) => d.statut)).toEqual(['Terminé']);
+    expect(JSON.stringify(out)).not.toContain('2026-10-05');
+    expect(JSON.stringify(h.ctx.events)).not.toMatch(/Test|exemple\.test/);
+  });
+
+  it('sans extensions d’historique : mêmes règles, aucune date de fin lue (null sauf activé ce mois-ci)', async () => {
+    const sans = harness({});
+    await sans.start();
+    try {
+      const gg = sans.ctx.graph;
+      gg.addPending(EXT, { givenName: 'A', surname: 'Test', statut: 'Terminé', hireDate: '2026-09-20', enabled: true, extras: { [EXT_ACT]: '2026-10-02T10:00:00Z' } });
+      gg.addPending(EXT, { givenName: 'B', surname: 'Test', statut: 'Terminé', hireDate: '2026-09-20', enabled: true, extras: { [EXT_ACT]: '2026-09-28T12:00:00Z' } });
+      const out = ((await (await sans.callRh('GET', '/api/suivi')).json()) as Suivi).demandes as Fin[];
+      expect(out.map((d) => [d.nom.split(' ')[0], d.termineCeMois])).toEqual([['A', true], ['B', null]]);
+    } finally {
+      await sans.stop();
+    }
   });
 });

@@ -3,6 +3,7 @@ import { addDays, todayIn } from './dates';
 import { step, type DirectionDeps } from './direction';
 import { buildFolderName } from './folder';
 import { graphFailureProps, type PendingDemande } from './directory';
+import { decoderEvenement } from './history';
 import { activationConfig, inspectActifs, type ActivationDeps, type OnboardingState } from './activation';
 
 /** Comptes renvoyés par statut au plus (`tronque` l'indique au-delà). */
@@ -34,6 +35,11 @@ export interface SuiviItem {
   statut: Statut;
   /** 1 EnAttente, 2 Validé, 3 Actif, 4 Terminé. */
   etape: 1 | 2 | 3 | 4;
+  /**
+   * Comptes Terminé seulement : le passage à Terminé date du mois en cours (calendrier du fuseau métier, Paris par défaut) ?
+   * `null` : inconnu (compte terminé avant l'historique et activé un mois plus tôt : il a pu l'être ce mois-ci).
+   */
+  termineCeMois?: boolean | null;
   /** Comptes Actif seulement ; { verification: 'echec' } si la lecture Graph a échoué pour ce compte. */
   onboarding?: OnboardingState | { verification: 'echec' };
   /**
@@ -59,7 +65,7 @@ export function actionsFor(d: Pick<PendingDemande, 'dateArrivee'>, statut: Statu
   return [];
 }
 
-const item = (d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: string, onboarding?: SuiviItem['onboarding'], dossierManquant = false): SuiviItem => ({
+const item = (d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: string, onboarding?: SuiviItem['onboarding'], dossierManquant = false, termineCeMois?: boolean | null): SuiviItem => ({
   id: d.id,
   nom: d.nom,
   upn: d.upn,
@@ -69,6 +75,7 @@ const item = (d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: str
   statut,
   etape: (STATUTS.indexOf(statut) + 1) as SuiviItem['etape'],
   ...(onboarding ? { onboarding } : {}),
+  ...(termineCeMois !== undefined ? { termineCeMois } : {}),
   actions: actionsFor(d, statut, droits, aujourdhui, dossierManquant),
 });
 
@@ -97,23 +104,30 @@ export async function listSuivi(
       // Prénom et nom : seulement pour calculer le nom du dossier (jamais renvoyés). Utile à la direction seule.
       directory.listByStatut(ext, 'Validé', undefined, droits.approuver && deps.library !== undefined),
       directory.listByStatut(ext, 'Actif'),
-      directory.listByStatut(ext, 'Terminé', arriveeMin),
+      // La date de fin (extension d'historique) est lue dans la même requête : aucune lecture de plus pour « ce mois-ci ».
+      directory.listByStatut(ext, 'Terminé', arriveeMin, false, config.history ? [config.history.termine] : []),
     ]),
   );
 
   // Activation des Terminé candidats : date d'activation, à défaut création du compte (activé avant l'extension),
   // comme inspectOnboarding. Une lecture en échec (tracée par step) ne masque pas le compte : date inconnue, gardé.
+  const moisCourant = aujourdhui.slice(0, 7);
+  const moisDe = (ms: number): string => todayIn(config.timeZone, new Date(ms)).slice(0, 7);
   const dates = await Promise.all(
     termines.demandes.map(async (d) => {
       const progress = await step(deps, actor, 'suivi_activation', d.id, {}, () => directory.getOnboardingProgress(d.id, activationExt)).catch(() => null);
       const at = progress ? Date.parse(progress.activation ?? progress.createdDateTime ?? '') : NaN;
-      return { d, at };
+      // Terminé ce mois-ci (calendrier du fuseau métier) : la date de fin si elle est enregistrée ; sinon, un compte activé ce mois-ci
+      // est forcément terminé ce mois-ci (la fin suit l'activation et ne peut pas être dans le futur) ; sinon on ne sait pas.
+      const fin = Date.parse(config.history ? (decoderEvenement(d.extensions?.[config.history.termine])?.le ?? '') : '');
+      const ceMois: boolean | null = Number.isFinite(fin) ? moisDe(fin) === moisCourant : Number.isFinite(at) && moisDe(at) === moisCourant ? true : null;
+      return { d, at, ceMois };
     }),
   );
+  // Fenêtre : activés depuis moins de 30 jours, et aussi tous ceux terminés ce mois-ci (activation plus ancienne, onboarding long).
   const recents = dates
-    .filter(({ at }) => !Number.isFinite(at) || at >= seuil)
-    .sort((a, b) => (Number.isFinite(b.at) ? b.at : -Infinity) - (Number.isFinite(a.at) ? a.at : -Infinity))
-    .map(({ d }) => d);
+    .filter(({ at, ceMois }) => !Number.isFinite(at) || at >= seuil || ceMois === true)
+    .sort((a, b) => (Number.isFinite(b.at) ? b.at : -Infinity) - (Number.isFinite(a.at) ? a.at : -Infinity));
 
   const gardes = {
     attente: attente.demandes.slice(0, MAX_PAR_STATUT),
@@ -132,7 +146,7 @@ export async function listSuivi(
     ...gardes.attente.map((d) => item(d, 'EnAttente', droits, aujourdhui)),
     ...gardes.valides.map((d) => item(d, 'Validé', droits, aujourdhui, undefined, manquants.has(d.id))),
     ...(await inspectActifs(deps, actor, gardes.actifs)).map((d) => item(d, 'Actif', droits, aujourdhui, d.onboarding)),
-    ...gardes.termines.map((d) => item(d, 'Terminé', droits, aujourdhui)),
+    ...gardes.termines.map(({ d, ceMois }) => item(d, 'Terminé', droits, aujourdhui, undefined, false, ceMois)),
   ];
   audit.track({ action: 'suivi.liste', actor, outcome: 'ok', resultats: demandes.length, tronque });
   return { demandes, tronque };

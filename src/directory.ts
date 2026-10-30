@@ -125,6 +125,8 @@ export interface PendingDemande {
   /** Prénom et nom de famille (nom du dossier SharePoint), présents seulement si la liste les a demandés (`withNames`) ; jamais renvoyés tels quels par l'API. */
   prenom?: string | null;
   famille?: string | null;
+  /** Valeurs brutes des extensions lues en plus (`extras` de `listByStatut`) ; null si absentes. Jamais renvoyées telles quelles par l'API. */
+  extensions?: Record<string, string | null>;
 }
 
 /** Les listes qui n'affichent pas l'adresse (GET /api/demandes, /api/activations) ne la renvoient pas : seul le suivi la porte. */
@@ -172,6 +174,8 @@ export interface Directory {
     statut: string,
     hiredSince?: string,
     withNames?: boolean,
+    /** Extensions à lire dans la même requête (`$select`), rendues dans `extensions`. */
+    extras?: readonly string[],
   ): Promise<{ demandes: PendingDemande[]; tronque: boolean }>;
   setAccountEnabled(id: string, enabled: boolean): Promise<void>;
   /** Mot de passe temporaire : Entra impose son changement à la première connexion (forceChangePasswordNextSignIn). */
@@ -317,7 +321,7 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async listByStatut(ext: string, statut: string, hiredSince?: string, withNames = false) {
+  async listByStatut(ext: string, statut: string, hiredSince?: string, withNames = false, extras: readonly string[] = []) {
     // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
     // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
     // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
@@ -326,7 +330,7 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`${ext} eq '${statut}'`)
-        .select(`id,displayName,userPrincipalName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}`)
+        .select(`id,displayName,userPrincipalName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}${extras.map((e) => `,${e}`).join('')}`)
         .expand('manager($select=id,displayName)')
         .top(100)
         .count(true);
@@ -353,6 +357,7 @@ export class GraphDirectory implements Directory {
           manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
           dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
           ...(withNames ? { prenom: typeof u.givenName === 'string' ? u.givenName : null, famille: typeof u.surname === 'string' ? u.surname : null } : {}),
+          ...(extras.length > 0 ? { extensions: Object.fromEntries(extras.map((e) => [e, typeof u[e] === 'string' ? (u[e] as string) : null])) } : {}),
         }))
         .filter((d) => !hiredSince || (d.dateArrivee !== null && d.dateArrivee >= hiredSince));
       return { demandes, tronque };

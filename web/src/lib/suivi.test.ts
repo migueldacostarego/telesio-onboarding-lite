@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aujourdhui, compter, filtrerDemandes, formatArrivee, groupeDe, ilYA, normaliser, type Demande } from '@/lib/suivi';
+import { aujourdhui, compter, filtrerDemandes, formatArrivee, groupeDe, ilYA, nbIncertaines, normaliser, type Demande } from '@/lib/suivi';
 
 const AUJOURDHUI = '2026-10-28';
 
@@ -142,13 +142,17 @@ describe('groupes et compteurs', () => {
     expect(groupeDe(avec('d', 'Validé', []))).toBe('encours'); // jour J pas atteint (ou ligne en cours de synchronisation)
     expect(groupeDe(avec('e', 'Validé', ['reprendre']))).toBe('encours');
     expect(groupeDe(avec('f', 'Actif', ['regenerer']))).toBe('encours');
-    expect(groupeDe(avec('g', 'Terminé'))).toBe('terminees');
+    expect(groupeDe(avec('g', 'Terminé'))).toBe('terminees'); // mois inconnu : dans le filtre, pas dans le compteur
+    expect(groupeDe({ ...avec('h', 'Terminé'), termineCeMois: true })).toBe('terminees');
+    expect(groupeDe({ ...avec('i', 'Terminé'), termineCeMois: false })).toBeNull(); // terminée un mois précédent : aucun groupe
   });
 
-  it('la somme des compteurs est le nombre de demandes', () => {
-    const liste = [avec('a', 'EnAttente'), avec('b', 'EnAttente'), avec('c', 'Validé', ['activer']), avec('d', 'Validé'), avec('e', 'Actif'), avec('f', 'Terminé')];
-    expect(compter(liste)).toEqual({ attente: 2, activer: 1, encours: 2, terminees: 1 });
-    expect(Object.values(compter(liste)).reduce((a, b) => a + b, 0)).toBe(liste.length);
+  it('la somme des compteurs est le nombre de demandes, hors Terminées d’un mois précédent ; Terminées ne compte que ce mois-ci', () => {
+    const fin = (nom: string, termineCeMois: boolean | null) => ({ ...avec(nom, 'Terminé'), termineCeMois });
+    const liste = [avec('a', 'EnAttente'), avec('b', 'EnAttente'), avec('c', 'Validé', ['activer']), avec('d', 'Validé'), avec('e', 'Actif'), fin('f', true), fin('g', true), fin('h', false), fin('i', null)];
+    expect(compter(liste)).toEqual({ attente: 2, activer: 1, encours: 2, terminees: 2 });
+    expect(nbIncertaines(liste)).toBe(1);
+    expect(nbIncertaines(liste.slice(0, 8))).toBe(0);
     expect(compter([])).toEqual({ attente: 0, activer: 0, encours: 0, terminees: 0 });
   });
 });

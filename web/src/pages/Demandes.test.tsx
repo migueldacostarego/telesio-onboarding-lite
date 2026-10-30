@@ -34,7 +34,7 @@ const EXEMPLES: Demande[] = [
   demande({ nom: 'Éloïse Dupont', dateArrivee: '2026-11-03', statut: 'EnAttente', etape: 1, actions: ['approuver', 'refuser'] }),
   demande({ nom: 'Anna Martin', poste: 'Développeuse', service: 'Technique', dateArrivee: '2026-10-20', statut: 'Actif', etape: 3 }),
   demande({ nom: 'Luc Bernard', poste: 'Chargé de paie', service: 'RH', dateArrivee: '2026-10-29', statut: 'Validé', etape: 2, actions: ['activer'] }),
-  demande({ nom: 'Sarah Petit', poste: null, service: null, dateArrivee: null, statut: 'Terminé', etape: 4 }),
+  demande({ nom: 'Sarah Petit', poste: null, service: null, dateArrivee: null, statut: 'Terminé', etape: 4, termineCeMois: true }),
 ];
 const avec = (demandes: Demande[], tronque = false) => ({ demandes, tronque });
 
@@ -262,7 +262,7 @@ describe('compteurs et filtre', () => {
       'En attente1À valider par la direction',
       'À activer1Jour d’arrivée atteint',
       'En cours1Validées et en onboarding',
-      'Terminées1Sur les 30 derniers jours',
+      'Terminées1Ce mois-ci, heure de Paris',
     ]);
     expect(groupe.getAllByRole('button').every((b) => b.getAttribute('aria-pressed') === 'false')).toBe(true);
 
@@ -299,6 +299,26 @@ describe('compteurs et filtre', () => {
     await screen.findByText('Anna Martin');
     expect(compteur('En attente')).toHaveTextContent('1+');
     expect(compteur('En attente')).toHaveTextContent('au moins');
+  });
+
+  it('Terminées : seulement celles de ce mois ; une Terminée du mois dernier reste dans la liste sans compteur ; « + » quand le mois est inconnu', async () => {
+    const user = userEvent.setup();
+    const terminee = (nom: string, termineCeMois?: boolean | null) => demande({ nom, statut: 'Terminé', etape: 4, termineCeMois });
+    mockApi({ suivi: avec([terminee('Ce Mois', true), terminee('Mois Dernier', false), terminee('Inconnu', null), demande({ nom: 'Attente', actions: ['approuver'] })]) });
+    rendre();
+    await screen.findByText('Ce Mois');
+    expect(compteur('Terminées')).toHaveTextContent('1+'); // un compte dont on ne connaît pas le mois : minimum
+    expect(compteur('Terminées')).toHaveTextContent('au moins');
+    expect(noms()).toHaveLength(4); // « Toutes » : la Terminée du mois dernier y est
+    await user.click(compteur('Terminées'));
+    expect(noms().sort()).toEqual(['Ce Mois', 'Inconnu']); // le filtre : ce mois-ci et l'incertaine, pas le mois dernier
+  });
+
+  it('Terminées : pas de « + » quand toutes les dates sont connues', async () => {
+    mockApi({ suivi: avec([demande({ nom: 'Alice Fin', statut: 'Terminé', etape: 4, termineCeMois: true }), demande({ nom: 'Bruno Fin', statut: 'Terminé', etape: 4, termineCeMois: false })]) });
+    rendre();
+    await screen.findByText('Alice Fin');
+    expect(compteur('Terminées')).toHaveTextContent(/^Terminées1Ce mois-ci, heure de Paris$/);
   });
 
   it('« À activer » est marqué quand il n’est pas vide : le travail du jour', async () => {

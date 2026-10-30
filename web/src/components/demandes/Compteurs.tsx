@@ -1,11 +1,11 @@
 import { Skeleton } from '@/components/ui/skeleton';
-import { GROUPES, compter, type Demande, type FiltreGroupe, type Groupe } from '@/lib/suivi';
+import { GROUPES, compter, nbIncertaines, type Demande, type FiltreGroupe, type Groupe } from '@/lib/suivi';
 
 const CELLULES: Record<Groupe, { libelle: string; aide: string }> = {
   attente: { libelle: 'En attente', aide: 'À valider par la direction' },
   activer: { libelle: 'À activer', aide: 'Jour d’arrivée atteint' },
   encours: { libelle: 'En cours', aide: 'Validées et en onboarding' },
-  terminees: { libelle: 'Terminées', aide: 'Sur les 30 derniers jours' },
+  terminees: { libelle: 'Terminées', aide: 'Ce mois-ci, heure de Paris' },
 };
 
 interface Props {
@@ -18,16 +18,19 @@ interface Props {
 
 /**
  * Quatre compteurs qui sont aussi le filtre : un clic ne garde que ce groupe, un second clic le retire (`aria-pressed`). Chaque
- * demande est dans un seul groupe (lib/suivi.ts : `groupeDe`), la somme est le nombre de demandes. « À activer » est la seule
+ * demande est dans un seul groupe au plus (lib/suivi.ts : `groupeDe`) ; une Terminée d'un mois précédent n'en a pas. « À activer » est la seule
  * cellule marquée quand elle n'est pas vide : c'est le travail du jour.
  */
 export function Compteurs({ demandes, tronque, groupe, onGroupe }: Props) {
   const n = compter(demandes);
+  const incertaines = nbIncertaines(demandes);
   return (
     <div role="group" aria-label="Filtrer par groupe de demandes" className="grid grid-cols-2 overflow-hidden rounded-lg border bg-card md:grid-cols-4 md:divide-x">
       {GROUPES.map((g, i) => {
         const actif = groupe === g;
         const marque = g === 'activer' && n[g] > 0;
+        // Liste incomplète : tous les nombres sont des minimums. Terminées : aussi quand des comptes ne disent pas leur mois de fin.
+        const minimum = tronque || (g === 'terminees' && incertaines > 0);
         return (
           <button
             key={g}
@@ -40,8 +43,8 @@ export function Compteurs({ demandes, tronque, groupe, onGroupe }: Props) {
             <span className="text-sm font-medium">{CELLULES[g].libelle}</span>
             <span className="text-3xl leading-tight font-semibold tracking-tight tabular-nums">
               {n[g]}
-              {tronque && <span aria-hidden="true">+</span>}
-              {tronque && <span className="sr-only"> au moins</span>}
+              {minimum && <span aria-hidden="true">+</span>}
+              {minimum && <span className="sr-only"> au moins</span>}
             </span>
             <span className="text-xs text-muted-foreground">{CELLULES[g].aide}</span>
           </button>

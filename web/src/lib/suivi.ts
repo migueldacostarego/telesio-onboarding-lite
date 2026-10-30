@@ -42,6 +42,8 @@ export interface Demande {
   etape: number;
   /** Ce que la personne connectée peut faire : `approuver`, `refuser`, `activer`, `regenerer`. L'interface n'en propose pas d'autre. */
   actions: string[];
+  /** Comptes Terminé seulement : terminé ce mois-ci (calendrier de Paris) ? `null` : inconnu (voir `listSuivi`, côté API). */
+  termineCeMois?: boolean | null;
   /** Comptes Actif seulement. */
   onboarding?: EtatOnboarding;
   /** Côté interface seulement (jamais dans l'API) : la ligne vient d'être écrite par l'écran et attend que l'API la rende (voir lib/synchro.ts). */
@@ -113,23 +115,35 @@ export type Tri = 'avenir' | 'recentes' | 'anciennes';
  * Les quatre compteurs de l'écran, qui sont aussi son filtre. Ils partagent les demandes sans les compter deux fois :
  * `attente` (En attente), `activer` (Validée dont l'API propose `activer`, c'est-à-dire le jour J atteint : le calcul est celui du
  * serveur, dans son fuseau, jamais celui du navigateur), `encours` (les autres Validées et les Activées), `terminees` (Terminées
- * dont l'activation date de moins de 30 jours : la fenêtre de `GET /api/suivi`, qui ne donne pas la date de fin).
+ * **ce mois-ci**, calendrier de Paris : `termineCeMois` de `GET /api/suivi`). Une Terminée d'un mois précédent n'a pas de groupe : elle
+ * reste dans « Toutes » (la liste en garde les 30 derniers jours d'activation), donc la somme des compteurs peut être inférieure au total.
  */
 export type Groupe = 'attente' | 'activer' | 'encours' | 'terminees';
 export const GROUPES: readonly Groupe[] = ['attente', 'activer', 'encours', 'terminees'];
 export type FiltreGroupe = Groupe | 'tous';
 
-export function groupeDe(d: Pick<Demande, 'statut' | 'actions'>): Groupe {
+type PourGroupe = Pick<Demande, 'statut' | 'actions' | 'termineCeMois'>;
+
+/** Le groupe d'une demande, ou `null` : Terminée avant ce mois-ci. Terminée « on ne sait pas » (`null`, absent) : dans `terminees` (le filtre) mais non comptée. */
+export function groupeDe(d: PourGroupe): Groupe | null {
   if (d.statut === 'EnAttente') return 'attente';
-  if (d.statut === 'Terminé') return 'terminees';
+  if (d.statut === 'Terminé') return d.termineCeMois === false ? null : 'terminees';
   return d.statut === 'Validé' && d.actions.includes('activer') ? 'activer' : 'encours';
 }
 
-export function compter(demandes: readonly Pick<Demande, 'statut' | 'actions'>[]): Record<Groupe, number> {
+/** Compte par groupe. « Terminées » ne compte que celles dont on sait qu'elles datent de ce mois-ci. */
+export function compter(demandes: readonly PourGroupe[]): Record<Groupe, number> {
   const n: Record<Groupe, number> = { attente: 0, activer: 0, encours: 0, terminees: 0 };
-  for (const d of demandes) n[groupeDe(d)]++;
+  for (const d of demandes) {
+    const g = groupeDe(d);
+    if (g === null || (g === 'terminees' && d.termineCeMois !== true)) continue;
+    n[g]++;
+  }
   return n;
 }
+
+/** Terminées dont on ne sait pas si c'est de ce mois-ci (terminées avant l'historique, activées un mois plus tôt) : le compteur est un minimum. */
+export const nbIncertaines = (demandes: readonly PourGroupe[]): number => demandes.filter((d) => d.statut === 'Terminé' && d.termineCeMois !== true && d.termineCeMois !== false).length;
 
 /** Minuscules sans accents : « Éloïse » se trouve avec « eloise ». */
 export const normaliser = (s: string): string => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
