@@ -1,16 +1,19 @@
-import { Progress } from '@/components/ui/progress';
 import { NB_ETAPES } from '@/lib/suivi';
 
-/** « 2 sur 4 » avec une petite barre (décorative : le texte dit la même chose). */
-export function Progression({ etape, barre = 'w-16' }: { etape: number; /** Largeur de la barre (classe Tailwind) ; plus courte dans le tableau, dont la colonne est fixe. */ barre?: string }) {
+/**
+ * Quatre segments : demande, validée, activée, terminée. Le texte « Étape n sur 4 » est dit aux lecteurs d'écran ; les segments sont
+ * décoratifs (et en couleurs neutres : remplis = faits).
+ */
+export function Progression({ etape }: { etape: number }) {
   const n = Math.min(NB_ETAPES, Math.max(0, Math.round(etape)));
   return (
-    <div className="flex items-center gap-2">
-      <Progress aria-hidden="true" value={(n / NB_ETAPES) * 100} className={`${barre} shrink-0`} />
-      <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-        <span className="sr-only">Étape </span>
-        {n} sur {NB_ETAPES}
+    <span className="inline-flex items-center gap-0.5" data-etape={n}>
+      <span className="sr-only">
+        Étape {n} sur {NB_ETAPES}
       </span>
-    </div>
+      {Array.from({ length: NB_ETAPES }, (_, i) => (
+        <span key={i} aria-hidden="true" className={`h-1.5 w-3 rounded-full ${i < n ? 'bg-foreground/70' : 'bg-foreground/15'}`} />
+      ))}
+    </span>
   );
 }

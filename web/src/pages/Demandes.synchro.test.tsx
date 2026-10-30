@@ -1,16 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { lecturesSuivi, reply } from '@/test/helpers';
-import { ELOISE, HUGO, actif, avancer, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
+import { ELOISE, HUGO, actif, avancer, choisir, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 import { SUIVI_KEY, type Suivi } from '@/lib/suivi';
 import { DELAI_SYNCHRO_MS } from '@/lib/synchro';
 
 tempsSimule();
 
 const valider = (nom: string) => screen.getByRole('button', { name: `Valider la demande de ${nom}` });
-const refuser = (nom: string) => screen.getByRole('button', { name: `Refuser la demande de ${nom}` });
 const activer = (nom: string) => screen.getByRole('button', { name: `Activer le compte de ${nom}` });
-const regenerer = (nom: string) => screen.getByRole('button', { name: `Régénérer le mot de passe de ${nom}` });
 const ligne = (nom: RegExp) => screen.getByRole('row', { name: nom });
 const eloise = () => ligne(/Éloïse Dupont/);
 const synchro = () => screen.queryAllByText('synchronisation…');
@@ -94,7 +92,7 @@ describe('autres actions', () => {
   it('Refuser : la ligne est retirée comme avant, sans indicateur', async () => {
     const { etat, user } = monter({ ecrire: () => reply(200, { id: ELOISE.id, statut: 'Refusé' }) });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     await user.type(await screen.findByRole('textbox', { name: /Motif du refus/ }), 'Raison');
     etat.demandes = [enAttente(HUGO)];
     await user.click(screen.getByRole('button', { name: 'Confirmer le refus' }));
@@ -127,7 +125,7 @@ describe('autres actions', () => {
       ecrire: () => reply(200, { id: ELOISE.id, statut: 'Actif', regeneration: true, motDePasseTemporaire: 'Rw8c-Nd5t-Yf6v-Gj2s' }),
     });
     await screen.findByText('Hugo Lambert');
-    await user.click(regenerer(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
     const boite = await screen.findByRole('dialog');
     await user.click(within(boite).getByRole('radio', { name: 'Mot de passe perdu' }));
     await user.click(within(boite).getByRole('button', { name: /Régénérer/ }));

@@ -52,7 +52,9 @@ function rendre() {
   return { client, ...vue };
 }
 const lignes = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
-const noms = () => lignes().map((l) => within(l).getAllByRole('cell')[0]?.textContent);
+const noms = () => lignes().map((l) => within(l).getAllByRole('link')[0]?.textContent);
+/** Compteur-filtre : « En attente », « À activer », « En cours » ou « Terminées ». */
+const compteur = (nom: string) => within(screen.getByRole('group', { name: 'Filtrer par groupe de demandes' })).getByRole('button', { name: new RegExp(`^${nom}`) });
 
 describe('chargement', () => {
   it('squelette (en-têtes réels, lignes factices) puis les données, jamais d’écran vide', async () => {
@@ -76,45 +78,79 @@ describe('chargement', () => {
 describe('tableau (bureau)', () => {
   beforeEach(() => mockApi({ suivi: avec(EXEMPLES) }));
 
-  it('colonnes, date en français, badge de statut et progression « n sur 4 »', async () => {
+  it('colonnes : personne (initiales, nom, adresse), poste et service, arrivée relative, statut avec étape et phrase d’état, actions', async () => {
     rendre();
     await screen.findByText('Anna Martin');
-    expect(screen.getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Nom', 'Poste', 'Service', 'Arrivée', 'Statut', 'Progression', 'Actions']);
-    const eloise = within(screen.getByRole('row', { name: /Éloïse Dupont/ }));
-    expect(eloise.getAllByRole('cell').map((c) => c.textContent)).toEqual(['Éloïse Dupont', 'Comptable', 'Finance', '3 nov. 2026', 'En attente', 'Étape 1 sur 4', 'ValiderRefuser']);
+    expect(screen.getAllByRole('columnheader').map((c) => c.textContent)).toEqual(['Personne', 'Poste', 'Arrivée', 'Statut', 'Actions']);
+    const cells = within(screen.getByRole('row', { name: /Éloïse Dupont/ })).getAllByRole('cell').map((c) => c.textContent);
+    expect(cells[0]).toContain('Éloïse Dupont');
+    expect(cells[0]).toContain('ÉD'); // initiales
+    expect(cells[1]).toBe('ComptableFinance');
+    expect(cells[2]).toBe('3 nov. 2026Dans 6 j'); // aujourd'hui : 28 oct. 2026 (Paris)
+    expect(cells[3]).toBe('En attenteÉtape 1 sur 4En attente de la direction');
+    expect(cells[4]).toBe('Valider');
   });
 
-  it('les quatre statuts : libellés et progression', async () => {
+  it('les quatre statuts : libellé, étape et phrase d’état', async () => {
     rendre();
     await screen.findByText('Anna Martin');
-    const parNom = Object.fromEntries(lignes().map((l) => [within(l).getAllByRole('cell')[0]!.textContent, within(l).getAllByRole('cell').map((c) => c.textContent)]));
-    expect(parNom['Éloïse Dupont']).toContain('En attente');
-    expect(parNom['Luc Bernard']).toContain('Validée');
-    expect(parNom['Anna Martin']).toContain('Activée');
-    expect(parNom['Sarah Petit']).toContain('Terminée');
-    expect(parNom['Éloïse Dupont']).toContain('Étape 1 sur 4');
-    expect(parNom['Luc Bernard']).toContain('Étape 2 sur 4');
-    expect(parNom['Anna Martin']).toContain('Étape 3 sur 4');
-    expect(parNom['Sarah Petit']).toContain('Étape 4 sur 4');
+    const statut = (nom: string) => within(screen.getByRole('row', { name: new RegExp(nom) })).getAllByRole('cell')[3]!.textContent;
+    expect(statut('Éloïse Dupont')).toBe('En attenteÉtape 1 sur 4En attente de la direction');
+    expect(statut('Luc Bernard')).toBe('ValidéeÉtape 2 sur 4À activer maintenant');
+    expect(statut('Anna Martin')).toBe('ActivéeÉtape 3 sur 4En attente de la 1re connexion');
+    expect(statut('Sarah Petit')).toBe('TerminéeÉtape 4 sur 4Onboarding terminé');
+    for (const [nom, attendu] of [['Éloïse Dupont', 'EnAttente'], ['Luc Bernard', 'Validé'], ['Anna Martin', 'Actif'], ['Sarah Petit', 'Terminé']] as const) {
+      expect(screen.getByRole('row', { name: new RegExp(nom) }).querySelector('[data-slot="statut"]')).toHaveAttribute('data-statut', attendu);
+    }
   });
 
   it('champs absents : « Non renseigné », « Non renseignée »', async () => {
     rendre();
     const sarah = within(await screen.findByRole('row', { name: /Sarah Petit/ }));
-    expect(sarah.getAllByText('Non renseigné')).toHaveLength(2);
+    expect(sarah.getAllByText('Non renseigné')).toHaveLength(1);
     expect(sarah.getByText('Non renseignée')).toBeInTheDocument();
   });
 
-  it('boutons seulement selon `actions` de l’API : Valider et Refuser pour approuver et refuser, rien pour le reste, pas de lien', async () => {
+  it('une action principale par ligne et un menu « … », seulement selon `actions` de l’API ; rien pour le reste', async () => {
+    const user = userEvent.setup();
     rendre();
     await screen.findByText('Anna Martin');
-    expect(screen.getAllByRole('button', { name: /^(Valider|Refuser) la demande/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+    expect(screen.getAllByRole('button', { name: /^(Valider|Refuser|Activer|Régénérer|Réessayer)/ }).map((b) => b.getAttribute('aria-label'))).toEqual([
+      'Activer le compte de Luc Bernard',
       'Valider la demande de Éloïse Dupont',
-      'Refuser la demande de Éloïse Dupont',
     ]);
-    // Seuls liens : le nom de chaque demande, vers sa page (l'objectId, rien d'autre, dans l'adresse).
-    expect(screen.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(EXEMPLES.map((d) => `/demandes/${d.id}`).sort((a, b) => ['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit'].indexOf(a.slice(10)) - ['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit'].indexOf(b.slice(10))));
+    // Un menu par ligne, nommé d'après la personne.
+    expect(screen.getAllByRole('button', { name: /^Autres actions pour/ })).toHaveLength(4);
+
+    await user.click(screen.getByRole('button', { name: 'Autres actions pour Éloïse Dupont' }));
+    expect(screen.getAllByRole('menuitem').map((m) => m.getAttribute('aria-label') ?? m.textContent)).toEqual(['Voir le détail', 'Refuser la demande de Éloïse Dupont']);
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', { name: 'Autres actions pour Sarah Petit' }));
+    expect(screen.getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Voir le détail']); // Terminée : rien d'autre
     expect(document.querySelector('form')).toBeNull();
+  });
+
+  it('une entrée du menu « … » n’ouvre pas la page de la demande (le clic ne remonte pas à la ligne)', async () => {
+    const user = userEvent.setup();
+    rendre();
+    await screen.findByText('Anna Martin');
+    await user.click(screen.getByRole('button', { name: 'Autres actions pour Éloïse Dupont' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Refuser la demande de Éloïse Dupont' }));
+    expect(await screen.findByRole('dialog', { name: 'Refuser la demande de Éloïse Dupont ?' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // « Voir le détail » du menu, lui, ouvre la page.
+    await user.click(screen.getByRole('button', { name: 'Autres actions pour Anna Martin' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Voir le détail' }));
+    expect(decodeURIComponent(window.location.pathname)).toBe(`/demandes/${EXEMPLES[1]!.id}`);
+  });
+
+  it('liens : le nom de chaque demande vers sa page (l’objectId, rien d’autre, dans l’adresse)', async () => {
+    rendre();
+    await screen.findByText('Anna Martin');
+    const attendu = ['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit'].map((nom) => `/demandes/${EXEMPLES.find((d) => d.nom === nom)!.id}`);
+    expect(screen.getAllByRole('link').map((l) => l.getAttribute('href'))).toEqual(attendu);
   });
 });
 
@@ -187,7 +223,7 @@ describe('recherche par nom', () => {
     await screen.findByText('Anna Martin');
 
     await user.type(screen.getByRole('searchbox', { name: 'Rechercher par nom' }), 'Dupont');
-    await user.click(screen.getByRole('button', { name: 'Activée' }));
+    await user.click(compteur('En cours'));
     expect(window.location.href).toBe(avant);
     expect(window.location.search).toBe('');
     expect(window.location.hash).toBe('');
@@ -201,7 +237,7 @@ describe('recherche par nom', () => {
     rendre();
     await screen.findByText('Anna Martin');
     await user.type(screen.getByRole('searchbox', { name: 'Rechercher par nom' }), 'zzz');
-    await user.click(screen.getByRole('button', { name: 'Terminée' }));
+    await user.click(compteur('Terminées'));
 
     expect(screen.getByText('Aucune demande ne correspond')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
@@ -209,42 +245,67 @@ describe('recherche par nom', () => {
 
     await user.click(screen.getByRole('button', { name: 'Effacer la recherche et le filtre' }));
     expect(screen.getByRole('searchbox', { name: 'Rechercher par nom' })).toHaveValue('');
-    expect(screen.getByRole('button', { name: 'Toutes' })).toHaveAttribute('aria-pressed', 'true');
+    expect(compteur('Terminées')).toHaveAttribute('aria-pressed', 'false');
     expect(noms()).toHaveLength(4);
   });
 });
 
-describe('filtre par statut', () => {
+describe('compteurs et filtre', () => {
   beforeEach(() => mockApi({ suivi: avec(EXEMPLES) }));
 
-  it('un statut à la fois, « Toutes » les rétablit, état annoncé par aria-pressed', async () => {
+  it('quatre compteurs qui partagent les demandes (leur somme est le total) et filtrent, un second clic retire le filtre', async () => {
     const user = userEvent.setup();
     rendre();
     await screen.findByText('Anna Martin');
-    const groupe = within(screen.getByRole('group', { name: 'Filtrer par statut' }));
-    expect(groupe.getAllByRole('button').map((b) => b.textContent)).toEqual(['Toutes', 'En attente', 'Validée', 'Activée', 'Terminée']);
-    expect(groupe.getByRole('button', { name: 'Toutes' })).toHaveAttribute('aria-pressed', 'true');
+    const groupe = within(screen.getByRole('group', { name: 'Filtrer par groupe de demandes' }));
+    expect(groupe.getAllByRole('button').map((b) => b.textContent)).toEqual([
+      'En attente1À valider par la direction',
+      'À activer1Jour d’arrivée atteint',
+      'En cours1Validées et en onboarding',
+      'Terminées1Sur les 30 derniers jours',
+    ]);
+    expect(groupe.getAllByRole('button').every((b) => b.getAttribute('aria-pressed') === 'false')).toBe(true);
 
-    for (const [libelle, attendu] of [['En attente', ['Éloïse Dupont']], ['Validée', ['Luc Bernard']], ['Activée', ['Anna Martin']], ['Terminée', ['Sarah Petit']]] as const) {
-      await user.click(groupe.getByRole('button', { name: libelle }));
+    for (const [nom, attendu] of [['En attente', ['Éloïse Dupont']], ['À activer', ['Luc Bernard']], ['En cours', ['Anna Martin']], ['Terminées', ['Sarah Petit']]] as const) {
+      await user.click(compteur(nom));
       expect(noms()).toEqual(attendu);
-      expect(groupe.getByRole('button', { name: libelle })).toHaveAttribute('aria-pressed', 'true');
-      expect(groupe.getByRole('button', { name: 'Toutes' })).toHaveAttribute('aria-pressed', 'false');
+      expect(compteur(nom)).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByText(`1 demande sur 4`)).toBeInTheDocument();
     }
-    await user.click(groupe.getByRole('button', { name: 'Toutes' }));
+    await user.click(compteur('Terminées')); // second clic : retire le filtre
+    expect(compteur('Terminées')).toHaveAttribute('aria-pressed', 'false');
     expect(noms()).toHaveLength(4);
   });
 
-  it('se combine avec la recherche', async () => {
+  it('« Tout afficher » retire le filtre ; le filtre se combine avec la recherche', async () => {
     const user = userEvent.setup();
     rendre();
     await screen.findByText('Anna Martin');
-    await user.click(screen.getByRole('button', { name: 'Activée' }));
+    expect(screen.queryByRole('button', { name: 'Tout afficher' })).not.toBeInTheDocument();
+    await user.click(compteur('En cours'));
     await user.type(screen.getByRole('searchbox', { name: 'Rechercher par nom' }), 'martin');
     expect(noms()).toEqual(['Anna Martin']);
     await user.clear(screen.getByRole('searchbox', { name: 'Rechercher par nom' }));
     await user.type(screen.getByRole('searchbox', { name: 'Rechercher par nom' }), 'dupont');
     expect(screen.getByText('Aucune demande ne correspond')).toBeInTheDocument();
+    await user.clear(screen.getByRole('searchbox', { name: 'Rechercher par nom' }));
+    await user.click(screen.getByRole('button', { name: 'Tout afficher' }));
+    expect(noms()).toHaveLength(4);
+  });
+
+  it('liste incomplète : les nombres sont des minimums (« + », dit aux lecteurs d’écran)', async () => {
+    mockApi({ suivi: avec(EXEMPLES, true) });
+    rendre();
+    await screen.findByText('Anna Martin');
+    expect(compteur('En attente')).toHaveTextContent('1+');
+    expect(compteur('En attente')).toHaveTextContent('au moins');
+  });
+
+  it('« À activer » est marqué quand il n’est pas vide : le travail du jour', async () => {
+    rendre();
+    await screen.findByText('Anna Martin');
+    expect(compteur('À activer').querySelector('span.bg-primary')).not.toBeNull();
+    expect(compteur('En attente').querySelector('span.bg-primary')).toBeNull();
   });
 });
 
@@ -386,12 +447,13 @@ describe('mobile', () => {
     expect(cartes).toHaveLength(4);
 
     // Ordre par défaut : à venir d'abord (Luc 29 oct., Éloïse 3 nov.), puis Anna (passée), puis Sarah (sans date).
-    expect(cartes.map((c) => c.textContent?.slice(0, 11))).toEqual(['Luc Bernard', 'Éloïse Dupo', 'Anna Martin', 'Sarah Petit']);
+    expect(cartes.map((c) => within(c).getAllByRole('link')[0]!.textContent)).toEqual(['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit']);
     const eloise = within(cartes[1]!);
     expect(eloise.getByText('Éloïse Dupont')).toBeInTheDocument();
     expect(eloise.getByText('En attente')).toBeInTheDocument();
     expect(eloise.getByText('Comptable · Finance')).toBeInTheDocument();
     expect(eloise.getByText('Arrivée : 3 nov. 2026')).toBeInTheDocument();
+    expect(eloise.getByText('(dans 6 j)')).toBeInTheDocument();
     expect(cartes[1]).toHaveTextContent('Étape 1 sur 4');
 
     const sarah = within(cartes[3]!);
@@ -404,13 +466,13 @@ describe('mobile', () => {
     const user = userEvent.setup();
     rendre();
     await screen.findByText('Anna Martin');
-    await user.click(screen.getByRole('button', { name: 'Validée' }));
+    await user.click(compteur('À activer'));
     expect(screen.getAllByRole('listitem')).toHaveLength(1);
     expect(screen.getByText('Luc Bernard')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Toutes' }));
+    await user.click(compteur('À activer'));
     await user.click(screen.getByRole('button', { name: /Arrivée : à venir d’abord/ }));
     await user.click(screen.getByRole('button', { name: /Arrivée : plus récentes d’abord/ }));
-    expect(screen.getAllByRole('listitem').map((c) => c.textContent?.slice(0, 11))).toEqual(['Anna Martin', 'Luc Bernard', 'Éloïse Dupo', 'Sarah Petit']);
+    expect(screen.getAllByRole('listitem').map((c) => within(c).getAllByRole('link')[0]!.textContent)).toEqual(['Anna Martin', 'Luc Bernard', 'Éloïse Dupont', 'Sarah Petit']);
   });
 
   it('squelette en cartes au chargement', async () => {

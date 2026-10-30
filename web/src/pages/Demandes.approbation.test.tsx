@@ -1,12 +1,11 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ecritures, lecturesSuivi, reply, stubBureau } from '@/test/helpers';
-import { ELOISE, HUGO, avancer, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
+import { ELOISE, HUGO, avancer, choisir, enAttente, menu, monter, tempsSimule, valide } from '@/test/demandes';
 
 tempsSimule();
 
 const valider = (nom: string) => screen.getByRole('button', { name: `Valider la demande de ${nom}` });
-const refuser = (nom: string) => screen.getByRole('button', { name: `Refuser la demande de ${nom}` });
 const POST_ELOISE = '/api/demandes/id-eloise/valider';
 const introuvable = () => reply(404, { error: 'Demande introuvable' });
 
@@ -24,10 +23,10 @@ describe('Valider', () => {
     expect(valider(ELOISE.nom)).toHaveTextContent(/^Valider$/);
     expect(screen.getByRole('status')).toHaveTextContent('Validation…');
     expect(valider(ELOISE.nom)).toBeDisabled();
-    expect(refuser(ELOISE.nom)).toBeDisabled();
+    expect(menu(ELOISE.nom)).toBeDisabled();
     // Les autres lignes ne sont pas touchées.
     expect(valider(HUGO.nom)).toBeEnabled();
-    expect(refuser(HUGO.nom)).toBeEnabled();
+    expect(menu(HUGO.nom)).toBeEnabled();
 
     // Un second clic ne repart pas.
     await user.click(valider(ELOISE.nom));
@@ -93,7 +92,7 @@ describe('compte pas encore répliqué (404 sur valider)', () => {
 
     expect(await screen.findByText('Compte en cours de création')).toBeInTheDocument();
     expect(valider(ELOISE.nom)).toBeDisabled();
-    expect(refuser(ELOISE.nom)).toBeDisabled();
+    expect(menu(ELOISE.nom)).toBeDisabled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(ecritures(fetchMock)).toHaveLength(1);
 
@@ -123,7 +122,7 @@ describe('compte pas encore répliqué (404 sur valider)', () => {
   it('un 404 sur refuser n’est jamais rejoué (c’est une suppression)', async () => {
     const { fetchMock, user } = monter({ ecrire: introuvable });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     await user.type(await screen.findByRole('textbox', { name: /Motif du refus/ }), 'Candidat retiré');
     await user.click(screen.getByRole('button', { name: 'Confirmer le refus' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Demande introuvable');
@@ -174,7 +173,7 @@ describe('202 licence_en_cours', () => {
     expect(await screen.findByText('Licence en cours d’attribution')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(valider(ELOISE.nom)).toBeDisabled();
-    expect(refuser(ELOISE.nom)).toBeDisabled();
+    expect(menu(ELOISE.nom)).toBeDisabled();
 
     await avancer(59_000);
     expect(ecritures(fetchMock)).toHaveLength(1);
@@ -218,7 +217,7 @@ describe('Refuser', () => {
     await screen.findByText('Hugo Lambert');
     const urlAvant = window.location.href;
 
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     const boite = await screen.findByRole('dialog', { name: 'Refuser la demande de Éloïse Dupont ?' });
     const confirmer = within(boite).getByRole('button', { name: 'Confirmer le refus' });
     expect(confirmer).toBeDisabled();
@@ -253,13 +252,13 @@ describe('Refuser', () => {
   it('Annuler (et Échap) ferment sans rien envoyer, et la boîte repart vide', async () => {
     const { fetchMock, user } = monter({ ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     await user.type(await screen.findByRole('textbox', { name: /Motif du refus/ }), 'Brouillon');
     await user.click(screen.getByRole('button', { name: 'Annuler' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(ecritures(fetchMock)).toHaveLength(0);
 
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     expect(await screen.findByRole('textbox', { name: /Motif du refus/ })).toHaveValue('');
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -269,14 +268,14 @@ describe('Refuser', () => {
   it('le motif est limité à 500 caractères', async () => {
     const { user } = monter({ ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     expect(await screen.findByRole('textbox', { name: /Motif du refus/ })).toHaveAttribute('maxlength', '500');
   });
 
   it('la boîte se ferme si la demande ne se refuse plus (traitée ailleurs, actualisation)', async () => {
     const { etat, user } = monter({ ecrire: () => reply(200, {}) });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     await screen.findByRole('dialog');
     etat.demandes = [valide(ELOISE), enAttente(HUGO)];
     await avancer(30_000);
@@ -303,7 +302,7 @@ describe('erreurs de l’API : ApiErrorAlert dans la ligne', () => {
     expect(screen.getAllByRole('alert')).toHaveLength(1);
     // La ligne est rendue : on peut réessayer.
     expect(valider(ELOISE.nom)).toBeEnabled();
-    expect(refuser(ELOISE.nom)).toBeEnabled();
+    expect(menu(ELOISE.nom)).toBeEnabled();
     // Après une erreur, l'état réel (validée ou refusée ailleurs, reprise partielle) est relu.
     await waitFor(() => expect(lecturesSuivi(fetchMock)).toBe(2));
 
@@ -325,7 +324,7 @@ describe('erreurs de l’API : ApiErrorAlert dans la ligne', () => {
   it('une erreur du refus ferme la boîte et s’affiche dans la ligne', async () => {
     const { user } = monter({ ecrire: () => reply(403, { error: 'Accès refusé', code: 'droit_manquant' }) });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     await user.type(await screen.findByRole('textbox', { name: /Motif du refus/ }), 'Raison');
     await user.click(screen.getByRole('button', { name: 'Confirmer le refus' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -347,7 +346,7 @@ describe('session expirée', () => {
     const surSession = vi.fn();
     const { user } = monter({ ecrire: () => new Response('<html>connexion</html>', { status: 200, headers: { 'content-type': 'text/html' } }), surSession });
     await screen.findByText('Hugo Lambert');
-    await user.click(refuser(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Refuser la demande de ${ELOISE.nom}`);
     await user.type(await screen.findByRole('textbox', { name: /Motif du refus/ }), 'Raison');
     await user.click(screen.getByRole('button', { name: 'Confirmer le refus' }));
     await waitFor(() => expect(surSession).toHaveBeenCalled());

@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { ActionsDemandes } from '@/hooks/useActionsDemandes';
 import type { ActionNom } from '@/lib/actions';
-import type { Demande, FiltreStatut, Tri, useSuivi } from '@/lib/suivi';
+import type { Demande, FiltreGroupe, Tri, useSuivi } from '@/lib/suivi';
 
 /**
  * Ce que la liste et la page de détail partagent. Tout vit **au-dessus des routes** : naviguer de l'une à l'autre ne perd ni un
@@ -15,8 +15,8 @@ export interface ContexteDemandes {
   surAction: (d: Demande, action: ActionNom) => void;
   terme: string;
   setTerme: (terme: string) => void;
-  statut: FiltreStatut;
-  setStatut: (statut: FiltreStatut) => void;
+  groupe: FiltreGroupe;
+  setGroupe: (groupe: FiltreGroupe) => void;
   tri: Tri;
   setTri: (tri: Tri) => void;
 }

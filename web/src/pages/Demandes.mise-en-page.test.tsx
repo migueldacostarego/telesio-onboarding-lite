@@ -15,7 +15,7 @@ const entetes = () => within(screen.getByRole('table')).getAllByRole('columnhead
 const lignes = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
 
 describe('mise en page du tableau', () => {
-  it('largeurs de colonnes fixes : table-layout fixed, une largeur par colonne sauf Nom (qui prend le reste)', async () => {
+  it('largeurs de colonnes fixes : table-layout fixed, une largeur par colonne sauf Personne (qui prend le reste)', async () => {
     stubBureau(true);
     monter({ demandes: [enAttente(ELOISE), valide(HUGO, { actions: ['activer'] })], ecrire: rien });
     await screen.findByText('Hugo Lambert');
@@ -58,28 +58,29 @@ describe('mise en page du tableau', () => {
     expect(hauteurs()).toEqual(avant);
   });
 
-  it('textes longs : une ligne tronquée, la valeur entière en infobulle (nom, poste, service, adresse)', async () => {
+  it('textes longs : une ligne tronquée, la valeur entière en infobulle (nom, poste, service, adresse, phrase d’état)', async () => {
     stubBureau(true);
     monter({ demandes: [enAttente(ANNA, { poste: LONG, service: 'Service des relations institutionnelles et partenariats internationaux' })], ecrire: rien });
     const ligne = await screen.findByRole('row', { name: /Anna Martin/ });
-    for (const texte of [LONG, 'Service des relations institutionnelles et partenariats internationaux', 'compte.anna@exemple.test']) {
+    for (const texte of [LONG, 'Service des relations institutionnelles et partenariats internationaux', 'compte.anna@exemple.test', 'En attente de la direction']) {
       const e = within(ligne).getByText(texte);
       expect(e).toHaveAttribute('title', texte);
-      expect(e.closest('td, span')).not.toBeNull();
+      expect(e).toHaveClass('truncate');
     }
-    expect(within(ligne).getByText(LONG).closest('td')).toHaveClass('truncate');
-    expect(within(ligne).getByText('compte.anna@exemple.test')).toHaveClass('truncate');
-    const bouton = within(ligne).getByRole('link', { name: 'Voir le détail de la demande de Anna Martin' });
-    expect(bouton).toHaveClass('truncate');
-    expect(bouton).toHaveAttribute('title', 'Anna Martin');
+    const lien = within(ligne).getByRole('link', { name: 'Voir le détail de la demande de Anna Martin' });
+    expect(lien).toHaveClass('truncate');
+    expect(lien).toHaveAttribute('title', 'Anna Martin');
   });
 
-  it('colonne Actions : les boutons restent sur une ligne dans le tableau, passent à la ligne sur la page de détail', async () => {
+  it('colonne Actions : une action principale et « … » sur une ligne dans le tableau, de largeur fixe ; les boutons passent à la ligne sur la page de détail', async () => {
     stubBureau(true);
     const { user } = monter({ demandes: [valide(HUGO, { actions: ['activer', 'reprendre'] })], ecrire: rien });
     const ligne = await screen.findByRole('row', { name: /Hugo Lambert/ });
     const groupe = within(ligne).getByRole('button', { name: /Activer le compte/ }).parentElement as HTMLElement;
-    expect(groupe).toHaveClass('flex-nowrap');
+    expect(groupe).toHaveClass('flex', 'items-center', 'justify-end');
+    expect(within(groupe).getByRole('button', { name: /Activer le compte/ })).toHaveClass('min-w-[5.5rem]'); // la largeur du bouton ne change pas pendant l'action
+    expect(within(groupe).getByRole('button', { name: 'Autres actions pour Hugo Lambert' })).toBeInTheDocument();
+    expect(within(ligne).queryByRole('button', { name: /Réessayer/ })).not.toBeInTheDocument(); // secondaire : dans le menu
     await user.click(within(ligne).getByRole('link', { name: 'Voir le détail de la demande de Hugo Lambert' }));
     await screen.findByText('Historique');
     expect(screen.getByRole('button', { name: /Activer le compte/ }).parentElement).toHaveClass('flex-wrap');

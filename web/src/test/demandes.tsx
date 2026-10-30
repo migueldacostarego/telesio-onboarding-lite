@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, render } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { act, render, screen } from '@testing-library/react';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, vi } from 'vitest';
 import type { DemandeDetail } from '@/lib/detail';
@@ -125,3 +125,12 @@ export function monter(o: {
 }
 
 export const avancer = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+
+/** Le bouton « … » d'une ligne (les actions secondaires et le détail) : désactivé tant que quelque chose tourne pour la ligne. */
+export const menu = (nom: string) => screen.getByRole('button', { name: `Autres actions pour ${nom}` });
+
+/** Ouvre le menu « … » de la ligne de `nom` et choisit l'entrée dont le nom accessible est `libelle` (ex. « Refuser la demande de … »). */
+export async function choisir(user: UserEvent, nom: string, libelle: string) {
+  await user.click(menu(nom));
+  await user.click(await screen.findByRole('menuitem', { name: libelle }));
+}

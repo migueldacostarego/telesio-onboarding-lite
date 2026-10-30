@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Actualisation } from '@/components/demandes/Actualisation';
 import { Barre } from '@/components/demandes/Barre';
+import { Compteurs, CompteursSquelette } from '@/components/demandes/Compteurs';
 import { NouvelleDemande } from '@/components/demandes/NouvelleDemande';
 import { DemandesCartes, DemandesCartesSquelette } from '@/components/demandes/DemandesCartes';
 import { DemandesTable, DemandesTableSquelette } from '@/components/demandes/DemandesTable';
@@ -14,7 +15,8 @@ import { useNow } from '@/hooks/useNow';
 import { useDemandes } from '@/lib/contexteDemandes';
 import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
 import { useMoi } from '@/lib/moi';
-import { SUIVI_KEY, aujourdhui, filtrerDemandes, type Demande } from '@/lib/suivi';
+import { jourAParis } from '@/lib/dates';
+import { SUIVI_KEY, filtrerDemandes, type Demande } from '@/lib/suivi';
 import { attendre, enSynchro } from '@/lib/synchro';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
@@ -27,11 +29,11 @@ const RELECTURE_SYNCHRO_MS = 5_000;
 export function Demandes() {
   // Liste, actions, recherche, filtre et tri vivent au-dessus des routes (lib/contexteDemandes.ts) : « retour » depuis une demande les retrouve.
   // Rien de tout cela ne va dans l'URL ni dans le stockage du navigateur (le terme est un nom).
-  const { suivi, actions, surAction, terme, setTerme, statut, setStatut, tri, setTri } = useDemandes();
+  const { suivi, actions, surAction, terme, setTerme, groupe, setGroupe, tri, setTri } = useDemandes();
   const bureau = useIsDesktop();
   const navigate = useNavigate();
-  // « À venir » dépend du jour : recalculé quand il change (passage de minuit), sans re-trier le reste du temps.
-  const jour = aujourdhui(new Date(useNow(60_000)));
+  // « À venir » et « Aujourd'hui » dépendent du jour à Paris : recalculé quand il change (passage de minuit), sans re-trier le reste du temps.
+  const jour = jourAParis(new Date(useNow(60_000)));
 
   const donnees = suivi.data;
   const queryClient = useQueryClient();
@@ -79,11 +81,11 @@ export function Demandes() {
     });
     // La ligne doit être visible : ni recherche ni filtre ne la masquent.
     setTerme('');
-    setStatut('tous');
+    setGroupe('tous');
     void queryClient.invalidateQueries({ queryKey: SUIVI_KEY });
   };
-  const visibles = useMemo(() => (donnees ? filtrerDemandes(donnees.demandes, { terme, statut, tri, aujourdhui: jour }) : []), [donnees, terme, statut, tri, jour]);
-  const filtre = terme.trim() !== '' || statut !== 'tous';
+  const visibles = useMemo(() => (donnees ? filtrerDemandes(donnees.demandes, { terme, groupe, tri, aujourdhui: jour }) : []), [donnees, terme, groupe, tri, jour]);
+  const filtre = terme.trim() !== '' || groupe !== 'tous';
   const reessayer = (
     <Button variant="outline" onClick={() => void suivi.refetch()} disabled={suivi.isFetching}>
       Réessayer
@@ -122,7 +124,8 @@ export function Demandes() {
 
       {suivi.isPending && (
         <>
-          <Barre desactive terme="" onTerme={() => {}} statut="tous" onStatut={() => {}} tri={tri} onTri={() => {}} />
+          <CompteursSquelette />
+          <Barre desactive terme="" onTerme={() => {}} tri={tri} onTri={() => {}} />
           <div role="status">
             <span className="sr-only">Chargement des demandes…</span>
             {bureau ? <DemandesTableSquelette tri={tri} /> : <DemandesCartesSquelette />}
@@ -140,7 +143,8 @@ export function Demandes() {
 
       {donnees && (
         <>
-          <Barre terme={terme} onTerme={setTerme} statut={statut} onStatut={setStatut} tri={tri} onTri={setTri} />
+          <Compteurs demandes={donnees.demandes} tronque={donnees.tronque} groupe={groupe} onGroupe={setGroupe} />
+          <Barre terme={terme} onTerme={setTerme} tri={tri} onTri={setTri} />
 
           {/* Échec d'une actualisation : les dernières données restent affichées. */}
           {suivi.isError && (
@@ -164,9 +168,16 @@ export function Demandes() {
             </div>
           ) : (
             <>
-              <p aria-live="polite" className="text-sm text-muted-foreground">
-                {visibles.length} {visibles.length > 1 ? 'demandes' : 'demande'}
-                {filtre && ` sur ${donnees.demandes.length}`}
+              <p aria-live="polite" className="flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+                <span>
+                  {visibles.length} {visibles.length > 1 ? 'demandes' : 'demande'}
+                  {filtre && ` sur ${donnees.demandes.length}`}
+                </span>
+                {groupe !== 'tous' && (
+                  <Button size="xs" variant="outline" onClick={() => setGroupe('tous')}>
+                    Tout afficher
+                  </Button>
+                )}
               </p>
               {visibles.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center">
@@ -176,16 +187,16 @@ export function Demandes() {
                     className="mt-3"
                     onClick={() => {
                       setTerme('');
-                      setStatut('tous');
+                      setGroupe('tous');
                     }}
                   >
                     Effacer la recherche et le filtre
                   </Button>
                 </div>
               ) : bureau ? (
-                <DemandesTable demandes={visibles} tri={tri} {...lignes} />
+                <DemandesTable demandes={visibles} tri={tri} aujourdhui={jour} {...lignes} />
               ) : (
-                <DemandesCartes demandes={visibles} {...lignes} />
+                <DemandesCartes demandes={visibles} aujourdhui={jour} {...lignes} />
               )}
             </>
           )}

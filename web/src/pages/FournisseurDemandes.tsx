@@ -7,7 +7,7 @@ import { DialogueRegeneration } from '@/components/demandes/DialogueRegeneration
 import { useActionsDemandes } from '@/hooks/useActionsDemandes';
 import type { ActionAvecBoite, ActionNom } from '@/lib/actions';
 import { Contexte } from '@/lib/contexteDemandes';
-import { useSuivi, type Demande, type FiltreStatut, type Tri } from '@/lib/suivi';
+import { useSuivi, type Demande, type FiltreGroupe, type Tri } from '@/lib/suivi';
 
 /** Liste, actions et boîtes de dialogue, partagées par les routes (voir lib/contexteDemandes.ts). */
 export function FournisseurDemandes({ children }: { children: ReactNode }) {
@@ -15,7 +15,7 @@ export function FournisseurDemandes({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const surDetail = useMatch('/demandes/:id');
   const [terme, setTerme] = useState('');
-  const [statut, setStatut] = useState<FiltreStatut>('tous');
+  const [groupe, setGroupe] = useState<FiltreGroupe>('tous');
   const [tri, setTri] = useState<Tri>('avenir');
   const donnees = suivi.data;
 
@@ -46,7 +46,7 @@ export function FournisseurDemandes({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Contexte.Provider value={{ suivi, actions, surAction, terme, setTerme, statut, setStatut, tri, setTri }}>
+    <Contexte.Provider value={{ suivi, actions, surAction, terme, setTerme, groupe, setGroupe, tri, setTri }}>
       {children}
       <DialogueRefus
         demande={boite('refuser')}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aujourdhui, filtrerDemandes, formatArrivee, ilYA, normaliser, type Demande } from '@/lib/suivi';
+import { aujourdhui, compter, filtrerDemandes, formatArrivee, groupeDe, ilYA, normaliser, type Demande } from '@/lib/suivi';
 
 const AUJOURDHUI = '2026-10-28';
 
@@ -56,7 +56,7 @@ describe('filtrerDemandes', () => {
   const liste = [d('Éloïse Dupont', '2026-11-03'), d('Anna Martin', '2026-10-20', 'Actif'), d('Zoé Sansdate', null), d('Luc Martin', '2026-11-03', 'Validé')];
 
   it('recherche par nom sans tenir compte de la casse ni des accents, tous les mots', () => {
-    const noms = (terme: string) => filtrerDemandes(liste, { terme, statut: 'tous', tri: 'recentes', aujourdhui: AUJOURDHUI }).map((x) => x.nom);
+    const noms = (terme: string) => filtrerDemandes(liste, { terme, groupe: 'tous', tri: 'recentes', aujourdhui: AUJOURDHUI }).map((x) => x.nom);
     expect(noms('eloise')).toEqual(['Éloïse Dupont']);
     expect(noms('ÉLOÏSE')).toEqual(['Éloïse Dupont']);
     expect(noms('dupont eloise')).toEqual(['Éloïse Dupont']);
@@ -68,13 +68,14 @@ describe('filtrerDemandes', () => {
 
   it('ne cherche que dans le nom', () => {
     const avecPoste = [{ ...d('Anna Martin', null), poste: 'Comptable', service: 'Finance' }];
-    expect(filtrerDemandes(avecPoste, { terme: 'comptable', statut: 'tous', tri: 'recentes', aujourdhui: AUJOURDHUI })).toEqual([]);
+    expect(filtrerDemandes(avecPoste, { terme: 'comptable', groupe: 'tous', tri: 'recentes', aujourdhui: AUJOURDHUI })).toEqual([]);
   });
 
-  it('filtre par statut, seul ou avec la recherche', () => {
-    expect(filtrerDemandes(liste, { terme: '', statut: 'Actif', tri: 'recentes', aujourdhui: AUJOURDHUI }).map((x) => x.nom)).toEqual(['Anna Martin']);
-    expect(filtrerDemandes(liste, { terme: 'martin', statut: 'Validé', tri: 'recentes', aujourdhui: AUJOURDHUI }).map((x) => x.nom)).toEqual(['Luc Martin']);
-    expect(filtrerDemandes(liste, { terme: '', statut: 'Terminé', tri: 'recentes', aujourdhui: AUJOURDHUI })).toEqual([]);
+  it('filtre par groupe, seul ou avec la recherche', () => {
+    expect(filtrerDemandes(liste, { terme: '', groupe: 'encours', tri: 'recentes', aujourdhui: AUJOURDHUI }).map((x) => x.nom)).toEqual(['Luc Martin', 'Anna Martin']);
+    expect(filtrerDemandes(liste, { terme: 'dupont', groupe: 'encours', tri: 'recentes', aujourdhui: AUJOURDHUI })).toEqual([]);
+    expect(filtrerDemandes(liste, { terme: 'martin', groupe: 'attente', tri: 'recentes', aujourdhui: AUJOURDHUI })).toEqual([]);
+    expect(filtrerDemandes(liste, { terme: '', groupe: 'terminees', tri: 'recentes', aujourdhui: AUJOURDHUI })).toEqual([]);
   });
 
   describe('tri par date d’arrivée (aujourd’hui : 2026-10-28)', () => {
@@ -86,7 +87,7 @@ describe('filtrerDemandes', () => {
       d('Ancienne', '2026-09-01'),
       d('Aujourdhui', '2026-10-28'),
     ];
-    const ordre = (tri: 'avenir' | 'recentes' | 'anciennes') => filtrerDemandes(dates, { terme: '', statut: 'tous', tri, aujourdhui: AUJOURDHUI }).map((x) => x.nom);
+    const ordre = (tri: 'avenir' | 'recentes' | 'anciennes') => filtrerDemandes(dates, { terme: '', groupe: 'tous', tri, aujourdhui: AUJOURDHUI }).map((x) => x.nom);
 
     it('par défaut (avenir) : les arrivées à venir de la plus proche à la plus lointaine, puis les passées de la plus récente à la plus ancienne, sans date en dernier', () => {
       expect(ordre('avenir')).toEqual(['Aujourdhui', 'Demain', 'Lointaine', 'Hier', 'Ancienne', 'Sans date']);
@@ -104,13 +105,13 @@ describe('filtrerDemandes', () => {
     it('à date égale, par nom ; plusieurs sans date aussi', () => {
       const memes = [d('Zoé', '2026-11-03'), d('Anna', '2026-11-03'), d('Yan', null), d('Bob', null)];
       for (const tri of ['avenir', 'recentes', 'anciennes'] as const) {
-        expect(filtrerDemandes(memes, { terme: '', statut: 'tous', tri, aujourdhui: AUJOURDHUI }).map((x) => x.nom)).toEqual(['Anna', 'Zoé', 'Bob', 'Yan']);
+        expect(filtrerDemandes(memes, { terme: '', groupe: 'tous', tri, aujourdhui: AUJOURDHUI }).map((x) => x.nom)).toEqual(['Anna', 'Zoé', 'Bob', 'Yan']);
       }
     });
 
     it('le jour qui passe change la partition : la veille à venir devient passée', () => {
       const liste = [d('A', '2026-10-28'), d('B', '2026-10-30')];
-      const ordreAu = (jour: string) => filtrerDemandes(liste, { terme: '', statut: 'tous', tri: 'avenir', aujourdhui: jour }).map((x) => x.nom);
+      const ordreAu = (jour: string) => filtrerDemandes(liste, { terme: '', groupe: 'tous', tri: 'avenir', aujourdhui: jour }).map((x) => x.nom);
       expect(ordreAu('2026-10-28')).toEqual(['A', 'B']);
       expect(ordreAu('2026-10-29')).toEqual(['B', 'A']);
     });
@@ -118,7 +119,7 @@ describe('filtrerDemandes', () => {
 
   it('ne modifie pas la liste reçue', () => {
     const copie = [...liste];
-    filtrerDemandes(liste, { terme: '', statut: 'tous', tri: 'anciennes', aujourdhui: AUJOURDHUI });
+    filtrerDemandes(liste, { terme: '', groupe: 'tous', tri: 'anciennes', aujourdhui: AUJOURDHUI });
     expect(liste).toEqual(copie);
   });
 });
@@ -128,5 +129,26 @@ describe('aujourdhui', () => {
     expect(aujourdhui(new Date(2026, 9, 5, 23, 59))).toBe('2026-10-05');
     expect(aujourdhui(new Date(2026, 0, 1, 0, 0))).toBe('2026-01-01');
     expect(aujourdhui(new Date(2026, 11, 31, 12, 0))).toBe('2026-12-31');
+  });
+});
+
+describe('groupes et compteurs', () => {
+  const avec = (nom: string, statut: Demande['statut'], actions: string[] = []) => ({ ...d(nom, '2026-11-03', statut), actions });
+
+  it('chaque demande est dans un seul groupe : le jour J atteint se lit dans `actions` de l’API, jamais dans l’horloge du navigateur', () => {
+    expect(groupeDe(avec('a', 'EnAttente', ['approuver', 'refuser']))).toBe('attente');
+    expect(groupeDe(avec('b', 'Validé', ['activer']))).toBe('activer');
+    expect(groupeDe(avec('c', 'Validé', ['activer', 'reprendre']))).toBe('activer');
+    expect(groupeDe(avec('d', 'Validé', []))).toBe('encours'); // jour J pas atteint (ou ligne en cours de synchronisation)
+    expect(groupeDe(avec('e', 'Validé', ['reprendre']))).toBe('encours');
+    expect(groupeDe(avec('f', 'Actif', ['regenerer']))).toBe('encours');
+    expect(groupeDe(avec('g', 'Terminé'))).toBe('terminees');
+  });
+
+  it('la somme des compteurs est le nombre de demandes', () => {
+    const liste = [avec('a', 'EnAttente'), avec('b', 'EnAttente'), avec('c', 'Validé', ['activer']), avec('d', 'Validé'), avec('e', 'Actif'), avec('f', 'Terminé')];
+    expect(compter(liste)).toEqual({ attente: 2, activer: 1, encours: 2, terminees: 1 });
+    expect(Object.values(compter(liste)).reduce((a, b) => a + b, 0)).toBe(liste.length);
+    expect(compter([])).toEqual({ attente: 0, activer: 0, encours: 0, terminees: 0 });
   });
 });

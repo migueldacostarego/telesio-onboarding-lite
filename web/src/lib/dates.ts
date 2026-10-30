@@ -16,6 +16,14 @@ export function jourAParis(maintenant: Date = new Date()): string {
   return JOUR_PARIS.format(maintenant);
 }
 
+const JOUR_COURT = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+
+/** « 3 nov. » à partir de AAAA-MM-JJ (lue en UTC : le fuseau du navigateur ne décale jamais le jour). */
+export function formatArriveeCourte(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? '' : JOUR_COURT.format(d);
+}
+
 const MS_PAR_JOUR = 86_400_000;
 
 /** Écart en jours entiers entre deux dates AAAA-MM-JJ (lues en UTC : jamais décalées par un fuseau). Positif : `iso` est dans le futur. */

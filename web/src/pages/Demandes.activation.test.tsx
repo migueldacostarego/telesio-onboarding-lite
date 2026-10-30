@@ -1,14 +1,13 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ecritures, lecturesSuivi, reply } from '@/test/helpers';
-import { ELOISE, HUGO, actif, avancer, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
+import { ELOISE, HUGO, actif, avancer, choisir, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 
 tempsSimule();
 
 const MOT_DE_PASSE = 'Kp7m-Xq4r-Tz9w-Hb3n';
 const NOUVEAU = 'Rw8c-Nd5t-Yf6v-Gj2s';
 const activer = (nom: string) => screen.getByRole('button', { name: `Activer le compte de ${nom}` });
-const regenerer = (nom: string) => screen.getByRole('button', { name: `Régénérer le mot de passe de ${nom}` });
 const remise = (motDePasseTemporaire = MOT_DE_PASSE, regeneration = false) => reply(200, { id: ELOISE.id, statut: 'Actif', regeneration, motDePasseTemporaire });
 const aValider = [valide(ELOISE, { actions: ['activer'] }), enAttente(HUGO, { actions: [] })];
 
@@ -176,7 +175,7 @@ describe('Régénérer', () => {
     await screen.findByText('Hugo Lambert');
     expect(screen.queryByRole('button', { name: /Régénérer le mot de passe de Hugo/ })).not.toBeInTheDocument();
 
-    await user.click(regenerer(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
     const boite = await screen.findByRole('dialog', { name: 'Régénérer le mot de passe de Éloïse Dupont ?' });
     expect(within(boite).queryByRole('textbox')).not.toBeInTheDocument();
     const confirmer = within(boite).getByRole('button', { name: 'Régénérer le mot de passe' });
@@ -198,7 +197,7 @@ describe('Régénérer', () => {
   it('les trois motifs de l’API, rien d’autre', async () => {
     const { user } = monter({ demandes: lesActifs, ecrire: () => remise(NOUVEAU, true) });
     await screen.findByText('Hugo Lambert');
-    await user.click(regenerer(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
     const boite = await screen.findByRole('dialog');
     expect(within(boite).getAllByRole('radio').map((r) => r.getAttribute('value'))).toEqual(['code_perdu', 'code_refuse', 'autre']);
   });
@@ -206,12 +205,12 @@ describe('Régénérer', () => {
   it('Annuler ne règle rien ; une erreur 409 (onboarding terminé) s’affiche dans la ligne', async () => {
     const { fetchMock, user } = monter({ demandes: lesActifs, ecrire: () => reply(409, { error: 'Action impossible : l’onboarding est terminé', raison: 'onboarding_termine' }) });
     await screen.findByText('Hugo Lambert');
-    await user.click(regenerer(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Annuler' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(ecritures(fetchMock)).toHaveLength(0);
 
-    await user.click(regenerer(ELOISE.nom));
+    await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
     const boite = await screen.findByRole('dialog');
     expect(within(boite).getByRole('radio', { name: 'Mot de passe perdu' })).not.toBeChecked(); // repart vide
     await user.click(within(boite).getByRole('radio', { name: 'Autre raison' }));

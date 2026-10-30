@@ -30,8 +30,14 @@ export const aUnMessage = (p: PropsLignes, d: Demande): boolean => {
 /** Une action tourne pour cette ligne : ses boutons sont inactifs (la page de détail reste ouvrable : l'état est partagé, rien ne se perd). */
 export const occupee = (p: PropsLignes, d: Demande): boolean => verrouille(p.etats[d.id]);
 
-/** Clic sur la ligne : ouvre le détail, sauf quand il vient d'un bouton ou d'un champ de la ligne. */
-export const ouvrirSiLigne = (e: { target: EventTarget }, ouvrir: () => void): void => {
-  if ((e.target as HTMLElement).closest('button, a, input, select, textarea, [role="button"]')) return;
+/**
+ * Clic sur la ligne : ouvre le détail, sauf quand il vient d'un bouton, d'un lien ou d'un champ de la ligne, ou d'une entrée de menu.
+ * Les événements React remontent aussi à travers les portails : le menu « … » est dessiné hors de la ligne dans le DOM mais reste
+ * son descendant pour React, d'où le contrôle d'appartenance au DOM de la ligne.
+ */
+export const ouvrirSiLigne = (e: { target: EventTarget; currentTarget: EventTarget }, ouvrir: () => void): void => {
+  const cible = e.target as HTMLElement;
+  if (!(e.currentTarget as HTMLElement).contains(cible)) return;
+  if (cible.closest('button, a, input, select, textarea, [role="button"], [role="menu"], [role="menuitem"]')) return;
   ouvrir();
 };

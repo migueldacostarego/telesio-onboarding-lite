@@ -108,7 +108,28 @@ export function ilYA(depuis: number, maintenant: number): string {
  * plus récente à la plus ancienne ; recentes / anciennes : ordre chronologique inverse / direct. Sans date : toujours en dernier.
  */
 export type Tri = 'avenir' | 'recentes' | 'anciennes';
-export type FiltreStatut = Statut | 'tous';
+
+/**
+ * Les quatre compteurs de l'écran, qui sont aussi son filtre. Ils partagent les demandes sans les compter deux fois :
+ * `attente` (En attente), `activer` (Validée dont l'API propose `activer`, c'est-à-dire le jour J atteint : le calcul est celui du
+ * serveur, dans son fuseau, jamais celui du navigateur), `encours` (les autres Validées et les Activées), `terminees` (Terminées
+ * dont l'activation date de moins de 30 jours : la fenêtre de `GET /api/suivi`, qui ne donne pas la date de fin).
+ */
+export type Groupe = 'attente' | 'activer' | 'encours' | 'terminees';
+export const GROUPES: readonly Groupe[] = ['attente', 'activer', 'encours', 'terminees'];
+export type FiltreGroupe = Groupe | 'tous';
+
+export function groupeDe(d: Pick<Demande, 'statut' | 'actions'>): Groupe {
+  if (d.statut === 'EnAttente') return 'attente';
+  if (d.statut === 'Terminé') return 'terminees';
+  return d.statut === 'Validé' && d.actions.includes('activer') ? 'activer' : 'encours';
+}
+
+export function compter(demandes: readonly Pick<Demande, 'statut' | 'actions'>[]): Record<Groupe, number> {
+  const n: Record<Groupe, number> = { attente: 0, activer: 0, encours: 0, terminees: 0 };
+  for (const d of demandes) n[groupeDe(d)]++;
+  return n;
+}
 
 /** Minuscules sans accents : « Éloïse » se trouve avec « eloise ». */
 export const normaliser = (s: string): string => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -121,11 +142,11 @@ export function aujourdhui(maintenant: Date = new Date()): string {
 
 export function filtrerDemandes(
   demandes: readonly Demande[],
-  o: { terme: string; statut: FiltreStatut; tri: Tri; aujourdhui: string },
+  o: { terme: string; groupe: FiltreGroupe; tri: Tri; aujourdhui: string },
 ): Demande[] {
   const mots = normaliser(o.terme).split(/\s+/).filter(Boolean);
   const retenues = demandes.filter((d) => {
-    if (o.statut !== 'tous' && d.statut !== o.statut) return false;
+    if (o.groupe !== 'tous' && groupeDe(d) !== o.groupe) return false;
     const nom = normaliser(d.nom);
     return mots.every((m) => nom.includes(m));
   });
