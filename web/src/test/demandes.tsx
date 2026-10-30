@@ -81,7 +81,7 @@ export function monter(o: {
   /** Adresse de départ (la liste par défaut) : `/demandes/<id>` ouvre une page de détail. */
   chemin?: string;
   /** Détails servis par GET /api/demandes/:id (par id), à défaut déduits de la liste. */
-  details?: Record<string, DemandeDetail>; demandes?: Demande[]; moi?: object; lire?: (url: string) => Response | Promise<Response> | undefined; ecrire: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>; surSession?: () => void }) {
+  details?: Record<string, DemandeDetail>; demandes?: Demande[]; moi?: object; lire?: (url: string) => Response | Promise<Response> | undefined; disponibilite?: (email: string) => Response | Promise<Response>; ecrire: (url: string, corps: Record<string, unknown>) => Response | Promise<Response>; surSession?: () => void }) {
   const etat = { demandes: o.demandes ?? [enAttente(ELOISE), enAttente(HUGO)], details: { ...o.details } as Record<string, DemandeDetail> };
   // GET /api/demandes/:id : le détail posé dans `etat.details`, à défaut celui qui se déduit de la ligne de la liste, à défaut 404.
   const lire = (url: string) => {
@@ -104,7 +104,7 @@ export function monter(o: {
       r.then(resolve, reject);
     });
   };
-  const fetchMock = mockApi({ moi: o.moi, suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), lire, ecrire });
+  const fetchMock = mockApi({ moi: o.moi, disponibilite: o.disponibilite, suivi: () => reply(200, { demandes: etat.demandes, tronque: false }), lire, ecrire });
   const client = createQueryClient(o.surSession);
   // BrowserRouter lit l'adresse de jsdom, partagée entre les tests : on la remet à chaque montage.
   window.history.replaceState(null, '', o.chemin ?? '/');

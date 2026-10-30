@@ -7,6 +7,7 @@ import { graphFailureProps, type DemandeLue, type LicenseRead } from './director
 import { buildFolderName } from './folder';
 import { ACTEUR_SYSTEME, decoderEvenement, type Evenement } from './history';
 import { STATUTS, actionsFor, type Statut, type SuiviAction } from './suivi';
+import type { TypeContrat } from './typeContrat';
 
 /** Auteur d'une étape : son nom affiché, `null` si le compte n'existe plus ou n'a pas pu être lu ; `systeme` : la tâche du serveur. */
 export interface Acteur {
@@ -46,6 +47,8 @@ export interface DemandeDetail {
   upn: string | null;
   poste: string | null;
   service: string | null;
+  /** Type de contrat (employeeType) ; null : compte antérieur au formulaire par type, ou valeur inconnue. */
+  typeContrat: TypeContrat | null;
   manager: { nom: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
@@ -166,6 +169,7 @@ export async function lireDemande(deps: DetailDeps, actor: string, id: string, n
     upn: u.upn,
     poste: u.poste,
     service: u.service,
+    typeContrat: u.typeContrat,
     manager: u.managerNom ? { nom: u.managerNom } : null,
     dateArrivee: u.dateArrivee,
     statut,

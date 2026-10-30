@@ -21,6 +21,14 @@ licenses = {
   }
 }
 
+# Licence de chaque type de contrat (clés de `licenses`). null = pas de licence prévue pour ce type : créer un tel type répond 409 « aucune
+# licence disponible ». Le tenant n'a que Business Premium : Contractor reste à null. Dès que Business Basic est acheté : l'ajouter à `licenses`
+# (business-basic, skuId de GET /subscribedSkus) et passer contractor à "business-basic".
+license_by_type = {
+  employe    = "business-premium"
+  contractor = null
+}
+
 # Utilisateur RH de test (rh@telesiosandbox.onmicrosoft.com) et directeur@, qui porte le rôle Direction : tout porteur de ce rôle
 # peut créer, valider et refuser des demandes (y compris les siennes, tracées), et activer. Les rôles se règlent aussi dans le portail Entra.
 rh_principal_object_ids        = ["1ec27e9b-ae17-43a4-98e6-2be67f1dcaad"]

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api } from '@/lib/api';
 import { fusionner } from '@/lib/synchro';
+import type { TypeContrat } from '@/lib/typeContrat';
 
 /** Statuts renvoyés par GET /api/suivi, dans l'ordre du parcours (étape 1 à 4). */
 export const STATUTS = ['EnAttente', 'Validé', 'Actif', 'Terminé'] as const;
@@ -35,6 +36,8 @@ export interface Demande {
   upn: string | null;
   poste: string | null;
   service: string | null;
+  /** Type de contrat (employeeType) ; null ou absent : compte antérieur au formulaire par type. */
+  typeContrat?: TypeContrat | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
   statut: Statut;

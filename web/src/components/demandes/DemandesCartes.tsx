@@ -8,6 +8,7 @@ import { Initiales } from '@/components/demandes/Initiales';
 import { actionsDe, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
+import { TypeBadge } from '@/components/demandes/TypeBadge';
 import { arriveeRelative } from '@/lib/dates';
 import { formatArrivee } from '@/lib/suivi';
 
@@ -30,7 +31,7 @@ export function DemandesCartes({ aujourdhui, ...lignes }: PropsLignes & { aujour
             <div className="flex items-start gap-3">
               <Initiales id={d.id} nom={d.nom} />
               <div className="min-w-0 flex-1">
-                <p className="font-medium break-words">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium break-words">
                   <Link
                     to={`/demandes/${d.id}`}
                     aria-label={`Voir le détail de la demande de ${d.nom}`}
@@ -38,6 +39,7 @@ export function DemandesCartes({ aujourdhui, ...lignes }: PropsLignes & { aujour
                   >
                     {d.nom}
                   </Link>
+                  <TypeBadge type={d.typeContrat} />
                   {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
                 </p>
                 <Adresse upn={d.upn} />

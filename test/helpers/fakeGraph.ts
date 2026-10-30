@@ -48,6 +48,8 @@ export class FakeGraph {
     authenticator?: number;
     /** Échec de GET /users filtré par statut (listByStatut). */
     list?: number;
+    /** Échec de GET /users filtré par userPrincipalName (upnTaken : vérification d'une adresse). */
+    upn?: number;
     /** Échec de GET /users/{id} (lecture de l'avancement d'onboarding, de la date d'activation). */
     read?: number;
   } = {};
@@ -207,6 +209,7 @@ export class FakeGraph {
             ...(call.select?.includes('userPrincipalName') ? { userPrincipalName: u.upn } : {}),
             jobTitle: u.props.jobTitle,
             department: u.props.department,
+            employeeType: u.props.employeeType,
             employeeHireDate: u.props.employeeHireDate,
             // Graph ne renvoie givenName et surname que si $select les nomme.
             ...(call.select?.includes('givenName') ? { givenName: u.props.givenName, surname: u.props.surname } : {}),
@@ -221,6 +224,7 @@ export class FakeGraph {
         return { value, '@odata.nextLink': `https://graph.microsoft.com/v1.0/users?${q.filter(Boolean).join('&')}` };
       }
       const upn = /userPrincipalName eq '([^']+)'/.exec(call.filter ?? '')?.[1];
+      if (upn && this.failOn.upn) throw graphError(this.failOn.upn, 'Authorization_RequestDenied');
       if (upn && this.hiddenOnce.delete(upn)) return { value: [] };
       return { value: [...this.users.values()].filter((u) => u.upn === upn).map((u) => ({ id: u.id })) };
     }
@@ -239,6 +243,7 @@ export class FakeGraph {
         userPrincipalName: u.upn,
         jobTitle: u.props.jobTitle,
         department: u.props.department,
+        employeeType: u.props.employeeType,
         manager: call.expand && u.manager ? this.managerOf(u.manager) : undefined,
         employeeHireDate: u.props.employeeHireDate,
         lastPasswordChangeDateTime: u.props.lastPasswordChangeDateTime,

@@ -1,5 +1,6 @@
 import { isValidTimeZone } from './dates';
 import { checkFolderPattern, DEFAULT_FOLDER_PATTERN } from './folder';
+import { TYPES_CONTRAT, type TypeContrat } from './typeContrat';
 
 
 export interface Config {
@@ -20,6 +21,12 @@ export interface Config {
   sharePoint: { siteId?: string; driveId?: string; folderPattern: string };
   /** Licences proposées à RH : un SKU et son groupe Entra (licence par groupe). Vide = demandes et validation répondent 503. */
   licenses: LicenseOption[];
+  /**
+   * Licence de chaque type de contrat (LICENCES_PAR_TYPE) : le skuId, qui figure dans `licenses`. Chaque type est facultatif : un type absent
+   * n'a pas de licence prévue (la création répond 409 « aucune licence disponible pour ce type de contrat »). Variable absente : la création
+   * de demande répond 503 (ce n'est pas une erreur de démarrage : l'application reste disponible pendant un déploiement en deux temps).
+   */
+  licenseByType?: Partial<Record<TypeContrat, string>>;
   /** Nom complet de l'attribut d'extension qui porte le skuId choisi : extension_<appId sans tirets>_licenceOnboarding. */
   licenseExtension?: string;
   /** Groupe de sécurité des arrivants : ajouté à la validation, retiré à Terminé. Cible de l'accès conditionnel qui impose Authenticator. Absent : activation fermée (503). */
@@ -94,6 +101,33 @@ function parseLicenses(raw: string | undefined): LicenseOption[] {
   });
 }
 
+/** LICENCES_PAR_TYPE : objet JSON { "Employé": skuId, "Contractor": skuId }, chaque entrée facultative (absente ou null : pas de licence pour ce type), chaque skuId étant l'un de LICENSES. */
+function parseLicenseByType(raw: string | undefined, licenses: LicenseOption[]): Partial<Record<TypeContrat, string>> | undefined {
+  const v = opt(raw);
+  if (v === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(v);
+  } catch {
+    throw new Error(`LICENCES_PAR_TYPE invalide (attendu : objet JSON { ${TYPES_CONTRAT.map((t) => `"${t}": skuId`).join(', ')} })`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`LICENCES_PAR_TYPE invalide (attendu : objet JSON { ${TYPES_CONTRAT.map((t) => `"${t}": skuId`).join(', ')} })`);
+  }
+  const o = parsed as Record<string, unknown>;
+  const extra = Object.keys(o).filter((k) => !(TYPES_CONTRAT as readonly string[]).includes(k));
+  if (extra.length > 0) throw new Error(`LICENCES_PAR_TYPE : type inconnu (${extra.join(', ')}) ; attendus : ${TYPES_CONTRAT.join(', ')}`);
+  const out: Partial<Record<TypeContrat, string>> = {};
+  for (const type of TYPES_CONTRAT) {
+    if (o[type] === undefined || o[type] === null) continue;
+    const sku = typeof o[type] === 'string' ? (o[type] as string).trim().toLowerCase() : '';
+    if (!GUID_RE.test(sku)) throw new Error(`LICENCES_PAR_TYPE.${type} invalide (attendu : le skuId d'une licence de LICENSES)`);
+    if (!licenses.some((l) => l.skuId === sku)) throw new Error(`LICENCES_PAR_TYPE.${type} : ce SKU ne figure pas dans LICENSES`);
+    out[type] = sku;
+  }
+  return out;
+}
+
 const HISTORY_ENV = {
   validation: 'ENTRA_HISTORY_VALIDATION_EXTENSION',
   activation: 'ENTRA_HISTORY_ACTIVATION_EXTENSION',
@@ -134,6 +168,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (licenses.length > 0 && licenseExtension === undefined) {
     throw new Error('ENTRA_LICENSE_EXTENSION requis quand LICENSES est défini');
   }
+  const licenseByType = parseLicenseByType(env.LICENCES_PAR_TYPE, licenses);
   const folderPattern = opt(env.SHAREPOINT_FOLDER_PATTERN) ?? DEFAULT_FOLDER_PATTERN;
   const patternError = checkFolderPattern(folderPattern);
   if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
@@ -168,6 +203,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     trustAuthHeaders: easyAuth || devBypass,
     sharePoint: { siteId, driveId, folderPattern },
     licenses,
+    licenseByType,
     licenseExtension,
     arrivantsGroupId: arrivantsGroupRaw?.toLowerCase(),
     activationExtension,

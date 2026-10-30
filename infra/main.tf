@@ -91,6 +91,7 @@ locals {
     SHAREPOINT_FOLDER_PATTERN = var.sharepoint_folder_pattern
 
     LICENSES                = local.licenses_json
+    LICENCES_PAR_TYPE       = local.licenses_by_type_json
     ENTRA_LICENSE_EXTENSION = msgraph_resource.license_extension.output.name
   }
 

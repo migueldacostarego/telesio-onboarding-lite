@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { erreurEmail } from '@/lib/email';
 import { aujourdhui } from '@/lib/suivi';
+import { TYPES_CONTRAT } from '@/lib/typeContrat';
 
 // CSP de /app sans 'unsafe-eval' : zod compile ses schémas avec `new Function` s'il le peut, et sonde pour cela (la CSP signale
 // la sonde comme violation, même interceptée). `jitless` : aucune compilation, aucune sonde. À garder avant tout schéma.
@@ -7,7 +9,8 @@ z.config({ jitless: true });
 
 /**
  * Formulaire « Nouvelle demande » : mêmes règles que `validateDemande` côté serveur (src/validation.ts), qui reste l'autorité
- * (fuseau métier, identifiant formé du prénom et du nom, licences proposées) : ses erreurs 400 s'affichent sous chaque champ.
+ * (fuseau métier, identifiant formé du prénom et du nom, disponibilité de l'adresse, licence déduite du type) : ses erreurs 400
+ * s'affichent sous chaque champ. Plus de licence dans le formulaire : le serveur la déduit du type de contrat.
  */
 export const LIMITES = { prenom: 64, nom: 64, poste: 128, service: 64 } as const;
 export const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,23 +36,30 @@ const dateReelle = (s: string): boolean => {
   return d.getUTCFullYear() === Number(m[1]) && d.getUTCMonth() === Number(m[2]) - 1 && d.getUTCDate() === Number(m[3]);
 };
 
-export const schemaDemande = z.object({
-  prenom: texte('Prénom', LIMITES.prenom),
-  nom: texte('Nom', LIMITES.nom),
-  poste: texte('Poste', LIMITES.poste),
-  service: texte('Service', LIMITES.service),
-  dateArrivee: z
-    .string()
-    .refine(dateReelle, 'Date d’arrivée requise')
-    // Jour du navigateur : un garde-fou de confort, le serveur tranche d'après le fuseau métier.
-    .refine((s) => !dateReelle(s) || s >= aujourdhui(), 'La date d’arrivée ne peut pas être dans le passé'),
-  managerId: z.string().regex(GUID, 'Choisissez le responsable dans la liste'),
-  licence: z.string().min(1, 'Choisissez une licence'),
-});
+/** `domaine` : celui des adresses (GET /api/moi). */
+export const schemaDemande = (domaine: string) =>
+  z.object({
+    prenom: texte('Prénom', LIMITES.prenom),
+    nom: texte('Nom', LIMITES.nom),
+    email: z
+      .string()
+      .transform((s) => s.trim().toLowerCase())
+      .refine((s) => erreurEmail(s, domaine) === null, { error: (issue) => erreurEmail(String(issue.input), domaine) ?? 'Adresse invalide' }),
+    typeContrat: z.enum(TYPES_CONTRAT, { error: 'Choisissez un type de contrat' }),
+    dateArrivee: z
+      .string()
+      .refine(dateReelle, 'Date d’arrivée requise')
+      // Jour du navigateur : un garde-fou de confort, le serveur tranche d'après le fuseau métier.
+      .refine((s) => !dateReelle(s) || s >= aujourdhui(), 'La date d’arrivée ne peut pas être dans le passé'),
+    poste: texte('Poste', LIMITES.poste),
+    service: texte('Service', LIMITES.service),
+    managerId: z.string().regex(GUID, 'Choisissez le responsable dans la liste'),
+  });
 
-export type DemandeEntree = z.input<typeof schemaDemande>;
-export type DemandeSortie = z.output<typeof schemaDemande>;
-export const CHAMPS = ['prenom', 'nom', 'poste', 'service', 'dateArrivee', 'managerId', 'licence'] as const;
+export type DemandeEntree = z.input<ReturnType<typeof schemaDemande>>;
+export type DemandeSortie = z.output<ReturnType<typeof schemaDemande>>;
+/** Dans l'ordre de la page : le premier champ en erreur reçoit le focus. */
+export const CHAMPS = ['prenom', 'nom', 'email', 'typeContrat', 'dateArrivee', 'poste', 'service', 'managerId'] as const;
 export type Champ = (typeof CHAMPS)[number];
 export const estChamp = (c: string): c is Champ => (CHAMPS as readonly string[]).includes(c);
 

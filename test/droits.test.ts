@@ -27,7 +27,7 @@ function suite(env: Record<string, string | undefined> = {}) {
       managerId,
       extras: { [EXT_LIC]: LICENSE_SKU, ...(o.createur ? { [EXT_CREATOR]: o.createur } : {}) },
     });
-  const body = () => ({ prenom: 'Éloïse', nom: 'Dupont', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, licence: LICENSE_SKU });
+  const body = () => ({ prenom: 'Éloïse', nom: 'Dupont', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, typeContrat: 'Employé' });
   const ecritures = () => g().calls.filter((c) => c.method !== 'GET' && !c.path.endsWith('/checkMemberGroups'));
   const refus = () => h.ctx.events.filter((e) => e.action === 'acces.refuse');
   return { h, g, compte, body, ecritures, refus };
@@ -172,7 +172,7 @@ describe('GET /api/suivi : droit acces et actions calculées pour la personne co
     const text = await res.text();
     expect(text).not.toContain(RH_ID);
     expect(text).not.toContain('createur');
-    expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut', 'upn']);
+    expect(Object.keys((JSON.parse(text) as { demandes: object[] }).demandes[0]!).sort()).toEqual(['actions', 'dateArrivee', 'etape', 'id', 'nom', 'poste', 'service', 'statut', 'typeContrat', 'upn']);
   });
 
   it('la liste ne lit plus le créateur (aucun statut) : il ne sert qu’à tracer l’auto-approbation', async () => {

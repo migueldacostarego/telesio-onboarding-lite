@@ -1,5 +1,6 @@
 import type { Client } from '@microsoft/microsoft-graph-client';
 import { latestTokenInfo, tokenAuditProps } from './tokenRoles';
+import { typeLu, type TypeContrat } from './typeContrat';
 
 export interface DirectoryUser {
   id: string;
@@ -60,6 +61,8 @@ export interface NewUser {
   employeeHireDate: string;
   jobTitle: string;
   department: string;
+  /** Type de contrat (« Employé », « Contractor ») : attribut natif d'Entra, lisible dans le portail. */
+  employeeType: string;
   /** Requis pour qu'Entra attribue une licence (licence par groupe). */
   usageLocation: string;
   passwordProfile: { password: string; forceChangePasswordNextSignIn: boolean };
@@ -92,6 +95,8 @@ export interface DemandeLue {
   upn: string | null;
   poste: string | null;
   service: string | null;
+  /** employeeType, si c'est un type connu ; null pour un compte antérieur au formulaire par type. */
+  typeContrat: TypeContrat | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
   createdDateTime: string | null;
@@ -119,6 +124,8 @@ export interface PendingDemande {
   upn: string | null;
   poste: string | null;
   service: string | null;
+  /** employeeType, si c'est un type connu ; null pour un compte antérieur au formulaire par type. */
+  typeContrat: TypeContrat | null;
   manager: { id: string; displayName: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
@@ -228,6 +235,7 @@ interface RawPending {
   userPrincipalName?: string | null;
   jobTitle?: string | null;
   department?: string | null;
+  employeeType?: string | null;
   employeeHireDate?: string | null;
   givenName?: string | null;
   surname?: string | null;
@@ -330,7 +338,7 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`${ext} eq '${statut}'`)
-        .select(`id,displayName,userPrincipalName,jobTitle,department,employeeHireDate${withNames ? ',givenName,surname' : ''}${extras.map((e) => `,${e}`).join('')}`)
+        .select(`id,displayName,userPrincipalName,jobTitle,department,employeeType,employeeHireDate${withNames ? ',givenName,surname' : ''}${extras.map((e) => `,${e}`).join('')}`)
         .expand('manager($select=id,displayName)')
         .top(100)
         .count(true);
@@ -354,6 +362,7 @@ export class GraphDirectory implements Directory {
           upn: typeof u.userPrincipalName === 'string' ? u.userPrincipalName : null,
           poste: u.jobTitle ?? null,
           service: u.department ?? null,
+          typeContrat: typeLu(u.employeeType),
           manager: u.manager ? { id: u.manager.id, displayName: u.manager.displayName } : null,
           dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
           ...(withNames ? { prenom: typeof u.givenName === 'string' ? u.givenName : null, famille: typeof u.surname === 'string' ? u.surname : null } : {}),
@@ -395,7 +404,7 @@ export class GraphDirectory implements Directory {
     try {
       const u = await this.client
         .api(`/users/${id}`)
-        .select(`id,displayName,givenName,surname,userPrincipalName,jobTitle,department,employeeHireDate,createdDateTime,lastPasswordChangeDateTime,accountEnabled${extensions.map((e) => `,${e}`).join('')}`)
+        .select(`id,displayName,givenName,surname,userPrincipalName,jobTitle,department,employeeType,employeeHireDate,createdDateTime,lastPasswordChangeDateTime,accountEnabled${extensions.map((e) => `,${e}`).join('')}`)
         .expand('manager($select=id,displayName)')
         .get();
       const str = (v: unknown) => (typeof v === 'string' ? v : null);
@@ -407,6 +416,7 @@ export class GraphDirectory implements Directory {
         upn: str(u.userPrincipalName),
         poste: str(u.jobTitle),
         service: str(u.department),
+        typeContrat: typeLu(u.employeeType),
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
         createdDateTime: str(u.createdDateTime),
         lastPasswordChange: str(u.lastPasswordChangeDateTime),

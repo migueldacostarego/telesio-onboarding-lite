@@ -21,7 +21,7 @@ describe('API', () => {
   });
   afterAll(() => new Promise((r) => server.close(r)));
 
-  const valid = () => ({ prenom: 'Éloïse', nom: 'De La Cruz', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, licence: LICENSE_SKU });
+  const valid = () => ({ prenom: 'Éloïse', nom: 'De La Cruz', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, typeContrat: 'Employé' });
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     fetch(`${base}/api/demandes`, {
       method: 'POST',
@@ -38,6 +38,11 @@ describe('API', () => {
     it('est normalisé : minuscules, sans accents ni espaces', () => {
       expect(normalizePart('Éloïse')).toBe('eloise');
       expect(normalizePart("D'Artagnan Œuvre")).toBe('dartagnanoeuvre');
+      // Mêmes cas que web/src/lib/email.test.ts : la proposition du formulaire recopie cette règle.
+      expect(normalizePart('D’Artagnan')).toBe('dartagnan');
+      expect(normalizePart('Ærø Straße')).toBe('aerostrasse');
+      expect(normalizePart('  --Anne--Marie--  ')).toBe('anne-marie');
+      expect(normalizePart('日本')).toBe('');
       expect(upnBase('Jean-Pierre', 'De La Cruz')).toBe('jean-pierre.delacruz');
     });
   });
@@ -80,16 +85,38 @@ describe('API', () => {
       for (const secret of [pw, 'eloise', 'Éloïse', 'cruz', 'exemple.test']) expect(logged.toLowerCase()).not.toContain(secret.toLowerCase());
     });
 
-    it('accepte une autre licence de la liste', async () => {
-      const res = await post({ ...valid(), prenom: 'Béa', nom: 'Autre', licence: LICENSE_SKU_B.toUpperCase() });
+    it('Employé : type écrit dans employeeType, licence dérivée (Business Premium) dans l’extension, dans le même POST', async () => {
+      const res = await post({ ...valid(), prenom: 'Emma', nom: 'Employee' });
       expect(res.status).toBe(201);
       const id = ((await res.json()) as { id: string }).id;
-      expect(ctx.graph.users.get(id)!.props[EXT_LIC]).toBe(LICENSE_SKU_B);
+      expect(ctx.graph.users.get(id)!.props[EXT_LIC]).toBe(LICENSE_SKU);
+      const created = ctx.graph.calls.filter((c) => c.method === 'POST' && c.path === '/users').at(-1)!.body as Record<string, unknown>;
+      expect(created).toMatchObject({ employeeType: 'Employé', [EXT_LIC]: LICENSE_SKU });
+      expect(ctx.events.find((e) => e.action === 'demande.compte_cree' && e.cible === id)).toMatchObject({ typeContrat: 'Employé', sku: LICENSE_SKU });
     });
 
-    it('400 si le SKU est hors liste, sans aucune écriture', async () => {
+    it('Contractor : la licence de son type (LICENCES_PAR_TYPE), pas celle d’Employé', async () => {
+      const res = await post({ ...valid(), prenom: 'Béa', nom: 'Contractor', typeContrat: 'Contractor' });
+      expect(res.status).toBe(201);
+      const id = ((await res.json()) as { id: string }).id;
+      expect(ctx.graph.users.get(id)!.props).toMatchObject({ employeeType: 'Contractor', [EXT_LIC]: LICENSE_SKU_B });
+    });
+
+    it('400 si le type est absent ou inconnu, sans aucune écriture', async () => {
       ctx.graph.calls.length = 0;
-      for (const licence of ['ffffffff-0000-4000-8000-000000000009', 'pas-un-guid', 42, '']) {
+      const sansType: Record<string, unknown> = { ...valid() };
+      delete sansType.typeContrat;
+      for (const body of [sansType, { ...valid(), typeContrat: '' }, { ...valid(), typeContrat: 'employe' }, { ...valid(), typeContrat: 'Stagiaire' }, { ...valid(), typeContrat: 42 }]) {
+        const res = await post(body);
+        expect(res.status).toBe(400);
+        expect(Object.keys(((await res.json()) as { details: object }).details)).toEqual(['typeContrat']);
+      }
+      expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    });
+
+    it('400 si la licence est envoyée (elle dépend du type), même valide, sans aucune écriture', async () => {
+      ctx.graph.calls.length = 0;
+      for (const licence of [LICENSE_SKU, LICENSE_SKU_B.toUpperCase(), '', 42, null]) {
         const res = await post({ ...valid(), licence });
         expect(res.status).toBe(400);
         expect(Object.keys(((await res.json()) as { details: object }).details)).toEqual(['licence']);
@@ -97,14 +124,125 @@ describe('API', () => {
       expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
     });
 
-    it('409 si la licence choisie n’a plus d’unité libre, sans aucune écriture', async () => {
-      ctx.graph.calls.length = 0;
-      ctx.events.length = 0;
-      const res = await post({ ...valid(), prenom: 'Zoé', nom: 'Zero', licence: LICENSE_SKU_ZERO });
-      expect(res.status).toBe(409);
-      expect(await res.json()).toEqual({ error: 'Aucune licence disponible', code: 'licence_indisponible' });
-      expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
-      expect(ctx.events.at(-1)).toMatchObject({ action: 'licence.indisponible', outcome: 'refuse', sku: LICENSE_SKU_ZERO, phase: 'demande' });
+    it('409 si la licence du type n’a plus d’unité libre, sans aucune écriture', async () => {
+      const sku = ctx.graph.skus.get(LICENSE_SKU_B)!;
+      const avant = sku.consumed;
+      sku.consumed = sku.enabled;
+      try {
+        ctx.graph.calls.length = 0;
+        ctx.events.length = 0;
+        const res = await post({ ...valid(), prenom: 'Zoé', nom: 'Zero', typeContrat: 'Contractor' });
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual({ error: 'Aucune licence disponible', code: 'licence_indisponible' });
+        expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+        expect(ctx.events.at(-1)).toMatchObject({ action: 'licence.indisponible', outcome: 'refuse', sku: LICENSE_SKU_B, typeContrat: 'Contractor', phase: 'demande' });
+      } finally {
+        sku.consumed = avant;
+      }
+    });
+
+    it('409 si le type n’a pas de licence prévue (entrée absente de LICENCES_PAR_TYPE), sans aucune lecture ni écriture ; l’autre type passe', async () => {
+      const partiel = setup({ LICENCES_PAR_TYPE: JSON.stringify({ Employé: LICENSE_SKU }) });
+      const m = partiel.graph.addUser('chef@exemple.test', 'Camille Responsable');
+      const s = partiel.app.listen(0);
+      await new Promise((r) => s.once('listening', r));
+      try {
+        const url = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+        const envoyer = (typeContrat: string) =>
+          fetch(`${url}/api/demandes`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ms-client-principal': principal(['RH']) }, body: JSON.stringify({ ...valid(), managerId: m, typeContrat }) });
+        partiel.graph.calls.length = 0;
+        const refus = await envoyer('Contractor');
+        expect(refus.status).toBe(409);
+        expect(await refus.json()).toEqual({ error: 'Aucune licence disponible pour ce type de contrat', code: 'licence_indisponible' });
+        expect(partiel.graph.calls).toEqual([]); // avant toute lecture Graph
+        expect(partiel.events.at(-1)).toMatchObject({ action: 'licence.indisponible', outcome: 'refuse', typeContrat: 'Contractor', raison: 'non_prevue', phase: 'demande' });
+        expect(JSON.stringify(partiel.events)).not.toMatch(/sku/);
+        expect((await envoyer('Employé')).status).toBe(201);
+      } finally {
+        await new Promise((r) => s.close(r));
+      }
+    });
+
+    it('409 pour les deux types quand LICENCES_PAR_TYPE est « {} » (aucun type configuré), et non 503', async () => {
+      const vide = setup({ LICENCES_PAR_TYPE: '{}' });
+      const s = vide.app.listen(0);
+      await new Promise((r) => s.once('listening', r));
+      try {
+        const url = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+        for (const typeContrat of ['Employé', 'Contractor']) {
+          const res = await fetch(`${url}/api/demandes`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ms-client-principal': principal(['RH']) }, body: JSON.stringify({ ...valid(), typeContrat }) });
+          expect(res.status).toBe(409);
+          expect(((await res.json()) as { code: string }).code).toBe('licence_indisponible');
+        }
+        expect(vide.graph.calls).toEqual([]);
+      } finally {
+        await new Promise((r) => s.close(r));
+      }
+    });
+
+    it('503 sans LICENCES_PAR_TYPE (déploiement en deux temps), sans aucune écriture ; le reste de l’API répond', async () => {
+      const sans = setup({ LICENCES_PAR_TYPE: '' });
+      const s = sans.app.listen(0);
+      await new Promise((r) => s.once('listening', r));
+      try {
+        const url = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+        const res = await fetch(`${url}/api/demandes`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-ms-client-principal': principal(['RH']) }, body: JSON.stringify(valid()) });
+        expect(res.status).toBe(503);
+        expect(((await res.json()) as { error: string }).error).toContain('LICENCES_PAR_TYPE');
+        expect(sans.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+      } finally {
+        await new Promise((r) => s.close(r));
+      }
+    });
+
+    describe('adresse choisie (email)', () => {
+      it('est utilisée telle quelle comme identifiant, en minuscules, sans suffixe', async () => {
+        const res = await post({ ...valid(), prenom: 'Zoé', nom: 'Choix', email: ' Zoe.Choix-Perso@Exemple.Test ' });
+        expect(res.status).toBe(201);
+        const out = (await res.json()) as { id: string; userPrincipalName: string };
+        expect(out.userPrincipalName).toBe('zoe.choix-perso@exemple.test');
+        const created = ctx.graph.calls.filter((c) => c.method === 'POST' && c.path === '/users').at(-1)!.body as Record<string, unknown>;
+        expect(created).toMatchObject({ userPrincipalName: 'zoe.choix-perso@exemple.test', mailNickname: 'zoe.choix-perso' });
+      });
+
+      it('409 email_pris si elle est déjà utilisée : une seule tentative, jamais de suffixe ajouté, aucune écriture, adresse absente des traces', async () => {
+        ctx.graph.addUser('jean.pris@exemple.test');
+        ctx.graph.calls.length = 0;
+        ctx.events.length = 0;
+        const res = await post({ ...valid(), prenom: 'Jean', nom: 'Pris', email: 'jean.pris@exemple.test' });
+        expect(res.status).toBe(409);
+        expect(await res.json()).toEqual({ error: 'Cette adresse est déjà utilisée', code: 'email_pris' });
+        expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+        expect(ctx.events.at(-1)).toMatchObject({ action: 'demande.email_pris', outcome: 'refuse' });
+        expect(JSON.stringify(ctx.events).toLowerCase()).not.toContain('jean');
+      });
+
+      it('409 email_pris aussi si elle est prise entre la vérification et la création', async () => {
+        ctx.graph.addUser('luc.course@exemple.test');
+        ctx.graph.hiddenOnce.add('luc.course@exemple.test');
+        const res = await post({ ...valid(), prenom: 'Luc', nom: 'Course', email: 'luc.course@exemple.test' });
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as { code: string }).code).toBe('email_pris');
+      });
+
+      it.each([
+        ['mauvais domaine', 'zoe.choix@autre.test'],
+        ['sans domaine', 'zoe.choix'],
+        ['deux @', 'a@b@exemple.test'],
+        ['accent', 'zoé.choix@exemple.test'],
+        ['espace', 'zoe choix@exemple.test'],
+        ['point double', 'zoe..choix@exemple.test'],
+        ['point en tête', '.zoe@exemple.test'],
+        ['tiret en fin', 'zoe-@exemple.test'],
+        ['trop long', `${'a'.repeat(65)}@exemple.test`],
+        ['pas du texte', 42],
+      ])('400 sur email : %s', async (_nom, email) => {
+        ctx.graph.calls.length = 0;
+        const res = await post({ ...valid(), email });
+        expect(res.status).toBe(400);
+        expect(Object.keys(((await res.json()) as { details: object }).details)).toEqual(['email']);
+        expect(ctx.graph.calls.filter((c) => c.method !== 'GET')).toEqual([]);
+      });
     });
 
     it('ajoute un suffixe 2, 3… en cas de collision', async () => {
@@ -158,7 +296,7 @@ describe('API', () => {
       const res = await post({});
       expect(res.status).toBe(400);
       const out = (await res.json()) as { details: Record<string, string> };
-      expect(Object.keys(out.details).sort()).toEqual(['dateArrivee', 'licence', 'managerId', 'nom', 'poste', 'prenom', 'service']);
+      expect(Object.keys(out.details).sort()).toEqual(['dateArrivee', 'managerId', 'nom', 'poste', 'prenom', 'service', 'typeContrat']);
     });
 
     it.each([
@@ -214,6 +352,58 @@ describe('API', () => {
     it('403 sans rôle RH', async () => {
       const res = await fetch(`${base}/api/licences`, { headers: { 'x-ms-client-principal': principal(['Autre']) } });
       expect(res.status).toBe(403);
+    });
+  });
+
+  describe('POST /api/annuaire/disponibilite', () => {
+    const dispo = (body: unknown, headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/annuaire/disponibilite`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ms-client-principal': principal(['RH']), ...headers },
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      });
+
+    it('dit si l’adresse est libre ; l’adresse n’est ni dans l’URL, ni dans les traces, et rien n’est écrit', async () => {
+      ctx.graph.addUser('marie.dispo@exemple.test');
+      ctx.graph.calls.length = 0;
+      ctx.events.length = 0;
+      const prise = await dispo({ email: 'Marie.Dispo@exemple.test' });
+      expect(prise.status).toBe(200);
+      expect(await prise.json()).toEqual({ disponible: false });
+      const libre = await dispo({ email: 'marie.libre@exemple.test' });
+      expect(await libre.json()).toEqual({ disponible: true });
+      expect(libre.headers.get('cache-control')).toBe('no-store');
+      expect(ctx.graph.calls.every((c) => c.method === 'GET')).toBe(true);
+      expect(ctx.events.map((e) => [e.action, e.outcome, e.disponible])).toEqual([['annuaire.disponibilite', 'ok', false], ['annuaire.disponibilite', 'ok', true]]);
+      expect(JSON.stringify(ctx.events).toLowerCase()).not.toContain('marie');
+    });
+
+    it('400 : adresse invalide ou hors domaine, sans appel Graph', async () => {
+      ctx.graph.calls.length = 0;
+      for (const email of ['marie@autre.test', 'marie', '', 42, undefined]) {
+        const res = await dispo(email === undefined ? {} : { email });
+        expect(res.status).toBe(400);
+        expect(Object.keys(((await res.json()) as { details: object }).details)).toEqual(['email']);
+      }
+      expect(ctx.graph.calls).toEqual([]);
+    });
+
+    it('502 si l’annuaire échoue (tracé sans l’adresse)', async () => {
+      ctx.graph.failOn.upn = 403;
+      ctx.events.length = 0;
+      try {
+        const res = await dispo({ email: 'marie.panne@exemple.test' });
+        expect(res.status).toBe(502);
+        expect(ctx.events.at(-1)).toMatchObject({ action: 'annuaire.disponibilite', outcome: 'erreur' });
+      } finally {
+        ctx.graph.failOn.upn = undefined;
+      }
+    });
+
+    it('401 sans identité, 403 sans droit creer, 415 hors JSON', async () => {
+      expect((await fetch(`${base}/api/annuaire/disponibilite`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
+      expect((await dispo({ email: 'a@exemple.test' }, { 'x-ms-client-principal': principal(['Autre']) })).status).toBe(403);
+      expect((await dispo('email=a', { 'content-type': 'text/plain' })).status).toBe(415);
     });
   });
 
@@ -276,6 +466,31 @@ describe('config', () => {
       expect(() => loadConfig({ LICENSES: bad, ENTRA_LICENSE_EXTENSION: ext })).toThrow();
     }
     expect(() => loadConfig({ LICENSES: ok })).toThrow(/ENTRA_LICENSE_EXTENSION/);
+  });
+
+  it('valide LICENCES_PAR_TYPE : objet JSON, chaque type facultatif, des SKU de LICENSES ; absent : pas d’erreur (503 à la création)', () => {
+    const [a, b] = ['eeeeeeee-0000-4000-8000-000000000005', 'eeeeeeee-0000-4000-8000-0000000000b5'];
+    const grp = 'dddddddd-0000-4000-8000-000000000004';
+    const ext = 'extension_0123456789abcdef0123456789abcdef_licenceOnboarding';
+    const licenses = JSON.stringify([{ skuId: a, libelle: 'Premium', groupId: grp }, { skuId: b, libelle: 'Basic', groupId: 'dddddddd-0000-4000-8000-0000000000b4' }]);
+    const base = { LICENSES: licenses, ENTRA_LICENSE_EXTENSION: ext };
+    expect(loadConfig(base).licenseByType).toBeUndefined();
+    expect(loadConfig({ ...base, LICENCES_PAR_TYPE: JSON.stringify({ Employé: a.toUpperCase(), Contractor: b }) }).licenseByType).toEqual({ Employé: a, Contractor: b });
+    // Chaque type est facultatif : absent ou null = pas de licence prévue (409 à la création), pas une erreur de configuration.
+    expect(loadConfig({ ...base, LICENCES_PAR_TYPE: JSON.stringify({ Employé: a }) }).licenseByType).toEqual({ Employé: a });
+    expect(loadConfig({ ...base, LICENCES_PAR_TYPE: JSON.stringify({ Employé: a, Contractor: null }) }).licenseByType).toEqual({ Employé: a });
+    expect(loadConfig({ ...base, LICENCES_PAR_TYPE: '{}' }).licenseByType).toEqual({});
+    for (const bad of [
+      'pas du json', '[]', '"texte"', 'null', '42',
+      JSON.stringify({ Employé: '' }),
+      JSON.stringify({ Employé: 7 }),
+      JSON.stringify({ Employé: a, Contractor: 'x' }),
+      JSON.stringify({ Employé: a, Contractor: 'eeeeeeee-0000-4000-8000-000000000009' }), // SKU hors LICENSES
+      JSON.stringify({ Employé: a, Contractor: b, Stagiaire: a }),
+    ]) {
+      expect(() => loadConfig({ ...base, LICENCES_PAR_TYPE: bad })).toThrow(/LICENCES_PAR_TYPE/);
+    }
+    expect(() => loadConfig({ LICENCES_PAR_TYPE: JSON.stringify({ Employé: a, Contractor: b }) })).toThrow(/LICENCES_PAR_TYPE/); // sans LICENSES
   });
 
   it('ignore le contournement d’auth de dev en production', () => {

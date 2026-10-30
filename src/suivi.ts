@@ -4,6 +4,7 @@ import { step, type DirectionDeps } from './direction';
 import { buildFolderName } from './folder';
 import { graphFailureProps, type PendingDemande } from './directory';
 import { decoderEvenement } from './history';
+import type { TypeContrat } from './typeContrat';
 import { activationConfig, inspectActifs, type ActivationDeps, type OnboardingState } from './activation';
 
 /** Comptes renvoyés par statut au plus (`tronque` l'indique au-delà). */
@@ -30,6 +31,8 @@ export interface SuiviItem {
   upn: string | null;
   poste: string | null;
   service: string | null;
+  /** Type de contrat (employeeType) ; null : compte antérieur au formulaire par type, ou valeur inconnue. */
+  typeContrat: TypeContrat | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
   statut: Statut;
@@ -71,6 +74,7 @@ const item = (d: PendingDemande, statut: Statut, droits: Droits, aujourdhui: str
   upn: d.upn,
   poste: d.poste,
   service: d.service,
+  typeContrat: d.typeContrat,
   dateArrivee: d.dateArrivee,
   statut,
   etape: (STATUTS.indexOf(statut) + 1) as SuiviItem['etape'],

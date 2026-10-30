@@ -106,6 +106,15 @@ describe('GET /api/demandes/:id', () => {
   const lire = (id: string, as: (id: string) => Promise<Response> = (i) => h.callRh('GET', `/api/demandes/${i}`)) => as(id);
   type Detail = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
+  it('le type de contrat vient d’employeeType ; null pour un compte antérieur ou une valeur inconnue', async () => {
+    const employe = compte('Validé', { employeeType: 'Employé', [EXT_LIC]: LICENSE_SKU });
+    const contractor = compte('Validé', { employeeType: 'Contractor', [EXT_LIC]: LICENSE_SKU });
+    const ancien = compte('Validé', { [EXT_LIC]: LICENSE_SKU });
+    const autre = compte('Validé', { employeeType: 'Member', [EXT_LIC]: LICENSE_SKU });
+    const types = await Promise.all([employe, contractor, ancien, autre].map(async (id) => ((await (await lire(id)).json()) as Detail).typeContrat));
+    expect(types).toEqual(['Employé', 'Contractor', null, null]);
+  });
+
   it('un compte Actif : identité, responsable, licence, groupe, dossier, onboarding et chronologie complète', async () => {
     const chef = g().addUser('chef@exemple.test', 'Chef Dupont');
     const id = compte('Actif', {

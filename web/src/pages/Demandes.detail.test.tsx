@@ -65,7 +65,7 @@ describe('page de détail /demandes/:id', () => {
   it('demande en attente : licence réservée, groupe et dossier créés à la validation', async () => {
     monter({ demandes: [enAttente(ELOISE)], ecrire: rien, chemin: `/demandes/${ELOISE.id}` });
     const compte = await screen.findByRole('region', { name: 'Compte et accès' });
-    expect(compte).toHaveTextContent('Business Premium : réservée à la validation');
+    expect(compte).toHaveTextContent('Business Premium : prévue, attribuée à la validation');
     expect(compte).toHaveTextContent('Ajouté à la validation');
     expect(compte).toHaveTextContent('Créé à la validation');
     expect(within(compte).queryByRole('link')).not.toBeInTheDocument();

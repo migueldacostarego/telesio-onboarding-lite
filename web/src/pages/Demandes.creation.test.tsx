@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { ecritures, lecturesSuivi, reply } from '@/test/helpers';
+import { ecritures, lecturesSuivi, reply, verifications } from '@/test/helpers';
 import { CAMILLE, DROITS_DIRECTION } from '@/test/helpers';
 import { ELOISE, HUGO, avancer, enAttente, monter, tempsSimule } from '@/test/demandes';
 
@@ -9,13 +9,10 @@ tempsSimule();
 
 const MANAGER = { id: '11111111-2222-4333-8444-555555555555', displayName: 'Marie Responsable', mail: 'marie.responsable@exemple.test' };
 const AUTRE = { id: '66666666-7777-4888-9999-000000000000', displayName: 'Marc Responsable', mail: null };
-const SKU = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-const SKU_VIDE = 'ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-const LICENCES = { licences: [{ skuId: SKU, libelle: 'Business Premium', disponibles: 3 }, { skuId: SKU_VIDE, libelle: 'Basic', disponibles: 0 }] };
 const CREEE = { id: 'id-nouveau', userPrincipalName: 'camille.durand@exemple.test', statut: 'EnAttente' };
 
-const lire = (url: string) => (url.startsWith('/api/annuaire?q=') ? reply(200, [MANAGER, AUTRE]) : url === '/api/licences' ? reply(200, LICENCES) : undefined);
-const nouvelleLigne = () => enAttente({ id: CREEE.id, nom: 'Camille Durand' }, { poste: 'Analyste', service: 'Finance', dateArrivee: '2026-11-16' });
+const lire = (url: string) => (url.startsWith('/api/annuaire?q=') ? reply(200, [MANAGER, AUTRE]) : undefined);
+const nouvelleLigne = () => enAttente({ id: CREEE.id, nom: 'Camille Durand' }, { poste: 'Analyste', service: 'Finance', dateArrivee: '2026-11-16', typeContrat: 'Employé' });
 const base = { demandes: [enAttente(ELOISE), enAttente(HUGO)], lire };
 const ouvrir = async (user: UserEvent) => {
   await user.click(screen.getByRole('button', { name: 'Nouvelle demande' }));
@@ -24,9 +21,11 @@ const ouvrir = async (user: UserEvent) => {
   return panneau;
 };
 const champ = (nom: string) => screen.getByLabelText(nom);
+const EMAIL = 'camille.durand@exemple.test';
+const creer = (panneau: HTMLElement) => within(panneau).getByRole('button', { name: 'Créer la demande' });
 
 /** Remplit tout, responsable compris (recherche, attente de 300 ms, choix dans la liste). */
-async function remplir(user: UserEvent, o: { date?: string; sansManager?: boolean } = {}) {
+async function remplir(user: UserEvent, o: { date?: string; sansManager?: boolean; type?: 'Employé' | 'Contractor' } = {}) {
   await user.type(champ('Prénom'), '  Camille ');
   await user.type(champ('Nom'), 'Durand');
   await user.type(champ('Poste'), 'Analyste');
@@ -37,8 +36,7 @@ async function remplir(user: UserEvent, o: { date?: string; sansManager?: boolea
     await avancer(300);
     await user.click(await screen.findByRole('option', { name: /Marie Responsable/ }));
   }
-  await screen.findByRole('option', { name: /Business Premium/ });
-  await user.selectOptions(champ('Licence'), SKU);
+  if (o.type) await user.click(screen.getByRole('radio', { name: o.type }));
 }
 
 describe('bouton « Nouvelle demande »', () => {
@@ -53,19 +51,165 @@ describe('bouton « Nouvelle demande »', () => {
   });
 });
 
-describe('validation côté interface (zod)', () => {
-  it('envoi à vide : une erreur sous chaque champ, rien n’est envoyé', async () => {
+describe('fenêtre', () => {
+  it('modale de 560 px à trois sections titrées, sans choix de licence', async () => {
     const { fetchMock, user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    expect(panneau).toHaveAttribute('data-slot', 'dialog-content');
+    expect(panneau.className).toContain('sm:max-w-[560px]');
+    for (const [titre, champs] of [['Identité', ['Prénom', 'Nom', 'Email pro']], ['Contrat', ['Date d’arrivée']], ['Poste', ['Poste', 'Service']]] as const) {
+      const section = within(panneau).getByRole('group', { name: titre });
+      for (const nom of champs) expect(within(section).getByLabelText(nom)).toBeInTheDocument();
+    }
+    expect(within(within(panneau).getByRole('group', { name: 'Contrat' })).getByRole('radiogroup', { name: 'Type' })).toBeInTheDocument();
+    expect(within(within(panneau).getByRole('group', { name: 'Poste' })).getByRole('combobox', { name: 'Responsable' })).toBeInTheDocument();
+    expect(within(panneau).getByRole('button', { name: 'Annuler' })).toBeInTheDocument();
+    expect(creer(panneau)).toBeEnabled();
+    // Plus de licence à choisir, ni lue.
+    expect(screen.queryByLabelText('Licence')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).not.toContain('/api/licences');
+  });
 
-    for (const [nom, erreur] of [['Prénom', 'Prénom requis'], ['Nom', 'Nom requis'], ['Poste', 'Poste requis'], ['Service', 'Service requis'], ['Date d’arrivée', 'Date d’arrivée requise'], ['Licence', 'Choisissez une licence']] as const) {
+  it('type : Employé par défaut, Contractor au choix (radio ; les flèches du clavier sont contrôlées dans Chrome, jsdom ne les rejoue pas)', async () => {
+    const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    await ouvrir(user);
+    expect(screen.getByRole('radio', { name: 'Employé' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Contractor' })).not.toBeChecked();
+    await user.click(screen.getByRole('radio', { name: 'Contractor' }));
+    expect(screen.getByRole('radio', { name: 'Contractor' })).toBeChecked();
+    await user.click(screen.getByRole('radio', { name: 'Employé' }));
+    expect(screen.getByRole('radio', { name: 'Employé' })).toBeChecked();
+  });
+});
+
+describe('email pro', () => {
+  it('proposé d’après le prénom et le nom (minuscules, accents retirés, espaces et apostrophes supprimés), mis à jour en tapant', async () => {
+    const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    await ouvrir(user);
+    expect(champ('Email pro')).toHaveValue('');
+    await user.type(champ('Prénom'), 'Éloïse');
+    expect(champ('Email pro')).toHaveValue(''); // pas de nom : rien à proposer
+    await user.type(champ('Nom'), 'De La Cruz');
+    expect(champ('Email pro')).toHaveValue('eloise.delacruz@exemple.test');
+    await user.clear(champ('Nom'));
+    await user.type(champ('Nom'), 'D’Artagnan');
+    expect(champ('Email pro')).toHaveValue('eloise.dartagnan@exemple.test');
+  });
+
+  it('une fois modifié, il n’est plus écrasé ; « Reproposer » revient à l’adresse proposée', async () => {
+    const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    await ouvrir(user);
+    await user.type(champ('Prénom'), 'Camille');
+    await user.type(champ('Nom'), 'Durand');
+    expect(screen.queryByRole('button', { name: /Reproposer/ })).not.toBeInTheDocument();
+
+    await user.clear(champ('Email pro'));
+    await user.type(champ('Email pro'), 'c.durand2@exemple.test');
+    await user.type(champ('Nom'), 'x'); // le nom change : l'adresse choisie reste
+    expect(champ('Email pro')).toHaveValue('c.durand2@exemple.test');
+    await user.click(screen.getByRole('button', { name: /Reproposer/ }));
+    expect(champ('Email pro')).toHaveValue('camille.durandx@exemple.test');
+    expect(screen.queryByRole('button', { name: /Reproposer/ })).not.toBeInTheDocument();
+    await user.type(champ('Nom'), 'y'); // de nouveau automatique
+    expect(champ('Email pro')).toHaveValue('camille.durandxy@exemple.test');
+  });
+
+  it('disponibilité : « Vérification… » puis « Adresse disponible », une requête 400 ms après la dernière frappe, l’adresse dans le corps seulement', async () => {
+    const { fetchMock, user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    const avant = window.location.href;
+    await ouvrir(user);
+    await user.type(champ('Prénom'), 'Camille');
+    await user.type(champ('Nom'), 'Durand');
+    expect(screen.getByText('Vérification…')).toBeInTheDocument();
+    expect(verifications(fetchMock)).toEqual([]);
+    await avancer(300);
+    expect(verifications(fetchMock)).toEqual([]); // moins de 400 ms
+    await avancer(200);
+    expect(await screen.findByText('Adresse disponible')).toBeInTheDocument();
+    expect(verifications(fetchMock)).toEqual([EMAIL]);
+    expect(champ('Email pro')).not.toHaveAttribute('aria-invalid');
+    expect(fetchMock.mock.calls.every((c) => !String(c[0]).includes('camille'))).toBe(true); // jamais dans une adresse d'API
+    expect(window.location.href).toBe(avant);
+    expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain('camille');
+  });
+
+  it('adresse mal formée : aucune vérification ; déjà prise : message, champ invalide, envoi bloqué avec le focus sur l’adresse', async () => {
+    const { fetchMock, user } = monter({ ...base, disponibilite: () => reply(200, { disponible: false }), ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    await remplir(user);
+    await avancer(500);
+    expect(await screen.findByText('Adresse déjà utilisée : modifiez-la.')).toBeInTheDocument();
+    expect(champ('Email pro')).toHaveAttribute('aria-invalid', 'true');
+    expect(champ('Email pro')).toHaveAccessibleDescription(/déjà utilisée/);
+
+    await user.click(creer(panneau));
+    expect(ecritures(fetchMock)).toHaveLength(0);
+    expect(champ('Email pro')).toHaveFocus();
+
+    const n = verifications(fetchMock).length;
+    await user.clear(champ('Email pro'));
+    await user.type(champ('Email pro'), 'camille.durand@autre.test'); // mal formée : le domaine
+    await avancer(1_000);
+    expect(verifications(fetchMock)).toHaveLength(n);
+    expect(champ('Email pro')).toHaveAccessibleDescription(/Le domaine doit être exemple.test/);
+  });
+
+  it('vérification en échec : message discret, l’envoi reste possible (le serveur revérifie)', async () => {
+    const { fetchMock, user } = monter({ ...base, disponibilite: () => reply(502, { error: 'Le service d’annuaire est indisponible' }), ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    await remplir(user);
+    await avancer(500);
+    expect(await screen.findByText(/Vérification impossible/)).toBeInTheDocument();
+    await user.click(creer(panneau));
+    expect(ecritures(fetchMock)).toHaveLength(1);
+  });
+});
+
+describe('validation côté interface (zod)', () => {
+  it('envoi à vide : une erreur sous chaque champ, le focus sur le premier, rien n’est envoyé', async () => {
+    const { fetchMock, user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    await user.click(creer(panneau));
+
+    for (const [nom, erreur] of [['Prénom', 'Prénom requis'], ['Nom', 'Nom requis'], ['Email pro', 'Adresse e-mail requise'], ['Poste', 'Poste requis'], ['Service', 'Service requis'], ['Date d’arrivée', 'Date d’arrivée requise']] as const) {
       expect(champ(nom)).toHaveAttribute('aria-invalid', 'true');
-      expect(champ(nom)).toHaveAccessibleDescription(erreur);
+      expect(champ(nom)).toHaveAccessibleDescription(expect.stringContaining(erreur));
     }
     expect(within(panneau).getByText('Choisissez le responsable dans la liste')).toBeInTheDocument();
     expect(ecritures(fetchMock)).toHaveLength(0);
+    expect(champ('Prénom')).toHaveFocus();
+  });
+
+  it('une erreur sur le responsable ou le type disparaît dès qu’on corrige le champ, sans attendre un nouvel envoi', async () => {
+    const { user } = monter({ ...base, ecrire: () => reply(409, { error: 'Aucune licence disponible', code: 'licence_indisponible' }) });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    await user.click(creer(panneau)); // à vide : le responsable est en erreur
+    expect(within(panneau).getByText('Choisissez le responsable dans la liste')).toBeInTheDocument();
+    await remplir(user);
+    expect(within(panneau).queryByText('Choisissez le responsable dans la liste')).not.toBeInTheDocument();
+
+    await user.click(creer(panneau)); // le serveur refuse : plus de licence pour ce type
+    expect(await within(panneau).findByText(/Aucune licence disponible pour ce type de contrat/)).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Contractor' }));
+    await waitFor(() => expect(within(panneau).queryByText(/Aucune licence disponible pour ce type de contrat/)).not.toBeInTheDocument());
+  });
+
+  it('le focus va au premier champ en erreur de la page, le responsable compris', async () => {
+    const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    await remplir(user, { sansManager: true });
+    await user.click(creer(panneau));
+    expect(screen.getByRole('combobox', { name: 'Responsable' })).toHaveFocus();
   });
 
   it('date dans le passé refusée, champs trop longs refusés', async () => {
@@ -74,7 +218,7 @@ describe('validation côté interface (zod)', () => {
     const panneau = await ouvrir(user);
     await remplir(user, { date: '2026-10-01' });
     fireEvent.change(champ('Poste'), { target: { value: 'x'.repeat(129) } });
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await user.click(creer(panneau));
     expect(champ('Date d’arrivée')).toHaveAccessibleDescription('La date d’arrivée ne peut pas être dans le passé');
     expect(champ('Poste')).toHaveAccessibleDescription('128 caractères au plus');
     expect(ecritures(fetchMock)).toHaveLength(0);
@@ -156,31 +300,8 @@ describe('responsable : recherche dans l’annuaire', () => {
   });
 });
 
-describe('licence', () => {
-  it('liste déroulante d’après /api/licences : « libellé : N disponibles », grisée à 0', async () => {
-    const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
-    await screen.findByText('Hugo Lambert');
-    await ouvrir(user);
-    const premiere = await screen.findByRole('option', { name: 'Business Premium : 3 disponibles' });
-    expect(premiere).toBeEnabled();
-    expect(screen.getByRole('option', { name: 'Basic : aucune disponible' })).toBeDisabled();
-  });
-
-  it('erreur de lecture : message et Réessayer', async () => {
-    let panne = true;
-    const { user } = monter({ ...base, lire: (u) => (u === '/api/licences' && panne ? reply(503, { error: 'Licences non configurées (LICENSES)' }) : lire(u)), ecrire: () => reply(201, CREEE) });
-    await screen.findByText('Hugo Lambert');
-    const panneau = await ouvrir(user);
-    await avancer(4_000); // une lecture est rejouée deux fois sur un 503 (query.ts)
-    expect(await within(panneau).findByRole('alert')).toHaveTextContent('Licences non configurées');
-    panne = false;
-    await user.click(within(panneau).getByRole('button', { name: 'Réessayer' }));
-    expect(await within(panneau).findByRole('option', { name: /Business Premium/ })).toBeInTheDocument();
-  });
-});
-
 describe('envoi', () => {
-  it('POST /api/demandes avec les sept champs (nettoyés), le panneau se ferme, la liste est relue et la nouvelle ligne mise en évidence', async () => {
+  it('POST /api/demandes avec les huit champs (nettoyés, type et adresse, sans licence), la fenêtre se ferme, la liste est relue et la nouvelle ligne mise en évidence', async () => {
     const { etat, fetchMock, user } = monter({
       ...base,
       ecrire: () => {
@@ -191,10 +312,10 @@ describe('envoi', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await remplir(user);
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await user.click(creer(panneau));
 
     expect(ecritures(fetchMock)).toEqual([
-      { url: '/api/demandes', corps: { prenom: 'Camille', nom: 'Durand', poste: 'Analyste', service: 'Finance', dateArrivee: '2026-11-16', managerId: MANAGER.id, licence: SKU } },
+      { url: '/api/demandes', corps: { prenom: 'Camille', nom: 'Durand', email: EMAIL, typeContrat: 'Employé', dateArrivee: '2026-11-16', poste: 'Analyste', service: 'Finance', managerId: MANAGER.id } },
     ]);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('Demande créée pour Camille Durand')).toBeInTheDocument();
@@ -204,10 +325,23 @@ describe('envoi', () => {
     const ligne = await screen.findByRole('row', { name: /Camille Durand/ });
     expect(ligne).toHaveAttribute('data-nouvelle', 'true');
     expect(ligne).toHaveTextContent('nouvelle demande');
+    expect(within(ligne).getByText('Employé')).toBeInTheDocument(); // le type est affiché dans la liste
     expect(screen.getByRole('row', { name: /Hugo Lambert/ })).not.toHaveAttribute('data-nouvelle');
     // Un second clic sur le bouton rouvre un formulaire vide.
     await user.click(screen.getByRole('button', { name: 'Nouvelle demande' }));
     expect(await screen.findByLabelText('Prénom')).toHaveValue('');
+  });
+
+  it('Contractor : le type part au serveur et s’affiche dans la liste', async () => {
+    const { etat, fetchMock, user } = monter({ ...base, ecrire: () => { etat.demandes = [...etat.demandes, { ...nouvelleLigne(), typeContrat: 'Contractor' }]; return reply(201, CREEE); } });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    await remplir(user, { type: 'Contractor' });
+    await user.click(creer(panneau));
+    expect(ecritures(fetchMock)).toMatchObject([{ corps: { typeContrat: 'Contractor' } }]);
+    expect(ecritures(fetchMock)[0]?.corps).not.toHaveProperty('licence');
+    const ligne = await screen.findByRole('row', { name: /Camille Durand/ });
+    expect(within(ligne).getByText('Contractor')).toBeInTheDocument();
   });
 
   it('la ligne créée n’est pas encore répliquée : elle est affichée tout de suite avec « synchronisation… », la liste est relue toutes les 5 s, l’indicateur part quand l’API la rend', async () => {
@@ -215,7 +349,7 @@ describe('envoi', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await remplir(user);
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await user.click(creer(panneau));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
     // L'API ne la renvoie pas encore : la ligne est là quand même, mise en évidence, avec ce que la personne a saisi.
@@ -245,7 +379,7 @@ describe('envoi', () => {
     await user.type(screen.getByRole('searchbox', { name: 'Rechercher par nom' }), 'hugo');
     const panneau = await ouvrir(user);
     await remplir(user);
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await user.click(creer(panneau));
     expect(await screen.findByRole('row', { name: /Camille Durand/ })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Rechercher par nom' })).toHaveValue('');
   });
@@ -255,7 +389,7 @@ describe('envoi', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await remplir(user);
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await user.click(creer(panneau));
     expect(await screen.findByText(/responsable n’a pas pu être affecté/)).toBeInTheDocument();
     expect(screen.getByText(/Ne renvoyez pas la demande/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Fermer ce message' }));
@@ -268,7 +402,7 @@ describe('envoi', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await remplir(user);
-    await user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await user.click(creer(panneau));
 
     const occupe = within(panneau).getByRole('button', { name: 'Création…' });
     expect(occupe).toBeDisabled();
@@ -287,7 +421,7 @@ describe('envoi', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await user.type(champ('Prénom'), 'Camille');
-    fireEvent.pointerDown(document.querySelector('[data-slot="sheet-overlay"]')!);
+    fireEvent.pointerDown(document.querySelector('[data-slot="dialog-overlay"]')!);
     expect(screen.getByRole('dialog', { name: 'Nouvelle demande' })).toBeInTheDocument();
     expect(champ('Prénom')).toHaveValue('Camille');
 
@@ -304,13 +438,14 @@ describe('erreurs de l’API', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(m.user);
     await remplir(m.user, o);
-    await m.user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await m.user.click(creer(panneau));
     return { ...m, panneau };
   };
 
   it('400 : le message du serveur sous chaque champ concerné, le panneau reste ouvert avec la saisie', async () => {
     const { panneau, fetchMock } = await soumettre(() => reply(400, { error: 'Entrée invalide', details: { prenom: 'doit contenir au moins une lettre latine ou un chiffre', dateArrivee: 'ne peut pas être dans le passé', managerId: 'objectId Entra (GUID) requis' } }));
     await waitFor(() => expect(champ('Prénom')).toHaveAccessibleDescription('doit contenir au moins une lettre latine ou un chiffre'));
+    expect(champ('Prénom')).toHaveFocus(); // le premier champ en erreur de la page
     expect(champ('Date d’arrivée')).toHaveAccessibleDescription('ne peut pas être dans le passé');
     expect(within(panneau).getByText('objectId Entra (GUID) requis')).toBeInTheDocument();
     expect(champ('Nom')).toHaveValue('Durand');
@@ -318,11 +453,29 @@ describe('erreurs de l’API', () => {
     expect(ecritures(fetchMock)).toHaveLength(1);
   });
 
-  it('409 licence_indisponible : message sous la licence, licences relues', async () => {
+  it('409 licence_indisponible : message sous le type de contrat (plus de champ licence), focus dessus, rien d’autre à relire', async () => {
     const { panneau, fetchMock } = await soumettre(() => reply(409, { error: 'Aucune licence disponible', code: 'licence_indisponible' }));
-    await waitFor(() => expect(champ('Licence')).toHaveAccessibleDescription(/Plus aucune licence disponible/));
-    expect(within(panneau).getByText('Aucune licence disponible')).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock.mock.calls.filter((c) => c[0] === '/api/licences')).toHaveLength(2));
+    await waitFor(() => expect(within(panneau).getByRole('radiogroup', { name: 'Type' })).toHaveAccessibleDescription(/Aucune licence disponible pour ce type de contrat/));
+    expect(within(panneau).getByRole('radio', { name: 'Employé' })).toHaveFocus();
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).not.toContain('/api/licences');
+    // Un autre type, et l'erreur part avec le nouveau choix.
+    await within(panneau).findByRole('radio', { name: 'Contractor' });
+  });
+
+  it('409 email_pris : message sous l’adresse, focus dessus, la saisie est conservée', async () => {
+    const { panneau, fetchMock } = await soumettre(() => reply(409, { error: 'Cette adresse est déjà utilisée', code: 'email_pris' }));
+    await waitFor(() => expect(champ('Email pro')).toHaveAccessibleDescription(/Cette adresse est déjà utilisée : modifiez-la/));
+    expect(champ('Email pro')).toHaveFocus();
+    expect(champ('Email pro')).toHaveValue(EMAIL);
+    expect(champ('Nom')).toHaveValue('Durand');
+    expect(screen.getByRole('dialog', { name: 'Nouvelle demande' })).toBeInTheDocument();
+    expect(within(panneau).getAllByRole('alert')).toHaveLength(1); // sous le champ seulement, pas en plus en haut de la fenêtre
+    expect(ecritures(fetchMock)).toHaveLength(1);
+  });
+
+  it('400 sur un champ qui n’est plus dans le formulaire (licence) : message dans la fenêtre', async () => {
+    const { panneau } = await soumettre(() => reply(400, { error: 'Entrée invalide', details: { licence: 'ne se choisit plus : elle dépend du type de contrat (typeContrat)' } }));
+    expect(await within(panneau).findByRole('alert')).toBeInTheDocument();
   });
 
   it('409 (aucun identifiant libre) : erreur dans le panneau', async () => {
@@ -345,7 +498,7 @@ describe('erreurs de l’API', () => {
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(m.user);
     await remplir(m.user);
-    await m.user.click(within(panneau).getByRole('button', { name: 'Créer la demande' }));
+    await m.user.click(creer(panneau));
     await waitFor(() => expect(surSession).toHaveBeenCalled());
   });
 });

@@ -6,7 +6,7 @@ import { harness } from './helpers/harness';
 const IL_Y_A_29_JOURS = '2026-09-28T10:00:00Z';
 const IL_Y_A_31_JOURS = '2026-09-26T10:00:00Z';
 
-type Item = { id: string; nom: string; upn: string | null; poste: string | null; service: string | null; dateArrivee: string | null; statut: string; etape: number; onboarding?: unknown };
+type Item = { id: string; nom: string; upn: string | null; poste: string | null; service: string | null; typeContrat: string | null; dateArrivee: string | null; statut: string; etape: number; onboarding?: unknown };
 type Suivi = { demandes: Item[]; tronque: boolean };
 
 function suite(env: Record<string, string | undefined> = {}) {
@@ -64,12 +64,12 @@ describe('GET /api/suivi', () => {
     expect((await fetch(`${h.base}/api/suivi`)).status).toBe(401);
   });
 
-  it('chaque demande ne porte que id, nom, upn, poste, service, date d’arrivée, statut, étape, actions (et onboarding pour Actif)', async () => {
+  it('chaque demande ne porte que id, nom, upn, poste, service, type de contrat, date d’arrivée, statut, étape, actions (et onboarding pour Actif)', async () => {
     const manager = g().addUser('chef@exemple.test', 'Chef Secret');
     const id = g().addPending(EXT, { givenName: 'Anna', surname: 'Martin', statut: 'Validé', hireDate: '2026-10-27', managerId: manager });
     const out = await suivi();
     expect(out.demandes).toEqual([
-      { id, nom: 'Anna Martin', upn: 'anna.martin@exemple.test', poste: 'Comptable', service: 'Finance', dateArrivee: '2026-10-27', statut: 'Validé', etape: 2, actions: ['activer'] },
+      { id, nom: 'Anna Martin', upn: 'anna.martin@exemple.test', poste: 'Comptable', service: 'Finance', typeContrat: null, dateArrivee: '2026-10-27', statut: 'Validé', etape: 2, actions: ['activer'] },
     ]);
     expect(JSON.stringify(out)).not.toContain('Chef Secret');
   });
@@ -88,6 +88,15 @@ describe('GET /api/suivi', () => {
     ]);
     // Une requête par statut, aucune lecture de plus par compte pour l'adresse.
     expect(g().calls.filter((c) => c.method === 'GET' && c.path === '/users' && c.select?.includes('userPrincipalName'))).toHaveLength(4);
+  });
+
+  it('le type de contrat est celui d’employeeType (null si absent ou inconnu)', async () => {
+    g().addPending(EXT, { givenName: 'Eva', surname: 'Employee', statut: 'EnAttente', extras: { employeeType: 'Employé' } });
+    g().addPending(EXT, { givenName: 'Carl', surname: 'Contractor', statut: 'EnAttente', extras: { employeeType: 'Contractor' } });
+    g().addPending(EXT, { givenName: 'Old', surname: 'Compte', statut: 'EnAttente' });
+    g().addPending(EXT, { givenName: 'Max', surname: 'Autre', statut: 'EnAttente', extras: { employeeType: 'Guest' } });
+    const out = await suivi();
+    expect(Object.fromEntries(out.demandes.map((d) => [d.nom, d.typeContrat]))).toEqual({ 'Eva Employee': 'Employé', 'Carl Contractor': 'Contractor', 'Old Compte': null, 'Max Autre': null });
   });
 
   it('Actif : onboarding calculé comme GET /activations, un échec de lecture est limité au compte concerné', async () => {

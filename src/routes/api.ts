@@ -12,7 +12,7 @@ import { listLicences, SkuAvailabilityCache } from '../licence';
 import { DirectoryError, type Directory } from '../directory';
 import { KeyedLock } from '../lock';
 import type { Library } from '../sharepoint';
-import { GUID_RE, validateDemande, validateMotif, validateRegeneration } from '../validation';
+import { GUID_RE, validateDemande, validateMotif, validateRegeneration, validerEmail } from '../validation';
 
 export interface ApiDeps {
   config: ReadyConfig;
@@ -75,10 +75,11 @@ export function createApiRouter(deps: ApiDeps): Router {
   const key = (req: express.Request) => String(req.params.id).toLowerCase();
 
   // GET /api/moi : qui est connecté, ses rôles et ses droits (calculés ici d'après RH_ROLE et DIRECTION_ROLE), lu dans l'identité Easy Auth (aucun appel Graph, jamais mis en cache).
+  // `domaine` : celui des adresses des comptes créés (UPN_DOMAIN), pour que le formulaire propose prenom.nom@domaine.
   api.get('/moi', authenticated, (_req, res) => {
     const { name, email, roles } = res.locals.principal as Principal;
     const uniques = [...new Set(roles)];
-    res.json({ nom: name ?? email ?? '', email: email ?? null, roles: uniques, droits: droitsDe(uniques, config) });
+    res.json({ nom: name ?? email ?? '', email: email ?? null, roles: uniques, droits: droitsDe(uniques, config), domaine: config.upnDomain });
   });
 
   // GET /api/annuaire?q= : recherche du manager (Entra, $search sur displayName/mail)
@@ -96,6 +97,25 @@ export function createApiRouter(deps: ApiDeps): Router {
     } catch (err) {
       const e = err instanceof DirectoryError ? err : undefined;
       audit.track({ action: 'annuaire.recherche', actor: actor(res), outcome: 'erreur', http: e?.statusCode, code: e?.code });
+      res.status(502).json({ error: 'Le service d’annuaire est indisponible' });
+    }
+  });
+
+  // POST /api/annuaire/disponibilite : l'adresse est-elle libre dans Entra (UPN, mail ou alias) ? Corps JSON : l'adresse ne voyage ni dans l'URL
+  // ni dans les traces (seulement le résultat).
+  api.post('/annuaire/disponibilite', creer, jsonOnly, json, async (req, res) => {
+    const e = validerEmail((req.body as { email?: unknown } | undefined)?.email, config.upnDomain);
+    if (!e.ok) {
+      res.status(400).json({ error: 'Entrée invalide', details: { email: e.message } });
+      return;
+    }
+    try {
+      const disponible = !(await directory.upnTaken(e.email));
+      audit.track({ action: 'annuaire.disponibilite', actor: actor(res), outcome: 'ok', disponible });
+      res.json({ disponible });
+    } catch (err) {
+      const de = err instanceof DirectoryError ? err : undefined;
+      audit.track({ action: 'annuaire.disponibilite', actor: actor(res), outcome: 'erreur', http: de?.statusCode, code: de?.code });
       res.status(502).json({ error: 'Le service d’annuaire est indisponible' });
     }
   });
@@ -119,7 +139,11 @@ export function createApiRouter(deps: ApiDeps): Router {
   // POST /api/demandes : crée le compte Entra désactivé (statutOnboarding=EnAttente)
   api.post('/demandes', creer, jsonOnly, json, async (req, res) => {
     if (noLicenses(res)) return;
-    const v = validateDemande(req.body, todayIn(config.timeZone, now()), config.licenses);
+    if (!config.licenseByType) {
+      res.status(503).json({ error: 'Licences par type de contrat non configurées (LICENCES_PAR_TYPE)' });
+      return;
+    }
+    const v = validateDemande(req.body, todayIn(config.timeZone, now()), config.upnDomain);
     if (!v.ok) {
       audit.track({ action: 'demande.rejetee', actor: actor(res), outcome: 'refuse', champs: Object.keys(v.details).join(',') });
       res.status(400).json({ error: 'Entrée invalide', details: v.details });

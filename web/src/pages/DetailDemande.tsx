@@ -7,6 +7,7 @@ import { BoutonCopier } from '@/components/demandes/Adresse';
 import { Chronologie } from '@/components/demandes/Chronologie';
 import { Initiales } from '@/components/demandes/Initiales';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
+import { TypeBadge } from '@/components/demandes/TypeBadge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ApiError } from '@/lib/api';
@@ -34,7 +35,7 @@ const Ligne = ({ libelle, children }: { libelle: string; children: ReactNode }) 
   </>
 );
 
-const LIBELLES_LICENCE = { choisie: 'réservée à la validation', attribuee: 'attribuée', en_cours: 'attribution en cours', erreur: 'attribution en erreur', inconnu: 'état illisible' } as const;
+const LIBELLES_LICENCE = { choisie: 'prévue, attribuée à la validation', attribuee: 'attribuée', en_cours: 'attribution en cours', erreur: 'attribution en erreur', inconnu: 'état illisible' } as const;
 
 function Licence({ d }: { d: DemandeDetail }) {
   if (!d.licence) return ABSENT;
@@ -139,6 +140,7 @@ export function DetailDemande() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h1 className="text-2xl font-semibold tracking-tight break-words">{d.nom}</h1>
                 <StatutBadge statut={statut} />
+                <TypeBadge type={d.typeContrat} />
               </div>
               <p className="text-sm text-muted-foreground">
                 {poste || 'Poste non renseigné'}
@@ -181,6 +183,7 @@ export function DetailDemande() {
                   ABSENT
                 )}
               </Ligne>
+              <Ligne libelle="Type de contrat">{d.typeContrat ?? ABSENT}</Ligne>
               <Ligne libelle="Poste">{d.poste ?? ABSENT}</Ligne>
               <Ligne libelle="Service">{d.service ?? ABSENT}</Ligne>
               <Ligne libelle="Responsable">{d.manager?.nom ?? ABSENT}</Ligne>

@@ -22,6 +22,7 @@ describe('GET /api/moi', () => {
       email: 'camille@exemple.test',
       roles: ['RH'],
       droits: { acces: true, creer: true, approuver: false, activer: true },
+      domaine: 'exemple.test',
     });
     expect(h.ctx.graph.calls).toEqual([]);
   });
@@ -47,9 +48,9 @@ describe('GET /api/moi', () => {
 
   it('sans nom dans le jeton, le nom retombe sur l’email ; sans rien, chaîne vide et email null', async () => {
     const mail = await as([], [{ typ: 'email', val: 'camille@exemple.test' }]);
-    expect(await mail.json()).toEqual({ nom: 'camille@exemple.test', email: 'camille@exemple.test', roles: [], droits: AUCUN });
+    expect(await mail.json()).toEqual({ nom: 'camille@exemple.test', email: 'camille@exemple.test', roles: [], droits: AUCUN, domaine: 'exemple.test' });
     const rien = await as([]);
-    expect(await rien.json()).toEqual({ nom: '', email: null, roles: [], droits: AUCUN });
+    expect(await rien.json()).toEqual({ nom: '', email: null, roles: [], droits: AUCUN, domaine: 'exemple.test' });
   });
 
   it('une personne connectée sans rôle reçoit 200 (c’est à l’interface de lui refuser l’accès)', async () => {
@@ -59,7 +60,7 @@ describe('GET /api/moi', () => {
   it('ne renvoie que nom, email et rôles : ni objectId, ni autre revendication', async () => {
     const res = await as(['RH'], [{ typ: 'name', val: 'Camille Exemple' }, { typ: 'tid', val: 'tenant-secret' }, { typ: 'preferred_username', val: 'camille@exemple.test' }]);
     const body = await res.text();
-    expect(Object.keys(JSON.parse(body) as object).sort()).toEqual(['droits', 'email', 'nom', 'roles']);
+    expect(Object.keys(JSON.parse(body) as object).sort()).toEqual(['domaine', 'droits', 'email', 'nom', 'roles']);
     expect(body).not.toContain(RH_ID);
     expect(body).not.toContain('tenant-secret');
   });

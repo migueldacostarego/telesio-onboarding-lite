@@ -130,6 +130,22 @@ variable "licenses" {
   }
 }
 
+variable "license_by_type" {
+  description = "Licence de chaque type de contrat (attribut natif employeeType), par clé de var.licenses : employe (« Employé ») et contractor (« Contractor »). RH ne choisit plus la licence : l'application la déduit du type. Chaque entrée est facultative : null (ou absente) = pas de licence prévue pour ce type, la création d'un tel type répond 409 « aucune licence disponible pour ce type de contrat ». Variable null : LICENCES_PAR_TYPE absent, la création de demande répond 503."
+  type = object({
+    employe    = optional(string)
+    contractor = optional(string)
+  })
+  default = null
+
+  validation {
+    condition = var.license_by_type == null || alltrue([
+      for k in [var.license_by_type.employe, var.license_by_type.contractor] : k == null || contains(keys(var.licenses), k)
+    ])
+    error_message = "employe et contractor doivent être null ou des clés de var.licenses."
+  }
+}
+
 variable "time_zone" {
   description = "Fuseau qui définit le jour J."
   type        = string

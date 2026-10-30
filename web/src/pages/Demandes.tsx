@@ -74,6 +74,7 @@ export function Demandes() {
       upn: creee.userPrincipalName,
       poste: valeurs.poste,
       service: valeurs.service,
+      typeContrat: valeurs.typeContrat,
       dateArrivee: valeurs.dateArrivee,
       statut: 'EnAttente',
       etape: 1,

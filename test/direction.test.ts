@@ -90,6 +90,7 @@ describe('GET /api/demandes, valider, refuser', () => {
           nom: 'Anna Martin',
           poste: 'Comptable',
           service: 'Finance',
+          typeContrat: null,
           manager: { id: managerId, displayName: 'Camille Responsable' },
           dateArrivee: '2026-11-03',
         },
@@ -302,7 +303,7 @@ describe('GET /api/demandes, valider, refuser', () => {
     });
 
     it('503 avant toute lecture si la licence n’est pas configurée', async () => {
-      const off = harness({ LICENSES: undefined, ENTRA_LICENSE_EXTENSION: undefined });
+      const off = harness({ LICENSES: undefined, LICENCES_PAR_TYPE: undefined, ENTRA_LICENSE_EXTENSION: undefined });
       await off.start();
       const id = off.ctx.graph.addPending(EXT, { givenName: 'Eva', surname: 'Test' });
       expect((await off.call('POST', `/api/demandes/${id}/valider`)).status).toBe(503);

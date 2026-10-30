@@ -25,7 +25,7 @@ describe('cache de GET /subscribedSkus', () => {
   const sku = () => h.ctx.graph.skus.get(LICENSE_SKU)!;
   const pending = () => h.ctx.graph.addPending(EXT, { givenName: 'Anna', surname: 'Martin', statut: 'EnAttente', managerId, extras: { [EXT_LIC]: LICENSE_SKU } });
   const demande = () =>
-    h.callRh('POST', '/api/demandes', { prenom: 'Léa', nom: 'Durand', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, licence: LICENSE_SKU });
+    h.callRh('POST', '/api/demandes', { prenom: 'Léa', nom: 'Durand', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, typeContrat: 'Employé' });
 
   it('sert la liste depuis la mémoire pendant 60 s, puis relit', async () => {
     expect(await free()).toBe(4);

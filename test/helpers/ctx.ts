@@ -30,6 +30,8 @@ export const LICENSES_JSON = JSON.stringify([
   { skuId: LICENSE_SKU_B, libelle: 'Business Standard', groupId: LICENSE_GROUP_B },
   { skuId: LICENSE_SKU_ZERO, libelle: 'Business Basic', groupId: LICENSE_GROUP_ZERO },
 ]);
+/** Licence de chaque type de contrat : Employé → A (Business Premium), Contractor → B ; ZERO (aucune unité libre) sert aux tests de licence épuisée. */
+export const LICENCES_PAR_TYPE_JSON = JSON.stringify({ Employé: LICENSE_SKU, Contractor: LICENSE_SKU_B });
 export const SITE = 'exemple.sharepoint.test,11111111-2222-4333-8444-555555555555,66666666-7777-4888-8999-000000000000';
 export const DRIVE = 'b!abc_DEF-123';
 
@@ -62,6 +64,7 @@ export function setup(env: Record<string, string | undefined> = {}, opts: { trus
       SHAREPOINT_SITE_ID: SITE,
       SHAREPOINT_DRIVE_ID: DRIVE,
       LICENSES: LICENSES_JSON,
+      LICENCES_PAR_TYPE: LICENCES_PAR_TYPE_JSON,
       ENTRA_LICENSE_EXTENSION: EXT_LIC,
       ARRIVANTS_GROUP_ID: ARRIVANTS_GROUP,
       ENTRA_ACTIVATION_EXTENSION: EXT_ACT,

@@ -9,6 +9,7 @@ import { EtatLigne } from '@/components/demandes/EtatLigne';
 import { Initiales } from '@/components/demandes/Initiales';
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
+import { TypeBadge } from '@/components/demandes/TypeBadge';
 import { actionsDe, aUnMessage, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
 import { arriveeRelative } from '@/lib/dates';
 import { formatArrivee, type Tri } from '@/lib/suivi';
@@ -67,14 +68,17 @@ export function DemandesTable({ tri, aujourdhui, ...lignes }: PropsLignes & { tr
                       <Initiales id={d.id} nom={d.nom} />
                       <div className="min-w-0">
                         {/* Le nom est un vrai lien (clavier, lecteur d'écran, nouvel onglet) ; la ligne entière est cliquable à la souris. */}
-                        <Link
-                          to={`/demandes/${d.id}`}
-                          aria-label={`Voir le détail de la demande de ${d.nom}`}
-                          title={d.nom}
-                          className="block max-w-full truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-                        >
-                          {d.nom}
-                        </Link>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Link
+                            to={`/demandes/${d.id}`}
+                            aria-label={`Voir le détail de la demande de ${d.nom}`}
+                            title={d.nom}
+                            className="block min-w-0 truncate rounded-sm font-medium outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                          >
+                            {d.nom}
+                          </Link>
+                          <TypeBadge type={d.typeContrat} />
+                        </div>
                         <Adresse upn={d.upn} />
                         {lignes.surlignee === d.id && <span className="sr-only"> (nouvelle demande)</span>}
                       </div>

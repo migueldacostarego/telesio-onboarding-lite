@@ -20,6 +20,8 @@ export interface Moi {
   /** Rôles d'application du jeton, tels quels : affichés dans le badge, jamais testés. */
   roles: string[];
   droits: Droits;
+  /** Domaine des adresses des comptes créés (UPN_DOMAIN) : le formulaire propose prenom.nom@domaine. */
+  domaine?: string;
 }
 
 export const MOI_KEY = ['moi'] as const;
