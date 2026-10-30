@@ -75,7 +75,7 @@ describe('client API', () => {
 
   it('503 : kind indisponible', async () => {
     mockFetch(reply(503, { error: 'Licences non configurées (LICENSES)' }));
-    expect(await failure(api.get('/api/licences'))).toMatchObject({ kind: 'indisponible', status: 503 });
+    expect(await failure(api.get('/api/suivi'))).toMatchObject({ kind: 'indisponible', status: 503 });
   });
 
   it('réseau coupé : kind reseau, statut 0', async () => {
@@ -109,7 +109,7 @@ describe('client API', () => {
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
 
     const get = mockFetch(reply(200, {}));
-    await api.get('/api/licences');
+    await api.get('/api/suivi');
     const [, getInit] = get.mock.calls[0] as unknown as [string, RequestInit];
     expect(getInit.body).toBeUndefined();
     expect(getInit.headers).not.toHaveProperty('Content-Type');

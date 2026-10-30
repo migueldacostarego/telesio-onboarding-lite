@@ -1,6 +1,5 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { createApiRouter, type ApiDeps } from './routes/api';
-import { pages } from './routes/pages';
 import { createWebRouter } from './routes/web';
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
@@ -22,10 +21,8 @@ export function createApp(deps: ApiDeps, options: AppOptions = {}): express.Expr
   const app = express();
   app.disable('x-powered-by');
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
-  // Avant `pages` : son middleware poserait la CSP à nonce des pages-coquilles sur les requêtes du front.
+  app.get('/', (_req, res) => res.redirect('/app/'));
   app.use('/app', createWebRouter(options.webDir));
-  // Les formulaires HTML ne servent que les pages ; l'API n'accepte que du JSON.
-  app.use(express.urlencoded({ extended: false, inflate: false }), pages);
   app.use('/api', createApiRouter(deps));
   app.use(errorHandler);
   return app;

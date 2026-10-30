@@ -136,14 +136,6 @@ export interface PendingDemande {
   extensions?: Record<string, string | null>;
 }
 
-/** Les listes qui n'affichent pas l'adresse (GET /api/demandes, /api/activations) ne la renvoient pas : seul le suivi la porte. */
-export type SansUpn = Omit<PendingDemande, 'upn'>;
-export const sansUpn = (d: PendingDemande): SansUpn => {
-  const reste: Partial<PendingDemande> = { ...d };
-  delete reste.upn;
-  return reste as SansUpn;
-};
-
 /** Disponibilité d'un SKU : prepaidUnits.enabled et consumedUnits de GET /subscribedSkus. */
 export interface SkuAvailability {
   enabled: number;

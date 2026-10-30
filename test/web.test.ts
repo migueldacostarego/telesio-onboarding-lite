@@ -162,7 +162,7 @@ describe('front React sous /app', () => {
   });
 
   it('seules les lectures retombent sur index.html', async () => {
-    const res = await fetch(`${srv.base}/app/demande`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const res = await fetch(`${srv.base}/app/nouvelle`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(res.status).toBe(404);
   });
 
@@ -182,15 +182,13 @@ describe('front React sous /app', () => {
     expect(res.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('les pages actuelles gardent leur CSP à nonce, et /api reste protégée', async () => {
-    const res = await get('/demande');
-    expect(res.status).toBe(200);
-    const csp = res.headers.get('content-security-policy') ?? '';
-    expect(csp).toMatch(/script-src 'nonce-/);
-    expect(csp).not.toBe(WEB_CSP);
-    expect((await get('/direction')).status).toBe(200);
-    expect((await get('/activation')).status).toBe(200);
-    expect((await get('/api/licences')).status).toBe(401);
+  it('/ redirige vers /app/ ; les anciennes pages n’existent plus ; /api reste protégée', async () => {
+    const racine = await fetch(`${srv.base}/`, { redirect: 'manual' });
+    expect(racine.status).toBe(302);
+    expect(racine.headers.get('location')).toBe('/app/');
+    for (const ancienne of ['/demande', '/direction', '/activation']) expect((await get(ancienne)).status).toBe(404);
+    for (const retiree of ['/api/licences', '/api/activations']) expect((await get(retiree)).status).toBe(404);
+    expect((await get('/api/suivi')).status).toBe(401);
     expect((await get('/healthz')).status).toBe(200);
   });
 });

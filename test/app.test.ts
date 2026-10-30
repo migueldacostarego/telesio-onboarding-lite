@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertReady, loadConfig } from '../src/config';
 import { normalizePart, upnBase } from '../src/upn';
-import { EXT, EXT_CREATOR, EXT_LIC, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID, principal, setup } from './helpers/ctx';
+import { EXT, EXT_CREATOR, EXT_LIC, LICENSE_SKU, LICENSE_SKU_B, RH_ID, principal, setup } from './helpers/ctx';
 
 describe('API', () => {
   let ctx: ReturnType<typeof setup>;
@@ -332,26 +332,6 @@ describe('API', () => {
       const noAuth = await fetch(`${base}/api/demandes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
       expect(noAuth.status).toBe(401);
       expect((await post(valid(), { 'x-ms-client-principal': principal(['Autre']) })).status).toBe(403);
-    });
-  });
-
-  describe('GET /api/licences', () => {
-    it('liste libellé et unités libres (jamais négatives), sans le groupe', async () => {
-      const res = await fetch(`${base}/api/licences`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({
-        licences: [
-          { skuId: LICENSE_SKU, libelle: 'Business Premium', disponibles: 4 },
-          { skuId: LICENSE_SKU_B, libelle: 'Business Standard', disponibles: 3 },
-          { skuId: LICENSE_SKU_ZERO, libelle: 'Business Basic', disponibles: 0 },
-        ],
-      });
-      expect(ctx.graph.calls.filter((c) => c.path === '/subscribedSkus').length).toBeGreaterThan(0);
-    });
-
-    it('403 sans rôle RH', async () => {
-      const res = await fetch(`${base}/api/licences`, { headers: { 'x-ms-client-principal': principal(['Autre']) } });
-      expect(res.status).toBe(403);
     });
   });
 

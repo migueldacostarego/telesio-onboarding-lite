@@ -10,7 +10,6 @@ import express, { Router, type RequestHandler, type Response } from 'express';
  * Styles : 'self', plus un **nonce aléatoire par requête** sur index.html seulement : les composants modaux de Radix
  * (dialog, sheet, menu modal) verrouillent le défilement en créant un <style> à l'exécution, que le front marque avec ce nonce
  * (meta `csp-nonce`, voir web/src/lib/nonce.ts). Le nonce ne vaut que pour les styles : il n'autorise aucun script.
- * Les pages-coquilles de pages.ts gardent leur propre CSP.
  */
 const buildCsp = (styleSrc: string): string =>
   [
