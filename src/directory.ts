@@ -243,8 +243,10 @@ export class GraphDirectory implements Directory {
   constructor(private readonly client: Pick<Client, 'api'>) {}
 
   async search(q: string): Promise<DirectoryUser[]> {
-    // Les guillemets et antislashs sont retirés : ils sortiraient de la chaîne $search.
-    const term = q.replace(/["\\]/g, '');
+    // Le SDK Graph n'encode pas les paramètres : `&` ajouterait un paramètre, `#` couperait l'URL (filtre accountEnabled compris), `%22` deviendrait
+    // un guillemet. Liste blanche : lettres, chiffres, espace, point, apostrophes, tiret et arobase (noms, adresses).
+    const term = q.replace(/[^\p{L}\p{N} .'’@-]/gu, '').replace(/\s+/g, ' ').trim();
+    if (term.length < 2) return [];
     try {
       const res = await this.client
         .api('/users')

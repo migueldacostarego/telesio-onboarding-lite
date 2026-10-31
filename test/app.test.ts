@@ -399,6 +399,32 @@ describe('API', () => {
       expect(call.headers.ConsistencyLevel).toBe('eventual');
     });
 
+    it('le terme ne peut pas injecter de paramètre OData : le SDK n’encode pas, & # % $ = + sont retirés', async () => {
+      ctx.graph.calls.length = 0;
+      // Sans assainissement : &$filter=… ajoute un paramètre, # coupe le reste de l'URL (dont le filtre accountEnabled) et %22 devient un guillemet.
+      const q = "ab%22&$filter=department eq 'X'#+";
+      const res = await fetch(`${base}/api/annuaire?q=${encodeURIComponent(q)}`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
+      expect(res.status).toBe(200);
+      const call = ctx.graph.calls[0]!;
+      expect(call.search).toBe(`"displayName:ab22filterdepartment eq 'X'" OR "mail:ab22filterdepartment eq 'X'"`);
+      expect(call.search).not.toMatch(/[&#%$=+]/);
+      expect(call.filter).toBe('accountEnabled eq true');
+    });
+
+    it('un nom avec accent ou apostrophe typographique reste cherchable', async () => {
+      ctx.graph.calls.length = 0;
+      await fetch(`${base}/api/annuaire?q=${encodeURIComponent('Éloïse D’Artagnan-Le Gall')}`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
+      expect(ctx.graph.calls[0]!.search).toBe('"displayName:Éloïse D’Artagnan-Le Gall" OR "mail:Éloïse D’Artagnan-Le Gall"');
+    });
+
+    it('un terme réduit à rien par l’assainissement ne part pas vers Graph', async () => {
+      ctx.graph.calls.length = 0;
+      const res = await fetch(`${base}/api/annuaire?q=${encodeURIComponent('&&##')}`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([]);
+      expect(ctx.graph.calls).toEqual([]);
+    });
+
     it('400 si q est trop court', async () => {
       const res = await fetch(`${base}/api/annuaire?q=a`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
       expect(res.status).toBe(400);
