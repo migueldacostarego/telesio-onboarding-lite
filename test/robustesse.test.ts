@@ -191,3 +191,22 @@ describe('verrou par compte : une action en cours', () => {
     await occupe;
   });
 });
+
+describe('acces.refuse : route auditée', () => {
+  const { h } = suite();
+  const refus = () => h.ctx.events.filter((e) => e.action === 'acces.refuse');
+
+  it('un identifiant qui n’est pas un GUID n’est pas écrit tel quel dans l’audit (texte de l’appelant, longueur libre)', async () => {
+    const junk = 'x'.repeat(3000);
+    const res = await h.callRh('POST', `/api/demandes/${junk}/valider`);
+    expect(res.status).toBe(403); // le droit est contrôlé avant l'identifiant
+    expect(refus()[0]).toMatchObject({ route: 'POST /api/demandes/:id/valider', reason: 'droit_manquant' });
+    expect(JSON.stringify(h.ctx.events)).not.toContain('xxxx');
+  });
+
+  it('un GUID est conservé (il identifie la cible du refus)', async () => {
+    const id = 'cccccccc-0000-4000-8000-0000000000c1';
+    await h.callRh('POST', `/api/demandes/${id}/valider`);
+    expect(refus()[0]).toMatchObject({ route: `POST /api/demandes/${id}/valider` });
+  });
+});

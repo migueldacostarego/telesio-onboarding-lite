@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import type { Audit } from './audit';
+import { GUID_RE } from './validation';
 
 export interface Principal {
   /** objectId Entra de l'appelant. */
@@ -66,7 +67,9 @@ interface Denial {
 /** Authentifie via Easy Auth, puis applique `check` ; pose le principal dans res.locals. */
 function guard(opts: GuardOpts, check: (p: Principal) => Promise<Denial | null>): RequestHandler {
   return async (req, res, next) => {
-    const route = `${req.method} ${req.baseUrl}${req.path}`;
+    // Les gardes passent avant la validation de l'id : un id qui n'est pas un GUID est du texte de l'appelant (longueur libre), il n'entre pas dans l'audit.
+    const chemin = `${req.baseUrl}${req.path}`.replace(/(\/demandes\/)([^/]+)/, (_m, debut: string, id: string) => (GUID_RE.test(id) ? debut + id : `${debut}:id`));
+    const route = `${req.method} ${chemin}`;
     const deny = (d: Denial, actor?: string) => {
       opts.audit.track({ action: 'acces.refuse', outcome: 'refuse', route, actor, reason: d.reason, ...d.extra });
       res.status(d.status).json({ error: d.error, ...(d.code ? { code: d.code } : {}) });
