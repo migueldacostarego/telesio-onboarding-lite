@@ -5,11 +5,12 @@ Ce journal est mis à jour après chaque étape : une nouvelle session peut repr
 
 ## Reprise (état courant)
 
-- Étape 1 (lecture et architecture) : faite.
-- Étape 2 (audit ECC) : faite (trois revues, constats en section 2).
-- Étape 3 (corrections critiques et hautes) : H1 corrigé ; reste H3 (error boundary front). Moyennes backend corrigées (S1 à S7).
-- Étapes 4 à 6 : à faire (tests manquants, nettoyage, synthèse).
-- Référence de départ : lint, typecheck et tests verts (serveur 276 tests, front 302 tests).
+- Étapes 1 (lecture, architecture), 2 (audit ECC), 3 (corrections critiques et hauts), 4 (tests) et 5 (nettoyage) : faites pour ce qui est listé en sections 3 et 4. La synthèse (étape 6) est en section 6.
+- Vérifié depuis la racine, comme la CI : `npm run build`, `npm run lint`, `npm test` verts. Tests : serveur 312 (276 au départ), front 308 (302 au départ).
+- Reste, par valeur décroissante : M13 (session expirée qui démonte la boîte du mot de passe), accessibilité (M14), tests de détail et du front (section 4), revue ECC du diff de cette branche contre `main` (non faite : les revues ECC ci-dessus portent sur le code de départ).
+- Non refait : le contrôle Chrome de la CSP derrière le vrai routeur (règle du projet après tout ajout de composant). `LimiteErreur` n'utilise que `Alert` et `Button`, déjà présents, et n'ajoute ni `<style>` ni script ni `style` inline ; le contrôle reste à faire avant fusion.
+- Non vérifié de bout en bout : la coupure de l'auto-collecte (S1). Le test lit `parseConfig()` ; rien ne prouve ici que `trackEvent` et `trackMetric` atteignent toujours Application Insights avec ces options. À contrôler sur `test` après le prochain déploiement : `customEvents` continue d'arriver, `requests` et `dependencies` restent vides pour les nouvelles lignes.
+- PR : voir plus bas (URL ajoutée après ouverture).
 
 ## Règles de la session
 
@@ -64,7 +65,7 @@ Aucun.
 |---|---|---|
 | H1 | Auto-collecte Application Insights active par défaut (`applicationinsights` 3.17 : HTTP, SDK Azure, exceptions, performance, mesures en direct). Les URL (`/api/annuaire?q=<nom>`, filtres Graph avec UPN) partent dans `requests` et `dependencies`, contrairement à ce que disaient le README et `src/audit.ts`. Défauts confirmés par `parseConfig()`. L'effet réel en production n'est pas vérifiable ici : contrôler `requests` et `dependencies` dans Log Analytics et purger si besoin. | corrigé (S1) |
 | H2 | L'identité d'apply de la CI porte `AppRoleAssignment.ReadWrite.All` (`scripts/bootstrap-oidc.sh`) : elle peut s'accorder n'importe quel rôle Graph (tier 0), et tout merge sur `main` lance un apply sur `dev` sans relecteur. Seule la discipline « ne jamais fusionner sans accord » protège. | à faire (hors périmètre : pas d'action tenant), voir 4 |
-| H3 | Front : aucun error boundary. Un chunk manquant après redéploiement (formulaire « Nouvelle demande ») ou une réponse `/api/moi` sans `droits` donne une page blanche, boîte du mot de passe temporaire comprise. | à faire |
+| H3 | Front : aucun error boundary. Un chunk manquant après redéploiement (formulaire « Nouvelle demande ») ou une réponse `/api/moi` sans `droits` donne une page blanche, boîte du mot de passe temporaire comprise. | corrigé (S8) |
 
 ### Moyenne
 
@@ -83,10 +84,11 @@ Aucun.
 | M11 | Compte Actif bloqué si l'arrivant change son mot de passe moins de 60 s après la remise (marge `MARGE_REMISE_MS` mesurée sur la date posée avant la réinitialisation) : jamais Terminé, jusqu'à une régénération. | à faire (compromis à trancher) |
 | M12 | Homonymes : le motif `{nom} {prenom}` fait partager le dossier SharePoint de deux personnes de même nom (dossier existant réutilisé). Déjà mentionné dans le README ; à traiter avant la prod. | décision D4 |
 | M13 | Front : session expirée en arrière-plan (`SessionExpired`) démonte la boîte du mot de passe temporaire, contredit DECISIONS-FRONT. | à faire |
-| M14 | Front, accessibilité : contrastes (texte secondaire sur fond d'accent environ 4,35:1 ; bordures de champs et focus sous 3:1), perte du focus après action ou fermeture de boîte, pas de changement de titre ni de focus à la navigation, zones `role="status"` montées déjà remplies, champs obligatoires non signalés, en-tête collant qui masque le focus. | à faire |
+| M14 | Front, accessibilité (**non traité**, seuls le lien https et le focus de fenêtre de la liste « Basse » ont été corrigés) : contrastes (texte secondaire sur fond d'accent environ 4,35:1 ; bordures de champs et focus sous 3:1), perte du focus après action ou fermeture de boîte, pas de changement de titre ni de focus à la navigation, zones `role="status"` montées déjà remplies, champs obligatoires non signalés, en-tête collant qui masque le focus. | à faire |
 
 ### Basse
 
+- Corrigé dans la liste ci-dessous : `createur` filtré par `GUID_RE` (S9), route d'audit `acces.refuse` (S14), code mort `setExtension` et `STATUTS` de `config.ts`, doublon `GUID_RE`, casts d'`activation.ts`, commentaire `MAX_COMPTES`, apostrophe de config (S11), lien https et focus de fenêtre côté front (S12), quatre passages du README (S13). Restent :
 - Back : `demande.auto_approbation` tracé avant l'issue de l'action (sur-déclaration) ; régénération qui écrit la date de remise avant `resetPassword` (compromis assumé, B1 de la revue) ; `MAX_COMPTES` de la terminaison (commentaire inexact, `listByStatut` déjà plafonné à 1000, `tronque` ignoré) ; SIGTERM n'attend pas le passage en cours ; branche inatteignable dans `createDemande` ; messages d'erreur incohérents (`Activation impossible` pour terminer et regenerer, 503 contre 409 pour un SKU absent, apostrophe droite dans un message de config, 413 rendu « Requête invalide ») ; verrou sans délai maximal ; `createur` non filtré par `GUID_RE` avant `getDisplayName` ; route d'audit `acces.refuse` construite sur le chemin brut.
 - Back, qualité : code mort (`Directory.setExtension`, `STATUTS` et `StatutOnboarding` de `config.ts`) ; duplication (`GUID_RE`, horloge et `sleep` par défaut, 503 licences en double, `str` et `slice(0, 10)` dans `directory.ts`) ; casts évitables (`activation.ts` : `refuse` sans `: never`).
 - Dépendances : `@azure/msal-node` 6.0.1 (avis haute, flux « authorization code » non utilisé ici : identité managée seulement) ; correctif dans `@azure/identity` 4.14.1, publié le 2026-10-29, applicable à partir du 2026-11-05 (règle des 7 jours) ; `minimatch` (outillage de lint, dev seulement, 11 avis modérés racine, 12 côté `web`).
@@ -112,25 +114,34 @@ Commits de la branche `audit/ecc-2026-10-31`, tous avec lint, typecheck et tests
 | S5 | `36a4930` | Plafond de 24 h pour `TERMINAISON_INTERVAL_MS` (test, README, `.env.example`) |
 | S4 | `054bbfd` | Lectures Graph des Terminé bornées à 5 (`mapLimit` exporté, `maplimit.test.ts`) |
 | S2 | `a887f5a` | Liste blanche du terme de recherche annuaire (3 tests) |
-| S1 | `54b3490` | Auto-collecte Application Insights coupée (`audit.test.ts`) |
+| S1 | `54b3490` | Auto-collecte Application Insights coupée (`audit.test.ts` ; effet de bout en bout non vérifié, voir Reprise) |
+| S8 | `56b1c1e` | Front : `LimiteErreur` autour du formulaire chargé à la demande et des pages (les boîtes survivent), forme de `/api/moi` vérifiée (5 tests) |
+| S9 | `d6b8c91` | Le créateur lu dans l'extension n'est un chemin Graph que s'il est un objectId (1 test) |
+| S10 | `c48473d` | 14 tests : garde-fous d'activation, échecs partiels, régénération en échec, statut en échec à la validation, création refusée, annuaire, verrou |
+| S11 | `c9c4872` | Nettoyage : code mort, `GUID_RE` partagé, casts évités, commentaire de la terminaison, apostrophe de config |
+| S12 | `f08a57e` | Front : lien du dossier SharePoint seulement en https (1 test), pas de relance de l'annuaire au focus |
+| S13 | `fc94f9e` | README : auto-collecte coupée, auto-approbation, prérequis TAP retiré, avis npm à jour |
+| S14 | `8912e1d` | L'audit `acces.refuse` n'écrit pas un identifiant qui n'est pas un GUID (2 tests) |
+| S15 | `348a286` | Tests de la terminaison : revérification incomplète, auteur `systeme` de l'historique |
 
 ## 4. Reste à faire
 
-Voir aussi « Constats » (statut « à faire »). Cas de test manquants identifiés par la revue backend (par priorité) :
+Voir aussi « Constats » (statut « à faire »). Cas de test encore manquants (la revue backend en listait 15 ; sont faits : garde-fous d'activation, échecs `groupe_arrivants` et `activation_date`, régénération en échec, statut en échec à la validation, création refusée par manager désactivé, homonymes et licences, annuaire trop long, verrou sur `valider`, `activer` et `regenerer`, terminaison revérifiée et auteur `systeme`) :
 
-1. Régénération en échec (`passwordPatch`) : 502, aucun mot de passe, historique et date de remise inchangés (à décider, B1).
-2. Échec de `activation_date`, de `groupe_arrivants`, de `activation_compte` à l'activation ; reprise d'`activer` sur compte déjà activé.
-3. Garde-fous d'activation : `date_arrivee_absente`, `compte_desactive` (régénération), `deja_actif`.
-4. Marge de 60 s : fige le comportement actuel (M11).
-5. Terminaison : revérification incomplète (`ignores`), historique `systeme`, `stop()` pendant un passage.
-6. Création : 20 collisions d'UPN, échec `listSkuAvailability`, manager désactivé, deux créations simultanées du même acteur.
-7. Validation : échec du groupe des arrivants, échec de l'écriture du statut après licence, échec de lecture de licence.
-8. Détail : 502 `detail_lecture`, états de licence `en_cours`, `erreur`, `inconnu`, SKU retiré, auteur supprimé.
-9. Annuaire : `q` trop long, échec Graph tracé sans le terme, erreur 500 du gestionnaire sans détail.
-10. Verrou `action_en_cours` sur `valider`, `activer`, `regenerer`.
-11. Front : perte du mot de passe sur 401, error boundary, focus après action, double soumission, relecture à 5 s depuis le détail, lien de dossier non https, focus de fenêtre.
+1. Détail : 502 `detail_lecture`, états de licence `en_cours`, `erreur`, `inconnu`, SKU retiré, auteur supprimé.
+2. Marge de 60 s : fige le comportement actuel (M11), à inverser si la marge change.
+3. Validation : échec du groupe des arrivants (sans casser le groupe de licence : prévoir un échec ciblé dans la fausse API), échec de lecture de licence.
+4. Création : deux demandes simultanées du même acteur (verrou `creation:`), échec de `getUser` et de `upnTaken`, 404 du manager après tous les essais.
+5. Suivi : liste des dossiers coupée au plafond de pages, nom de dossier impossible à former.
+6. Gestionnaire d'erreurs : une exception non `ServiceError` donne 500 sans détail.
+7. Front : perte du mot de passe sur 401 (M13), focus après action et fermeture de boîte, double soumission (double clic), relecture à 5 s depuis le détail, `queryClient.clear()` qui vide aussi `synchro.ts`, focus de fenêtre sans requête d'annuaire, alerte de création 502 visible.
+8. E2E derrière le vrai routeur Express avec une fausse API : aucun `securitypolicyviolation` ni message console (aujourd'hui manuel, règle du projet).
 
-Infra, hors périmètre de cette session (aucune action tenant) : retirer `AppRoleAssignment.ReadWrite.All` de l'identité d'apply ou protéger `dev` par relecteurs obligatoires et branche `main` protégée (H2) ; Contributor limité à un groupe de ressources (M7) ; `worker_count = 1` explicite ; `local_authentication_disabled` sur Application Insights ; vérifier dans Log Analytics ce que l'auto-collecte a déjà enregistré (H1) et purger si besoin.
+Front, à faire (revue React) : M13 (garder la boîte du mot de passe montée tant que `remise` n'est pas fermée avant de basculer sur `SessionExpired`, en gardant le vidage du cache après fermeture) ; accessibilité M14 (contrastes via `--muted-foreground`, `--input` et `--ring`, focus rendu à un élément stable après action, titre et focus à la navigation, `role="status"` persistant, `aria-required`, `scroll-padding-top`) ; messages d'erreur traduits (clés et étapes brutes) ; `jsx-a11y` dans le lint ; `ui/sheet.tsx` inutilisé.
+
+Back, à faire : M11 (marge de 60 s), régénération qui écrit la date avant le mot de passe (B1), `demande.auto_approbation` tracé trop tôt, messages d'erreur à harmoniser (`Activation impossible`, 503 contre 409 pour un SKU absent, 413), délai maximal du verrou, `MAX_COMPTES` et `tronque` de la terminaison, passage en cours non attendu à l'arrêt, duplications restantes (horloge et `sleep` par défaut, 503 licences en double, `str` et `slice(0, 10)` de `directory.ts`).
+
+Infra, hors périmètre de cette session (aucune action tenant) : retirer `AppRoleAssignment.ReadWrite.All` de l'identité d'apply ou protéger `dev` par relecteurs obligatoires et branche `main` protégée (H2) ; Contributor limité à un groupe de ressources (M7) ; `worker_count = 1` explicite ; `local_authentication_disabled` sur Application Insights ; vérifier dans Log Analytics ce que l'auto-collecte a déjà enregistré sur `test` et `dev` (H1) et purger si besoin ; README (tableau des permissions) : « rôle RH » alors que la direction active aussi.
 
 ## 5. Décisions
 
@@ -145,4 +156,31 @@ Infra, hors périmètre de cette session (aucune action tenant) : retirer `AppRo
 
 ## 6. Synthèse
 
-(à compléter en fin de session)
+### Prêt pour la production (côté code)
+
+- Autorisations : droits calculés côté serveur, gardes avant toute validation d'identifiant, 503 sans Easy Auth, aucun contournement trouvé.
+- Entrées : validation stricte, CSRF par `jsonOnly`, corps limité à 16 ko, plus l'injection de paramètres OData de l'annuaire corrigée (S2).
+- Navigateur : CSP stricte avec nonce, en-têtes `nosniff`, `Referrer-Policy`, HSTS et CORP (S6), lien de dossier https seulement (S12), plus de page blanche (S8).
+- Données personnelles : journaux sans nom ni UPN (relu et testé), auto-collecte de la télémétrie coupée (S1, à vérifier de bout en bout, voir Reprise), mot de passe temporaire jamais tracé ni mis en cache.
+- Robustesse : reprises après échec partiel testées, `reprendre` possible après une activation partielle (S3), lectures Graph bornées (S4), plafond de la tâche de terminaison (S5).
+- Qualité : 312 tests serveur et 308 tests front verts, build, lint et typecheck verts, code mort retiré.
+
+### Bloque la migration vers le vrai tenant
+
+1. **Identité d'apply de la CI** : `AppRoleAssignment.ReadWrite.All` (H2) et Contributor sur tout l'abonnement (M7). Un merge sur `main` applique `dev` sans relecteur : exiger des relecteurs sur l'environnement `dev`, protéger `main`, ou sortir les affectations de rôle de l'apply automatique.
+2. **Statut en extension** : écrivable par tout administrateur d'utilisateurs, et les actions ne vérifient pas `createurOnboarding` (M8). Mettre les comptes d'onboarding dans une unité administrative à gestion restreinte et décider de l'exigence du créateur (D5).
+3. **Télémétrie** : contrôler dans Log Analytics ce que l'auto-collecte a déjà enregistré sur `test` et `dev` (noms, UPN dans `requests` et `dependencies`) et purger ; confirmer que `customEvents` arrive toujours après le déploiement de S1.
+4. **Une seule instance** : fixer `worker_count = 1` (verrou et tâche de terminaison en mémoire), ou prévoir un verrou partagé.
+5. **Homonymes** : décider du motif de nom de dossier (ajouter `{id}`) ou du refus en 409 (D4).
+6. **Parcours complet sur `test`** avec une vraie session sur `/app` : toujours pas fait (CLAUDE.md), ainsi que le contrôle Chrome de la CSP après S8.
+7. **Décisions produit ouvertes** : auto-approbation et séparation des tâches (D2), adresses libres (D6), marge de 60 s (M11), session expirée et boîte du mot de passe (M13).
+8. **Dépendances** : `@azure/identity` 4.14.1 à partir du 2026-11-05 (avis msal-node, flux non utilisé ici).
+9. **Prod** : `upn_domain`, rôles et SharePoint des `tfvars` de prod encore vides.
+
+### Recommandations prioritaires
+
+1. Traiter H2 et M7 (aucun changement de code, mais ce sont les deux risques de plus fort impact).
+2. Déployer sur `test`, puis vérifier la télémétrie (S1) et parcourir `/app` avec une vraie session.
+3. Corriger M13 puis l'accessibilité (contrastes et focus), avec `jsx-a11y` au lint.
+4. Trancher les décisions D2, D4, D5, D6 et M11 avant d'ouvrir le vrai tenant.
+5. Après le 2026-11-05 : `@azure/identity` 4.14.1 (en vérifiant `npm audit`).
