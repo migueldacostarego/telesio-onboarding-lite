@@ -6,8 +6,9 @@ Ce journal est mis à jour après chaque étape : une nouvelle session peut repr
 ## Reprise (état courant)
 
 - Étape 1 (lecture et architecture) : faite.
-- Étape 2 (audit ECC) : trois revues en cours (sécurité et Terraform, qualité backend et tests, front React).
-- Étapes 3 à 6 : à faire.
+- Étape 2 (audit ECC) : faite (trois revues, constats en section 2).
+- Étape 3 (corrections critiques et hautes) : H1 corrigé ; reste H3 (error boundary front). Moyennes backend corrigées (S1 à S7).
+- Étapes 4 à 6 : à faire (tests manquants, nettoyage, synthèse).
 - Référence de départ : lint, typecheck et tests verts (serveur 276 tests, front 302 tests).
 
 ## Règles de la session
@@ -51,19 +52,96 @@ App Service Linux (Node 22) avec identité managée affectée par l'utilisateur,
 
 ## 2. Constats
 
-(à compléter après les revues)
+Sources : trois revues ECC en lecture seule (agents `security-reviewer`, `typescript-reviewer`, `react-reviewer`), dont chaque constat retenu ici a été relu dans le code (ou reproduit) avant correction. Statuts : **corrigé** (commit en section 3), **à faire**, **décision** (voir section 5).
+
+### Critique
+
+Aucun.
+
+### Haute
+
+| # | Constat | Statut |
+|---|---|---|
+| H1 | Auto-collecte Application Insights active par défaut (`applicationinsights` 3.17 : HTTP, SDK Azure, exceptions, performance, mesures en direct). Les URL (`/api/annuaire?q=<nom>`, filtres Graph avec UPN) partent dans `requests` et `dependencies`, contrairement à ce que disaient le README et `src/audit.ts`. Défauts confirmés par `parseConfig()`. L'effet réel en production n'est pas vérifiable ici : contrôler `requests` et `dependencies` dans Log Analytics et purger si besoin. | corrigé (S1) |
+| H2 | L'identité d'apply de la CI porte `AppRoleAssignment.ReadWrite.All` (`scripts/bootstrap-oidc.sh`) : elle peut s'accorder n'importe quel rôle Graph (tier 0), et tout merge sur `main` lance un apply sur `dev` sans relecteur. Seule la discipline « ne jamais fusionner sans accord » protège. | à faire (hors périmètre : pas d'action tenant), voir 4 |
+| H3 | Front : aucun error boundary. Un chunk manquant après redéploiement (formulaire « Nouvelle demande ») ou une réponse `/api/moi` sans `droits` donne une page blanche, boîte du mot de passe temporaire comprise. | à faire |
+
+### Moyenne
+
+| # | Constat | Statut |
+|---|---|---|
+| M1 | Injection de paramètres OData dans `$search` (`GraphDirectory.search`) : le SDK Graph n'encode pas, `&` ajoute un paramètre, `#` coupe l'URL (le filtre `accountEnabled` disparaît). Reproduit hors réseau. Droit requis : `creer`. | corrigé (S2) |
+| M2 | `reprendre` proposé par le suivi mais refusé en 409 pour un compte Validé déjà activé (activation partielle : compte activé, puis échec du mot de passe ou du statut). | corrigé (S3) |
+| M3 | `GET /api/suivi` : lectures Graph des comptes Terminé sans borne de parallélisme (jusqu'à 1000 GET simultanés par appel, relu toutes les 30 s par onglet). | corrigé (S4) |
+| M4 | `TERMINAISON_INTERVAL_MS` sans borne haute : au-delà de 2^31-1 ms, `setTimeout` se rabat sur 1 ms (boucle serrée contre Graph). | corrigé (S5) |
+| M5 | En-têtes de sécurité absents hors CSP du front (`nosniff`, `Referrer-Policy`, HSTS, CORP). | corrigé (S6) |
+| M6 | `body-parser` 2.3.0 (avis DoS sur corps compressé, haute) dans le verrou. Atténué par `inflate:false`. | corrigé (S7) |
+| M7 | Contributor sur tout l'abonnement pour l'identité d'apply (`bootstrap-oidc.sh`) : équivaut, via Kudu ou l'affectation d'identité, aux droits Graph de l'identité managée ; dev et test partagent l'abonnement. | à faire, voir 4 |
+| M8 | Statut `statutOnboarding` écrivable par un administrateur d'utilisateurs, et `activer`, `regenerer`, `valider`, `refuser` ne vérifient pas que le compte porte `createurOnboarding`. Déjà connu (avant la prod), durcissement possible. | décision D5 |
+| M9 | Pas de séparation des tâches : Direction crée, valide, active (auto-approbation tracée, pas bloquée). | décision D2 |
+| M10 | Adresse professionnelle libre (`comptabilite@`, `paie@`) sans lien avec le nom. | décision D6 |
+| M11 | Compte Actif bloqué si l'arrivant change son mot de passe moins de 60 s après la remise (marge `MARGE_REMISE_MS` mesurée sur la date posée avant la réinitialisation) : jamais Terminé, jusqu'à une régénération. | à faire (compromis à trancher) |
+| M12 | Homonymes : le motif `{nom} {prenom}` fait partager le dossier SharePoint de deux personnes de même nom (dossier existant réutilisé). Déjà mentionné dans le README ; à traiter avant la prod. | décision D4 |
+| M13 | Front : session expirée en arrière-plan (`SessionExpired`) démonte la boîte du mot de passe temporaire, contredit DECISIONS-FRONT. | à faire |
+| M14 | Front, accessibilité : contrastes (texte secondaire sur fond d'accent environ 4,35:1 ; bordures de champs et focus sous 3:1), perte du focus après action ou fermeture de boîte, pas de changement de titre ni de focus à la navigation, zones `role="status"` montées déjà remplies, champs obligatoires non signalés, en-tête collant qui masque le focus. | à faire |
+
+### Basse
+
+- Back : `demande.auto_approbation` tracé avant l'issue de l'action (sur-déclaration) ; régénération qui écrit la date de remise avant `resetPassword` (compromis assumé, B1 de la revue) ; `MAX_COMPTES` de la terminaison (commentaire inexact, `listByStatut` déjà plafonné à 1000, `tronque` ignoré) ; SIGTERM n'attend pas le passage en cours ; branche inatteignable dans `createDemande` ; messages d'erreur incohérents (`Activation impossible` pour terminer et regenerer, 503 contre 409 pour un SKU absent, apostrophe droite dans un message de config, 413 rendu « Requête invalide ») ; verrou sans délai maximal ; `createur` non filtré par `GUID_RE` avant `getDisplayName` ; route d'audit `acces.refuse` construite sur le chemin brut.
+- Back, qualité : code mort (`Directory.setExtension`, `STATUTS` et `StatutOnboarding` de `config.ts`) ; duplication (`GUID_RE`, horloge et `sleep` par défaut, 503 licences en double, `str` et `slice(0, 10)` dans `directory.ts`) ; casts évitables (`activation.ts` : `refuse` sans `: never`).
+- Dépendances : `@azure/msal-node` 6.0.1 (avis haute, flux « authorization code » non utilisé ici : identité managée seulement) ; correctif dans `@azure/identity` 4.14.1, publié le 2026-10-29, applicable à partir du 2026-11-05 (règle des 7 jours) ; `minimatch` (outillage de lint, dev seulement, 11 avis modérés racine, 12 côté `web`).
+- CI/CD : `id-token: write` au niveau du workflow (le job `build` n'en a pas besoin), `persist-credentials` non désactivé, `npm ci` sans `--ignore-scripts`, pas de `timeout-minutes`, sortie Terraform interpolée dans un `run`.
+- Terraform : Application Insights sans `local_authentication_disabled`, `worker_count` non fixé alors que verrou et tâche supposent une instance, `User.Read.All` redondant avec `User.ReadWrite.All`, grant SharePoint `write` sur tout le site, compte d'état ouvert aux réseaux.
+- Front : relecture à 5 s seulement depuis la liste ; `synchro.ts` garde des lignes (noms, UPN) après `queryClient.clear()` ; `annuaire` et `disponibilite` relancés à chaque focus de fenêtre ; lien du dossier SharePoint sans contrôle de schéma ; messages d'erreur techniques (clés et étapes brutes) ; erreur réseau sur Activer ou Régénérer sans mention que l'action a pu aboutir ; création sans effet sur un 202 ; titres des boîtes vides pendant l'animation de fermeture ; libellés incohérents (« Email pro », « E-mail », « email », « synchronisation… ») ; message « Demande créée » perdu à la navigation ; `ui/sheet.tsx` inutilisé ; `jsx-a11y` absent du lint.
+- Documentation : README « sauf les siennes » contredit l'auto-approbation autorisée ; README « rôle RH » alors que la direction peut aussi activer ; README cite encore le TAP comme prérequis ; avis body-parser du README périmé.
+- Couverture : voir la liste des cas manquants en section 4.
+
+### Vérifié sans défaut (à ne pas « corriger »)
+
+Authz (`droitsDe`, gardes avant validation de `:id`, 503 sans Easy Auth, contournement de dev ignoré en production) ; IDOR (GUID ancré, 404 hors demandes d'onboarding, `valider` et `refuser` exigent statut et compte désactivé) ; injection `upnTaken`, `listByStatut`, chemins SharePoint ; CSRF (`jsonOnly`, pas de CORS) ; CSP stricte avec nonce, `index.html` jamais en cache ; mot de passe temporaire (CSPRNG, environ 67 bits, jamais tracé, `no-store`, jamais dans cache, URL ni stockage côté front) ; journaux sans nom ni UPN (relu par la revue et par les tests) ; course entre la tâche de terminaison et les routes (verrou partagé, revérification sous verrou) ; minuteur de terminaison nettoyé ; Easy Auth et App Service durcis (connexion obligatoire, sauf `/healthz`, FTP et basic auth coupés, TLS 1.2) ; actions GitHub épinglées par SHA.
 
 ## 3. Corrigé
 
-(à compléter)
+Commits de la branche `audit/ecc-2026-10-31`, tous avec lint, typecheck et tests verts :
+
+| Réf. | Commit | Sujet |
+|---|---|---|
+| S7 | `7e50987` | body-parser 2.4.0 dans le verrou (publié le 2026-10-22, plus de 7 jours) |
+| S6 | `2191c16` | En-têtes `nosniff`, `Referrer-Policy`, HSTS, CORP sur toutes les réponses (test `entetes.test.ts`) |
+| S3 | `0597273` | `reprendre` accepte un compte Validé déjà activé (2 tests) |
+| S5 | `36a4930` | Plafond de 24 h pour `TERMINAISON_INTERVAL_MS` (test, README, `.env.example`) |
+| S4 | `054bbfd` | Lectures Graph des Terminé bornées à 5 (`mapLimit` exporté, `maplimit.test.ts`) |
+| S2 | `a887f5a` | Liste blanche du terme de recherche annuaire (3 tests) |
+| S1 | `54b3490` | Auto-collecte Application Insights coupée (`audit.test.ts`) |
 
 ## 4. Reste à faire
 
-(à compléter)
+Voir aussi « Constats » (statut « à faire »). Cas de test manquants identifiés par la revue backend (par priorité) :
+
+1. Régénération en échec (`passwordPatch`) : 502, aucun mot de passe, historique et date de remise inchangés (à décider, B1).
+2. Échec de `activation_date`, de `groupe_arrivants`, de `activation_compte` à l'activation ; reprise d'`activer` sur compte déjà activé.
+3. Garde-fous d'activation : `date_arrivee_absente`, `compte_desactive` (régénération), `deja_actif`.
+4. Marge de 60 s : fige le comportement actuel (M11).
+5. Terminaison : revérification incomplète (`ignores`), historique `systeme`, `stop()` pendant un passage.
+6. Création : 20 collisions d'UPN, échec `listSkuAvailability`, manager désactivé, deux créations simultanées du même acteur.
+7. Validation : échec du groupe des arrivants, échec de l'écriture du statut après licence, échec de lecture de licence.
+8. Détail : 502 `detail_lecture`, états de licence `en_cours`, `erreur`, `inconnu`, SKU retiré, auteur supprimé.
+9. Annuaire : `q` trop long, échec Graph tracé sans le terme, erreur 500 du gestionnaire sans détail.
+10. Verrou `action_en_cours` sur `valider`, `activer`, `regenerer`.
+11. Front : perte du mot de passe sur 401, error boundary, focus après action, double soumission, relecture à 5 s depuis le détail, lien de dossier non https, focus de fenêtre.
+
+Infra, hors périmètre de cette session (aucune action tenant) : retirer `AppRoleAssignment.ReadWrite.All` de l'identité d'apply ou protéger `dev` par relecteurs obligatoires et branche `main` protégée (H2) ; Contributor limité à un groupe de ressources (M7) ; `worker_count = 1` explicite ; `local_authentication_disabled` sur Application Insights ; vérifier dans Log Analytics ce que l'auto-collecte a déjà enregistré (H1) et purger si besoin.
 
 ## 5. Décisions
 
-(à compléter)
+- D1. Les corrections ne touchent que le code, les tests et la documentation : aucun changement d'infra (apply interdit, et un merge sur `main` déploierait `dev`).
+- D2. Auto-approbation : **non modifiée** (décision produit déjà prise et documentée). Recommandation : alerte Application Insights sur `demande.auto_approbation` et `demande.mdp_temporaire` hors horaires, ou second valideur quand `createur == acteur`.
+- D3. Dépendances : `@azure/identity` 4.14.1 non appliqué (publié il y a moins de 7 jours) ; à refaire à partir du 2026-11-05. Aucune dépendance ajoutée.
+- D4. Homonymes (M12) : non changé (modifier le motif de nom de dossier est une décision métier). Recommandation avant la prod : ajouter `{id}` au motif, ou refuser en 409 la première validation quand le dossier existe déjà (la reprise resterait idempotente).
+- D5. Exiger `createurOnboarding` sur toutes les actions (M8) casserait les comptes antérieurs à l'extension : non fait, à décider avec une migration.
+- D6. Adresse libre (M10) : non changé (le formulaire propose `prenom.nom`, la direction voit l'adresse). À décider : imposer le dérivé du nom ou une liste de noms réservés.
+- D7. Marge de 60 s (M11) : non changée, compromis entre faux positif (la remise elle-même) et blocage ; à trancher avec une relecture de `lastPasswordChangeDateTime` après `resetPassword`.
+- D8. Auto-collecte (H1) : coupée en réglant le client existant (`reglerTelemetrie`) plutôt qu'en changeant de mode d'initialisation, pour garder le chemin d'envoi déjà éprouvé en production.
 
 ## 6. Synthèse
 
