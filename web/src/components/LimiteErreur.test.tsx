@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LimiteErreur } from '@/components/LimiteErreur';
+import { Link, MemoryRouter, Route, Routes } from 'react-router';
+import { LimiteErreur, LimiteErreurParPage } from '@/components/LimiteErreur';
 
 function Casse(): never {
   throw new Error('détail interne avec une donnée : camille@exemple.test');
@@ -48,5 +49,28 @@ describe('LimiteErreur', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Recharger la page' }));
     expect(reload).toHaveBeenCalledOnce();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('LimiteErreurParPage', () => {
+  beforeEach(() => void vi.spyOn(console, 'error').mockImplementation(() => {}));
+  afterEach(() => vi.restoreAllMocks());
+
+  it('une exception sur une page n’enferme pas la navigation : changer de page remonte la limite', async () => {
+    render(
+      <MemoryRouter initialEntries={['/cassee']}>
+        <Link to="/saine">Aller à la page saine</Link>
+        <LimiteErreurParPage message="Cette page n’a pas pu s’afficher.">
+          <Routes>
+            <Route path="/cassee" element={<Casse />} />
+            <Route path="/saine" element={<p>page saine</p>} />
+          </Routes>
+        </LimiteErreurParPage>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('Cette page n’a pas pu s’afficher.');
+    await userEvent.click(screen.getByRole('link', { name: 'Aller à la page saine' }));
+    expect(screen.getByText('page saine')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

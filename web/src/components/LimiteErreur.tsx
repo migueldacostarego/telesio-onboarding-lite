@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 
@@ -40,4 +41,13 @@ export class LimiteErreur extends Component<Props, { erreur: boolean }> {
       </>
     );
   }
+}
+
+/**
+ * Pour les pages : la limite repart à zéro à chaque changement d'adresse (clé = chemin). Sans cela, une exception de rendu sur une page
+ * garderait l'alerte affichée après un clic sur le logo ou « précédent », jusqu'au rechargement.
+ */
+export function LimiteErreurParPage(props: Props) {
+  const { pathname } = useLocation();
+  return <LimiteErreur key={pathname} {...props} />;
 }
