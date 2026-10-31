@@ -124,8 +124,8 @@ Commits de la branche `audit/ecc-2026-10-31`, tous avec lint, typecheck et tests
 | S13 | `fc94f9e` | README : auto-collecte coupée, auto-approbation, prérequis TAP retiré, avis npm à jour |
 | S14 | `8912e1d` | L'audit `acces.refuse` n'écrit pas un identifiant qui n'est pas un GUID (2 tests) |
 | S15 | `348a286` | Tests de la terminaison : revérification incomplète, auteur `systeme` de l'historique |
-| S16 | (voir `git log`) | Front : `LimiteErreurParPage`, la limite d'erreur des pages repart à zéro à chaque changement d'adresse (défaut de S8 relevé par la revue ECC du diff) |
-| S17 | (voir `git log`) | Liste blanche de recherche : garde `_` et les marques combinantes (défaut de S2 relevé par la revue du diff) ; tests : borne de 5 lectures du suivi, `valider` refusé sur un compte activé |
+| S16 | `3c85a22` | Front : `LimiteErreurParPage`, la limite d'erreur des pages repart à zéro à chaque changement d'adresse (défaut de S8 relevé par la revue ECC du diff) |
+| S17 | `e1e2802` | Liste blanche de recherche : garde `_` et les marques combinantes (défaut de S2 relevé par la revue du diff) ; tests : borne de 5 lectures du suivi, `valider` refusé sur un compte activé |
 
 ## 4. Reste à faire
 
