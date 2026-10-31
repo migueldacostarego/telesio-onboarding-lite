@@ -3,7 +3,7 @@ import { ServiceError } from '../src/demandes';
 import { loadConfig } from '../src/config';
 import { KeyedLock } from '../src/lock';
 import { ACTEUR_TERMINAISON, demarrerTerminaisonAuto, terminerComptesAcheves } from '../src/terminaison';
-import { ARRIVANTS_GROUP, EXT, EXT_ACT, RH_ID, listen, principal, setup } from './helpers/ctx';
+import { ARRIVANTS_GROUP, EXT, EXT_ACT, HISTORY, HISTORY_ENV, RH_ID, listen, principal, setup } from './helpers/ctx';
 
 // NOW (ctx) = 2026-10-27 10:00 UTC. Activation le 26 à 10:00 ; mot de passe changé plus de 60 s après la remise = complet.
 const ACTIVATION = '2026-10-26T10:00:00.000Z';
@@ -274,5 +274,26 @@ describe('les routes et la tâche partagent le même verrou', () => {
       await tenu;
       await srv.close();
     }
+  });
+});
+
+describe('terminerComptesAcheves : revérification et historique', () => {
+  it('l’onboarding n’est plus complet à la revérification (Authenticator retiré entre la lecture et l’écriture) : compte ignoré, groupe et statut intacts', async () => {
+    const { g, deps, ctx, actif, statut, ecritures, lock } = monter();
+    const id = actif('Revoque');
+    // 1re lecture (inspection de la liste) : inscrit ; 2e lecture (revérification par terminerOnboarding) : plus inscrit.
+    vi.spyOn(ctx.directory, 'hasAuthenticator').mockResolvedValueOnce(true).mockResolvedValue(false);
+    expect(await terminerComptesAcheves(deps, lock)).toEqual({ lus: 1, termines: 0, ignores: 1 });
+    expect(statut(id)).toBe('Actif');
+    expect(g.groups.get(ARRIVANTS_GROUP)!.has(id)).toBe(true);
+    expect(ecritures()).toEqual([]);
+    expect(ctx.events.some((e) => e.action === 'onboarding.termine_auto')).toBe(false);
+  });
+
+  it('avec l’historique configuré, la fin est datée avec l’auteur « systeme » (jamais un objectId de personne)', async () => {
+    const { g, deps, actif, lock } = monter(HISTORY_ENV);
+    const id = actif('Complet');
+    await terminerComptesAcheves(deps, lock);
+    expect(String(g.users.get(id)!.props[HISTORY.termine])).toMatch(/^systeme\|\d{4}-\d{2}-\d{2}T[\d:.]+Z$/);
   });
 });
