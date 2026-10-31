@@ -5,9 +5,10 @@ Ce journal est mis à jour après chaque étape : une nouvelle session peut repr
 
 ## Reprise (état courant)
 
+- Revue ECC du diff de la branche contre `main` : faite (agent `code-reviewer`), 1 constat moyen et 3 bas, tous corrigés (S16, S17). Aucun critique ni haut.
 - Étapes 1 (lecture, architecture), 2 (audit ECC), 3 (corrections critiques et hauts), 4 (tests) et 5 (nettoyage) : faites pour ce qui est listé en sections 3 et 4. La synthèse (étape 6) est en section 6.
-- Vérifié depuis la racine, comme la CI : `npm run build`, `npm run lint`, `npm test` verts. Tests : serveur 312 (276 au départ), front 308 (302 au départ).
-- Reste, par valeur décroissante : M13 (session expirée qui démonte la boîte du mot de passe), accessibilité (M14), tests de détail et du front (section 4), revue ECC du diff de cette branche contre `main` (non faite : les revues ECC ci-dessus portent sur le code de départ).
+- Vérifié depuis la racine, comme la CI : `npm run build`, `npm run lint`, `npm test` verts. Tests : serveur 315 (276 au départ), front 309 (302 au départ).
+- Reste, par valeur décroissante : M13 (session expirée qui démonte la boîte du mot de passe), accessibilité (M14), tests de détail et du front (section 4).
 - Non refait : le contrôle Chrome de la CSP derrière le vrai routeur (règle du projet après tout ajout de composant). `LimiteErreur` n'utilise que `Alert` et `Button`, déjà présents, et n'ajoute ni `<style>` ni script ni `style` inline ; le contrôle reste à faire avant fusion.
 - Non vérifié de bout en bout : la coupure de l'auto-collecte (S1). Le test lit `parseConfig()` ; rien ne prouve ici que `trackEvent` et `trackMetric` atteignent toujours Application Insights avec ces options. À contrôler sur `test` après le prochain déploiement : `customEvents` continue d'arriver, `requests` et `dependencies` restent vides pour les nouvelles lignes.
 - PR : https://github.com/migueldacostarego/telesio-onboarding-lite/pull/9 (ouverte, non fusionnée).
@@ -123,6 +124,8 @@ Commits de la branche `audit/ecc-2026-10-31`, tous avec lint, typecheck et tests
 | S13 | `fc94f9e` | README : auto-collecte coupée, auto-approbation, prérequis TAP retiré, avis npm à jour |
 | S14 | `8912e1d` | L'audit `acces.refuse` n'écrit pas un identifiant qui n'est pas un GUID (2 tests) |
 | S15 | `348a286` | Tests de la terminaison : revérification incomplète, auteur `systeme` de l'historique |
+| S16 | (voir `git log`) | Front : `LimiteErreurParPage`, la limite d'erreur des pages repart à zéro à chaque changement d'adresse (défaut de S8 relevé par la revue ECC du diff) |
+| S17 | (voir `git log`) | Liste blanche de recherche : garde `_` et les marques combinantes (défaut de S2 relevé par la revue du diff) ; tests : borne de 5 lectures du suivi, `valider` refusé sur un compte activé |
 
 ## 4. Reste à faire
 
@@ -163,7 +166,7 @@ Infra, hors périmètre de cette session (aucune action tenant) : retirer `AppRo
 - Navigateur : CSP stricte avec nonce, en-têtes `nosniff`, `Referrer-Policy`, HSTS et CORP (S6), lien de dossier https seulement (S12), plus de page blanche (S8).
 - Données personnelles : journaux sans nom ni UPN (relu et testé), auto-collecte de la télémétrie coupée (S1, à vérifier de bout en bout, voir Reprise), mot de passe temporaire jamais tracé ni mis en cache.
 - Robustesse : reprises après échec partiel testées, `reprendre` possible après une activation partielle (S3), lectures Graph bornées (S4), plafond de la tâche de terminaison (S5).
-- Qualité : 312 tests serveur et 308 tests front verts, build, lint et typecheck verts, code mort retiré.
+- Qualité : 315 tests serveur et 309 tests front verts, build, lint et typecheck verts, code mort retiré.
 
 ### Bloque la migration vers le vrai tenant
 
