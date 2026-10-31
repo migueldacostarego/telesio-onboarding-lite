@@ -10,7 +10,7 @@ Ce journal est mis à jour après chaque étape : une nouvelle session peut repr
 - Reste, par valeur décroissante : M13 (session expirée qui démonte la boîte du mot de passe), accessibilité (M14), tests de détail et du front (section 4), revue ECC du diff de cette branche contre `main` (non faite : les revues ECC ci-dessus portent sur le code de départ).
 - Non refait : le contrôle Chrome de la CSP derrière le vrai routeur (règle du projet après tout ajout de composant). `LimiteErreur` n'utilise que `Alert` et `Button`, déjà présents, et n'ajoute ni `<style>` ni script ni `style` inline ; le contrôle reste à faire avant fusion.
 - Non vérifié de bout en bout : la coupure de l'auto-collecte (S1). Le test lit `parseConfig()` ; rien ne prouve ici que `trackEvent` et `trackMetric` atteignent toujours Application Insights avec ces options. À contrôler sur `test` après le prochain déploiement : `customEvents` continue d'arriver, `requests` et `dependencies` restent vides pour les nouvelles lignes.
-- PR : voir plus bas (URL ajoutée après ouverture).
+- PR : https://github.com/migueldacostarego/telesio-onboarding-lite/pull/9 (ouverte, non fusionnée).
 
 ## Règles de la session
 
