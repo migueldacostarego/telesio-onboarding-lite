@@ -201,7 +201,6 @@ export interface Directory {
   /** extensions : attributs d'extension (nom complet -> valeur) posés à la création. */
   createUser(user: NewUser, extensions?: Record<string, string>): Promise<string>;
   setManager(userId: string, managerId: string): Promise<void>;
-  setExtension(userId: string, name: string, value: string): Promise<void>;
 }
 
 interface GraphErrorLike {
@@ -315,16 +314,8 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async setExtension(userId: string, name: string, value: string): Promise<void> {
-    try {
-      await this.client.api(`/users/${userId}`).patch({ [name]: value });
-    } catch (err) {
-      throw wrap(err);
-    }
-  }
-
   async listByStatut(ext: string, statut: string, hiredSince?: string, withNames = false, extras: readonly string[] = []) {
-    // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
+    // `ext` est validé à la config, `statut` vient de STATUTS (suivi.ts) : sûrs dans le filtre.
     // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
     // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
     try {

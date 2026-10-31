@@ -6,7 +6,11 @@ import type { KeyedLock } from './lock';
 /** « Acteur » des événements de la tâche : pas une personne, aucun objectId d'utilisateur. */
 export const ACTEUR_TERMINAISON = 'systeme:terminaison';
 
-/** Comptes Actif examinés par passage au plus (au-delà, le passage suivant reprend : 10 pages de 100 côté Graph). */
+/**
+ * Comptes Actif examinés par passage au plus. `listByStatut` lit déjà 10 pages de 100 au plus et le drapeau `tronque` n'est pas relu ici :
+ * au-delà de 1000 comptes Actif, les mêmes premiers comptes sont relus à chaque passage et les suivants ne sont pas examinés tant que
+ * ceux-là restent Actif (limite connue, très au-dessus du volume visé ; voir AUDIT.md).
+ */
 const MAX_COMPTES = 1000;
 
 export interface BilanTerminaison {

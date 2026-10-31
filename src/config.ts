@@ -1,6 +1,7 @@
 import { isValidTimeZone } from './dates';
 import { checkFolderPattern, DEFAULT_FOLDER_PATTERN } from './folder';
 import { TYPES_CONTRAT, type TypeContrat } from './typeContrat';
+import { GUID_RE } from './validation';
 
 
 export interface Config {
@@ -61,11 +62,7 @@ export interface LicenseOption {
 
 export type ReadyConfig = Config & { upnDomain: string; statusExtension: string };
 
-export const STATUTS = ['EnAttente', 'Validé', 'Refusé', 'Actif', 'Terminé'] as const;
-export type StatutOnboarding = (typeof STATUTS)[number];
-
 const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
-const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Ids Graph de site (host,guid,guid) et de drive (b!…) : insérés tels quels dans un chemin d'API.
 const GRAPH_ID_RE = /^[A-Za-z0-9!._,-]+$/;
 const EXTENSION_RE = /^extension_[0-9a-f]{32}_[A-Za-z0-9_]+$/i;
@@ -121,7 +118,7 @@ function parseLicenseByType(raw: string | undefined, licenses: LicenseOption[]):
   for (const type of TYPES_CONTRAT) {
     if (o[type] === undefined || o[type] === null) continue;
     const sku = typeof o[type] === 'string' ? (o[type] as string).trim().toLowerCase() : '';
-    if (!GUID_RE.test(sku)) throw new Error(`LICENCES_PAR_TYPE.${type} invalide (attendu : le skuId d'une licence de LICENSES)`);
+    if (!GUID_RE.test(sku)) throw new Error(`LICENCES_PAR_TYPE.${type} invalide (attendu : le skuId d’une licence de LICENSES)`);
     if (!licenses.some((l) => l.skuId === sku)) throw new Error(`LICENCES_PAR_TYPE.${type} : ce SKU ne figure pas dans LICENSES`);
     out[type] = sku;
   }
