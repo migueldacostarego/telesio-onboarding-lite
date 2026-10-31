@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { AppHeader } from '@/components/AppHeader';
+import { LimiteErreur } from '@/components/LimiteErreur';
 import { UserMenu, UserMenuSkeleton } from '@/components/UserMenu';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -81,11 +82,14 @@ export function App() {
     <Frame menu={<UserMenu user={moi.data} />}>
       {/* Liste, actions et boîtes de dialogue au-dessus des routes : la navigation ne perd aucun état (lib/contexteDemandes.ts). */}
       <FournisseurDemandes>
-        <Routes>
-          <Route index element={<Demandes />} />
-          <Route path="demandes/:id" element={<DetailDemande />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {/* La limite n'enveloppe que les pages : une exception de rendu ne démonte pas les boîtes (mot de passe temporaire compris). */}
+        <LimiteErreur message="Cette page n’a pas pu s’afficher. Rechargez-la ; si le problème persiste, contactez l’administrateur.">
+          <Routes>
+            <Route index element={<Demandes />} />
+            <Route path="demandes/:id" element={<DetailDemande />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </LimiteErreur>
       </FournisseurDemandes>
     </Frame>
   );

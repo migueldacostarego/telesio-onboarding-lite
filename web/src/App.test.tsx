@@ -41,6 +41,16 @@ describe('chargement de /api/moi', () => {
   });
 });
 
+describe('réponse /api/moi inattendue', () => {
+  it('sans `droits` : une erreur avec Réessayer, jamais une page blanche', async () => {
+    mockApi({ moi: { nom: 'Camille', email: null, roles: [] } });
+    renderApp();
+    expect(await screen.findByText('Erreur du serveur')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Réessayer' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Demandes' })).not.toBeInTheDocument();
+  });
+});
+
 describe('page Demandes', () => {
   it('affiche son titre et l’état vide, sans les cartes d’accueil', async () => {
     connecte();
