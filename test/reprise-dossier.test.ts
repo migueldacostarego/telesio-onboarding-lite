@@ -131,6 +131,23 @@ describe('POST /api/demandes/:id/reprendre', () => {
     expect(actions(await suivi('dir'), id)).toEqual(['activer']);
   });
 
+  it('compte Validé déjà activé (activation partielle après un échec de dossier) : proposée par le suivi et acceptée par la route', async () => {
+    // « Activer » a réussi à activer le compte puis échoué (mot de passe ou statut) : le compte est Validé, activé, sans dossier.
+    const id = g().addPending(EXT, { givenName: 'Partiel', surname: 'Test', statut: 'Validé', hireDate: '2026-10-20', enabled: true, extras: { [EXT_LIC]: LICENSE_SKU } });
+    expect(actions(await suivi('dir'), id)).toContain('reprendre');
+    const res = await h.call('POST', `/api/demandes/${id}/reprendre`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id, statut: 'Validé', dossier: { cree: true } });
+    expect(g().users.get(id)!.props[EXT]).toBe('Validé');
+  });
+
+  it('un compte activé hors Validé reste refusé (409) : le garde-fou ne vaut que pour reprendre un Validé', async () => {
+    const enAttente = g().addPending(EXT, { givenName: 'Active', surname: 'Test', statut: 'EnAttente', enabled: true, extras: { [EXT_LIC]: LICENSE_SKU } });
+    const actif = g().addPending(EXT, { givenName: 'Actif', surname: 'Test', statut: 'Actif', enabled: true, extras: { [EXT_LIC]: LICENSE_SKU } });
+    for (const id of [enAttente, actif]) expect((await h.call('POST', `/api/demandes/${id}/reprendre`)).status).toBe(409);
+    expect(ecritures()).toEqual([]);
+  });
+
   it('trace la reprise et le dossier avec l’objectId seulement', async () => {
     const id = compte('Sans');
     await h.call('POST', `/api/demandes/${id}/reprendre`);
