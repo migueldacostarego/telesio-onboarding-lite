@@ -246,7 +246,9 @@ describe('TERMINAISON_INTERVAL_MS', () => {
     expect(loadConfig({ ...base, TERMINAISON_INTERVAL_MS: '600000' }).terminaisonIntervalMs).toBe(600_000);
   });
   it('refuse une valeur absurde (trop courte, négative, non entière, non numérique)', () => {
-    for (const v of ['1000', '-5', '60000.5', 'abc']) expect(() => loadConfig({ ...base, TERMINAISON_INTERVAL_MS: v })).toThrow(/TERMINAISON_INTERVAL_MS/);
+    // Au-delà de 2^31-1 ms, setTimeout se rabat sur 1 ms : la tâche tournerait en boucle serrée contre Graph. Plafond : 24 h.
+    expect(loadConfig({ ...base, TERMINAISON_INTERVAL_MS: '86400000' }).terminaisonIntervalMs).toBe(86_400_000);
+    for (const v of ['1000', '-5', '60000.5', 'abc', '86400001', '2592000000']) expect(() => loadConfig({ ...base, TERMINAISON_INTERVAL_MS: v })).toThrow(/TERMINAISON_INTERVAL_MS/);
   });
 });
 

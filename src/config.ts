@@ -187,8 +187,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!isValidTimeZone(timeZone)) throw new Error(`TZ_METIER invalide : "${timeZone}"`);
   const terminaisonRaw = opt(env.TERMINAISON_INTERVAL_MS);
   const terminaisonIntervalMs = terminaisonRaw === undefined ? 300_000 : Number(terminaisonRaw);
-  if (!Number.isInteger(terminaisonIntervalMs) || terminaisonIntervalMs < 0 || (terminaisonIntervalMs > 0 && terminaisonIntervalMs < 60_000)) {
-    throw new Error('TERMINAISON_INTERVAL_MS invalide (0 pour désactiver, sinon 60000 ms au moins)');
+  // Plafond : au-delà de 2^31-1 ms, setTimeout se rabat sur 1 ms (boucle serrée contre Graph).
+  if (!Number.isInteger(terminaisonIntervalMs) || terminaisonIntervalMs < 0 || (terminaisonIntervalMs > 0 && terminaisonIntervalMs < 60_000) || terminaisonIntervalMs > 86_400_000) {
+    throw new Error('TERMINAISON_INTERVAL_MS invalide (0 pour désactiver, sinon entre 60000 ms et 86400000 ms)');
   }
   // Easy Auth pose WEBSITE_AUTH_ENABLED=True. Le contournement de dev est ignoré en production.
   const easyAuth = env.WEBSITE_AUTH_ENABLED?.toLowerCase() === 'true';
