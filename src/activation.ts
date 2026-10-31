@@ -11,7 +11,7 @@ export type ActivationDeps = Pick<DirectionDeps, 'config' | 'directory' | 'audit
 const maintenant = (deps: Pick<ActivationDeps, 'now'>): Date => (deps.now ?? (() => new Date()))();
 
 /** Parallélisme des lectures Graph de contrôle d'onboarding (deux appels par compte Actif). */
-const INSPECT_CONCURRENCY = 5;
+export const INSPECT_CONCURRENCY = 5;
 
 export interface OnboardingState {
   /** lastPasswordChangeDateTime postérieur à la date d'activation. */
@@ -23,7 +23,7 @@ export interface OnboardingState {
 }
 
 /** Exécute fn sur chaque élément, au plus `limit` à la fois, en gardant l'ordre. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
   await Promise.all(

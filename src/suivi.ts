@@ -5,7 +5,7 @@ import { buildFolderName } from './folder';
 import { graphFailureProps, type PendingDemande } from './directory';
 import { decoderEvenement } from './history';
 import type { TypeContrat } from './typeContrat';
-import { activationConfig, inspectActifs, type ActivationDeps, type OnboardingState } from './activation';
+import { INSPECT_CONCURRENCY, activationConfig, inspectActifs, mapLimit, type ActivationDeps, type OnboardingState } from './activation';
 
 /** Comptes renvoyés par statut au plus (`tronque` l'indique au-delà). */
 export const MAX_PAR_STATUT = 100;
@@ -117,8 +117,11 @@ export async function listSuivi(
   // comme inspectOnboarding. Une lecture en échec (tracée par step) ne masque pas le compte : date inconnue, gardé.
   const moisCourant = aujourdhui.slice(0, 7);
   const moisDe = (ms: number): string => todayIn(config.timeZone, new Date(ms)).slice(0, 7);
-  const dates = await Promise.all(
-    termines.demandes.map(async (d) => {
+  // Au plus INSPECT_CONCURRENCY lectures à la fois : l'écran relit toute la liste toutes les 30 s (5 s pendant une synchronisation).
+  const dates = await mapLimit(
+    termines.demandes,
+    INSPECT_CONCURRENCY,
+    async (d) => {
       const progress = await step(deps, actor, 'suivi_activation', d.id, {}, () => directory.getOnboardingProgress(d.id, activationExt)).catch(() => null);
       const at = progress ? Date.parse(progress.activation ?? progress.createdDateTime ?? '') : NaN;
       // Terminé ce mois-ci (calendrier du fuseau métier) : la date de fin si elle est enregistrée ; sinon, un compte activé ce mois-ci
@@ -126,7 +129,7 @@ export async function listSuivi(
       const fin = Date.parse(config.history ? (decoderEvenement(d.extensions?.[config.history.termine])?.le ?? '') : '');
       const ceMois: boolean | null = Number.isFinite(fin) ? moisDe(fin) === moisCourant : Number.isFinite(at) && moisDe(at) === moisCourant ? true : null;
       return { d, at, ceMois };
-    }),
+    },
   );
   // Fenêtre : activés depuis moins de 30 jours, et aussi tous ceux terminés ce mois-ci (activation plus ancienne, onboarding long).
   const recents = dates
