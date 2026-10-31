@@ -244,7 +244,7 @@ export class GraphDirectory implements Directory {
   async search(q: string): Promise<DirectoryUser[]> {
     // Le SDK Graph n'encode pas les paramètres : `&` ajouterait un paramètre, `#` couperait l'URL (filtre accountEnabled compris), `%22` deviendrait
     // un guillemet. Liste blanche : lettres, chiffres, espace, point, apostrophes, tiret et arobase (noms, adresses).
-    const term = q.replace(/[^\p{L}\p{N} .'’@-]/gu, '').replace(/\s+/g, ' ').trim();
+    const term = q.replace(/[^\p{L}\p{M}\p{N} .'’@_-]/gu, '').replace(/\s+/g, ' ').trim();
     if (term.length < 2) return [];
     try {
       const res = await this.client

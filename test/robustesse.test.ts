@@ -210,3 +210,43 @@ describe('acces.refuse : route auditée', () => {
     expect(refus()[0]).toMatchObject({ route: `POST /api/demandes/${id}/valider` });
   });
 });
+
+describe('valider : compte déjà activé', () => {
+  const { h, g, compte, ecritures } = suite();
+
+  it('un compte Validé déjà activé n’est pas revalidé (409) : seul reprendre l’accepte, rien n’est écrit', async () => {
+    const id = compte('Validé', { enabled: true });
+    const res = await h.call('POST', `/api/demandes/${id}/valider`);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ statut: 'inconnu' });
+    expect(ecritures()).toEqual([]);
+    expect(g().users.get(id)!.props[EXT]).toBe('Validé');
+  });
+});
+
+describe('GET /api/suivi : comptes Terminé lus par lots', () => {
+  const { h, g } = suite();
+
+  it('au plus 5 lectures de l’avancement en même temps, quel que soit le nombre de comptes Terminé', async () => {
+    for (let n = 0; n < 12; n++) {
+      g().addPending(EXT, { givenName: `Fini${n}`, surname: 'Test', statut: 'Terminé', hireDate: '2026-10-20', enabled: true });
+    }
+    let enCours = 0;
+    let max = 0;
+    const lire = h.ctx.directory.getOnboardingProgress.bind(h.ctx.directory);
+    h.ctx.directory.getOnboardingProgress = async (...args) => {
+      enCours++;
+      max = Math.max(max, enCours);
+      await new Promise((r) => setTimeout(r, 5));
+      try {
+        return await lire(...args);
+      } finally {
+        enCours--;
+      }
+    };
+    const res = await h.call('GET', '/api/suivi');
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { demandes: unknown[] }).demandes).toHaveLength(12);
+    expect(max).toBe(5);
+  });
+});

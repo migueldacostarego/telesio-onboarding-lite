@@ -417,6 +417,15 @@ describe('API', () => {
       expect(ctx.graph.calls[0]!.search).toBe('"displayName:Éloïse D’Artagnan-Le Gall" OR "mail:Éloïse D’Artagnan-Le Gall"');
     });
 
+    it('le tiret bas d’une adresse et un accent saisi en forme décomposée sont conservés', async () => {
+      ctx.graph.calls.length = 0;
+      await fetch(`${base}/api/annuaire?q=${encodeURIComponent('jean_dupont@exemple.test')}`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
+      expect(ctx.graph.calls[0]!.search).toBe('"displayName:jean_dupont@exemple.test" OR "mail:jean_dupont@exemple.test"');
+      const decompose = 'Ele\u0301onore';
+      await fetch(`${base}/api/annuaire?q=${encodeURIComponent(decompose)}`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
+      expect(ctx.graph.calls[1]!.search).toBe(`"displayName:${decompose}" OR "mail:${decompose}"`);
+    });
+
     it('un terme réduit à rien par l’assainissement ne part pas vers Graph', async () => {
       ctx.graph.calls.length = 0;
       const res = await fetch(`${base}/api/annuaire?q=${encodeURIComponent('&&##')}`, { headers: { 'x-ms-client-principal': principal(['RH']) } });
