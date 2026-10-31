@@ -229,3 +229,16 @@ describe('GET /api/demandes/:id', () => {
     expect(await detail(valide)).toEqual(['activer']);
   });
 });
+
+describe('GET /api/demandes/:id : extension du créateur falsifiée', () => {
+  const { h, g, compte } = suite();
+
+  it('une valeur qui n’est pas un objectId n’est jamais utilisée dans un chemin Graph, le créateur reste inconnu', async () => {
+    const id = compte('EnAttente', { [EXT_LIC]: LICENSE_SKU, [EXT_CREATOR]: '../me/memberOf' });
+    g().calls.length = 0;
+    const res = await h.call('GET', `/api/demandes/${id}`);
+    expect(res.status).toBe(200);
+    expect(g().calls.filter((c) => c.path.includes('memberOf') || c.path.includes('..'))).toEqual([]);
+    expect(((await res.json()) as { historique: { creation: { par: unknown } } }).historique.creation.par).toBeNull();
+  });
+});
