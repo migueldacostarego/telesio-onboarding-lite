@@ -138,56 +138,82 @@ function parseHistory(env: NodeJS.ProcessEnv): HistoryExtensions | undefined {
   if (entries.every(([, , v]) => v === undefined)) return undefined;
   const missing = entries.filter(([, , v]) => v === undefined).map(([, name]) => name);
   if (missing.length > 0) throw new Error(`Historique : variables manquantes (${missing.join(', ')}) ; les quatre ou aucune`);
-  for (const [, name, v] of entries) {
-    if (!EXTENSION_RE.test(v as string)) throw new Error(`${name} invalide (attendu : extension_<appId sans tirets>_<nom>)`);
-  }
+  for (const [, name, v] of entries) parseExtension(v, name);
   return Object.fromEntries(entries.map(([key, , v]) => [key, v])) as unknown as HistoryExtensions;
 }
 
+/** Attribut d'extension Entra facultatif : `extension_<appId sans tirets>_<nom>`. `name` est la variable d'environnement, citée dans l'erreur. */
+export function parseExtension(raw: string | undefined, name: string): string | undefined {
+  const v = opt(raw);
+  if (v !== undefined && !EXTENSION_RE.test(v)) throw new Error(`${name} invalide (attendu : extension_<appId sans tirets>_<nom>)`);
+  return v;
+}
+
+/** Id Graph facultatif (site ou drive), inséré tel quel dans un chemin d'API. */
+export function parseGraphId(raw: string | undefined, name: string): string | undefined {
+  const v = opt(raw);
+  if (v !== undefined && !GRAPH_ID_RE.test(v)) throw new Error(`${name} invalide`);
+  return v;
+}
+
+/** UPN_DOMAIN : nom de domaine facultatif, mis en minuscules. */
+export function parseUpnDomain(raw: string | undefined): string | undefined {
+  const v = opt(raw)?.toLowerCase();
+  if (v !== undefined && !DOMAIN_RE.test(v)) throw new Error('UPN_DOMAIN invalide (attendu : un nom de domaine, ex. contoso.com)');
+  return v;
+}
+
+/** SHAREPOINT_FOLDER_PATTERN : motif de nom de dossier, `DEFAULT_FOLDER_PATTERN` si absent. */
+export function parseFolderPattern(raw: string | undefined): string {
+  const v = opt(raw) ?? DEFAULT_FOLDER_PATTERN;
+  const patternError = checkFolderPattern(v);
+  if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
+  return v;
+}
+
+/** ARRIVANTS_GROUP_ID : GUID facultatif, mis en minuscules. */
+export function parseArrivantsGroupId(raw: string | undefined): string | undefined {
+  const v = opt(raw);
+  if (v !== undefined && !GUID_RE.test(v)) throw new Error('ARRIVANTS_GROUP_ID invalide (attendu : GUID)');
+  return v?.toLowerCase();
+}
+
+/** TZ_METIER : fuseau IANA, Europe/Paris si absent. */
+export function parseTimeZone(raw: string | undefined): string {
+  const v = opt(raw) ?? 'Europe/Paris';
+  if (!isValidTimeZone(v)) throw new Error(`TZ_METIER invalide : "${v}"`);
+  return v;
+}
+
+/** TERMINAISON_INTERVAL_MS : 0 désactive la tâche, sinon entre 60 s et 24 h ; 5 minutes si absent. */
+export function parseTerminaisonInterval(raw: string | undefined): number {
+  const v = opt(raw);
+  const ms = v === undefined ? 300_000 : Number(v);
+  // Plafond : au-delà de 2^31-1 ms, setTimeout se rabat sur 1 ms (boucle serrée contre Graph).
+  if (!Number.isInteger(ms) || ms < 0 || (ms > 0 && ms < 60_000) || ms > 86_400_000) {
+    throw new Error('TERMINAISON_INTERVAL_MS invalide (0 pour désactiver, sinon entre 60000 ms et 86400000 ms)');
+  }
+  return ms;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const upnDomain = opt(env.UPN_DOMAIN)?.toLowerCase();
-  if (upnDomain !== undefined && !DOMAIN_RE.test(upnDomain)) {
-    throw new Error('UPN_DOMAIN invalide (attendu : un nom de domaine, ex. contoso.com)');
-  }
-  const statusExtension = opt(env.ENTRA_STATUS_EXTENSION);
-  if (statusExtension !== undefined && !EXTENSION_RE.test(statusExtension)) {
-    throw new Error('ENTRA_STATUS_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
-  }
-  const siteId = opt(env.SHAREPOINT_SITE_ID);
-  const driveId = opt(env.SHAREPOINT_DRIVE_ID);
-  if (siteId !== undefined && !GRAPH_ID_RE.test(siteId)) throw new Error('SHAREPOINT_SITE_ID invalide');
-  if (driveId !== undefined && !GRAPH_ID_RE.test(driveId)) throw new Error('SHAREPOINT_DRIVE_ID invalide');
+  const upnDomain = parseUpnDomain(env.UPN_DOMAIN);
+  const statusExtension = parseExtension(env.ENTRA_STATUS_EXTENSION, 'ENTRA_STATUS_EXTENSION');
+  const siteId = parseGraphId(env.SHAREPOINT_SITE_ID, 'SHAREPOINT_SITE_ID');
+  const driveId = parseGraphId(env.SHAREPOINT_DRIVE_ID, 'SHAREPOINT_DRIVE_ID');
   const licenses = parseLicenses(env.LICENSES);
-  const licenseExtension = opt(env.ENTRA_LICENSE_EXTENSION);
-  if (licenseExtension !== undefined && !EXTENSION_RE.test(licenseExtension)) {
-    throw new Error('ENTRA_LICENSE_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
-  }
+  const licenseExtension = parseExtension(env.ENTRA_LICENSE_EXTENSION, 'ENTRA_LICENSE_EXTENSION');
   if (licenses.length > 0 && licenseExtension === undefined) {
     throw new Error('ENTRA_LICENSE_EXTENSION requis quand LICENSES est défini');
   }
   const licenseByType = parseLicenseByType(env.LICENCES_PAR_TYPE, licenses);
-  const folderPattern = opt(env.SHAREPOINT_FOLDER_PATTERN) ?? DEFAULT_FOLDER_PATTERN;
-  const patternError = checkFolderPattern(folderPattern);
-  if (patternError) throw new Error(`SHAREPOINT_FOLDER_PATTERN invalide : ${patternError}`);
-  const arrivantsGroupRaw = opt(env.ARRIVANTS_GROUP_ID);
-  if (arrivantsGroupRaw !== undefined && !GUID_RE.test(arrivantsGroupRaw)) throw new Error('ARRIVANTS_GROUP_ID invalide (attendu : GUID)');
-  const activationExtension = opt(env.ENTRA_ACTIVATION_EXTENSION);
-  if (activationExtension !== undefined && !EXTENSION_RE.test(activationExtension)) {
-    throw new Error('ENTRA_ACTIVATION_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
-  }
-  const creatorExtension = opt(env.ENTRA_CREATOR_EXTENSION);
-  if (creatorExtension !== undefined && !EXTENSION_RE.test(creatorExtension)) {
-    throw new Error('ENTRA_CREATOR_EXTENSION invalide (attendu : extension_<appId sans tirets>_<nom>)');
-  }
+  const folderPattern = parseFolderPattern(env.SHAREPOINT_FOLDER_PATTERN);
+  const arrivantsGroupId = parseArrivantsGroupId(env.ARRIVANTS_GROUP_ID);
+  const activationExtension = parseExtension(env.ENTRA_ACTIVATION_EXTENSION, 'ENTRA_ACTIVATION_EXTENSION');
+  const creatorExtension = parseExtension(env.ENTRA_CREATOR_EXTENSION, 'ENTRA_CREATOR_EXTENSION');
   const history = parseHistory(env);
-  const timeZone = opt(env.TZ_METIER) ?? 'Europe/Paris';
-  if (!isValidTimeZone(timeZone)) throw new Error(`TZ_METIER invalide : "${timeZone}"`);
-  const terminaisonRaw = opt(env.TERMINAISON_INTERVAL_MS);
-  const terminaisonIntervalMs = terminaisonRaw === undefined ? 300_000 : Number(terminaisonRaw);
-  // Plafond : au-delà de 2^31-1 ms, setTimeout se rabat sur 1 ms (boucle serrée contre Graph).
-  if (!Number.isInteger(terminaisonIntervalMs) || terminaisonIntervalMs < 0 || (terminaisonIntervalMs > 0 && terminaisonIntervalMs < 60_000) || terminaisonIntervalMs > 86_400_000) {
-    throw new Error('TERMINAISON_INTERVAL_MS invalide (0 pour désactiver, sinon entre 60000 ms et 86400000 ms)');
-  }
+  const timeZone = parseTimeZone(env.TZ_METIER);
+  const terminaisonIntervalMs = parseTerminaisonInterval(env.TERMINAISON_INTERVAL_MS);
   // Easy Auth pose WEBSITE_AUTH_ENABLED=True. Le contournement de dev est ignoré en production.
   const easyAuth = env.WEBSITE_AUTH_ENABLED?.toLowerCase() === 'true';
   const devBypass = env.ALLOW_INSECURE_DEV_AUTH === 'true' && env.NODE_ENV !== 'production';
@@ -203,7 +229,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     licenses,
     licenseByType,
     licenseExtension,
-    arrivantsGroupId: arrivantsGroupRaw?.toLowerCase(),
+    arrivantsGroupId,
     activationExtension,
     creatorExtension,
     history,
