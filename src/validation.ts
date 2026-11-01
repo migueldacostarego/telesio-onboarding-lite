@@ -61,33 +61,74 @@ export function validerEmail(raw: unknown, domain: string): { ok: true; email: s
   return { ok: true, email: s };
 }
 
+type Details = Record<string, string>;
+
+const CHAMPS_TEXTE = ['prenom', 'nom', 'poste', 'service'] as const;
+type ChampsTexte = Record<(typeof CHAMPS_TEXTE)[number], string>;
+
+/** Le corps de la requête comme dictionnaire : tout ce qui n'est pas un objet vaut un objet vide. */
+function enObjet(body: unknown): Record<string, unknown> {
+  return (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
+}
+
+/** Une chaîne sans les espaces autour ; vide si la valeur n'est pas une chaîne. */
+function chaineRognee(raw: unknown): string {
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/** Les champs texte obligatoires (prénom, nom, poste, service) : les valeurs valides, et un message « requis » par champ refusé, dans l'ordre des champs. */
+export function lireChampsTexte(b: Record<string, unknown>): { valeurs: Partial<ChampsTexte>; erreurs: Details } {
+  const valeurs: Partial<ChampsTexte> = {};
+  const erreurs: Details = {};
+  for (const champ of CHAMPS_TEXTE) {
+    const v = text(b[champ], LIMITS[champ]);
+    if (v) valeurs[champ] = v;
+    else erreurs[champ] = `requis, ${LIMITS[champ]} caractères max`;
+  }
+  return { valeurs, erreurs };
+}
+
+const ERREUR_LETTRE = 'doit contenir au moins une lettre latine ou un chiffre';
+
+/** Bloc d'identité : prénom et nom doivent contenir une lettre latine ou un chiffre, et former un identifiant assez court. Rien à vérifier tant que l'un des deux manque (son message « requis » est déjà posé). */
+export function erreursIdentite(prenom: string | undefined, nom: string | undefined): Details {
+  const erreurs: Details = {};
+  if (!prenom || !nom) return erreurs;
+  if (!normalizePart(prenom)) erreurs.prenom = ERREUR_LETTRE;
+  if (!normalizePart(nom)) erreurs.nom = ERREUR_LETTRE;
+  if (!erreurs.prenom && !erreurs.nom && upnBase(prenom, nom).length > MAX_LOCAL_BASE) {
+    erreurs.nom = `prénom et nom trop longs pour former un identifiant (${MAX_LOCAL_BASE} caractères max)`;
+  }
+  return erreurs;
+}
+
+/** Message d'erreur d'une date d'arrivée (déjà rognée) mal formée, impossible ou antérieure à `today` ; undefined si elle convient. */
+export function erreurDateArrivee(date: string, today: string): string | undefined {
+  if (!isRealDate(date)) return 'date valide au format AAAA-MM-JJ requise';
+  if (date < today) return 'ne peut pas être dans le passé';
+  return undefined;
+}
+
+/** Email facultatif : rien quand il est absent, l'adresse en minuscules quand elle est valide, sinon le message d'erreur. */
+export function lireEmail(raw: unknown, domain: string): { email?: string; erreur?: string } {
+  if (raw === undefined) return {};
+  const e = validerEmail(raw, domain);
+  return e.ok ? { email: e.email } : { erreur: e.message };
+}
+
+const estComplet = (valeurs: Partial<ChampsTexte>): valeurs is ChampsTexte => CHAMPS_TEXTE.every((champ) => valeurs[champ] !== undefined);
+
 /** `today` : AAAA-MM-JJ dans le fuseau métier (voir todayIn) ; `domain` : domaine des adresses (UPN_DOMAIN). */
 export function validateDemande(body: unknown, today: string, domain: string): Validation {
-  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
-  const details: Record<string, string> = {};
+  const b = enObjet(body);
+  const { valeurs, erreurs: details } = lireChampsTexte(b);
+  Object.assign(details, erreursIdentite(valeurs.prenom, valeurs.nom));
 
-  const prenom = text(b.prenom, LIMITS.prenom);
-  const nom = text(b.nom, LIMITS.nom);
-  const poste = text(b.poste, LIMITS.poste);
-  const service = text(b.service, LIMITS.service);
-  if (!prenom) details.prenom = `requis, ${LIMITS.prenom} caractères max`;
-  if (!nom) details.nom = `requis, ${LIMITS.nom} caractères max`;
-  if (!poste) details.poste = `requis, ${LIMITS.poste} caractères max`;
-  if (!service) details.service = `requis, ${LIMITS.service} caractères max`;
+  const dateArrivee = chaineRognee(b.dateArrivee);
+  const erreurDate = erreurDateArrivee(dateArrivee, today);
+  if (erreurDate) details.dateArrivee = erreurDate;
 
-  if (prenom && nom) {
-    if (!normalizePart(prenom)) details.prenom = 'doit contenir au moins une lettre latine ou un chiffre';
-    if (!normalizePart(nom)) details.nom = 'doit contenir au moins une lettre latine ou un chiffre';
-    if (!details.prenom && !details.nom && upnBase(prenom, nom).length > MAX_LOCAL_BASE) {
-      details.nom = `prénom et nom trop longs pour former un identifiant (${MAX_LOCAL_BASE} caractères max)`;
-    }
-  }
-
-  const dateArrivee = typeof b.dateArrivee === 'string' ? b.dateArrivee.trim() : '';
-  if (!isRealDate(dateArrivee)) details.dateArrivee = 'date valide au format AAAA-MM-JJ requise';
-  else if (dateArrivee < today) details.dateArrivee = 'ne peut pas être dans le passé';
-
-  const managerId = typeof b.managerId === 'string' ? b.managerId.trim() : '';
+  const managerId = chaineRognee(b.managerId);
   if (!GUID_RE.test(managerId)) details.managerId = 'objectId Entra (GUID) requis';
 
   const typeContrat = estTypeContrat(b.typeContrat) ? b.typeContrat : undefined;
@@ -95,17 +136,17 @@ export function validateDemande(body: unknown, today: string, domain: string): V
   // La licence découle du type : un client qui l'envoie encore (formulaire d'avant) est refusé plutôt qu'ignoré en silence.
   if (b.licence !== undefined) details.licence = 'ne se choisit plus : elle dépend du type de contrat (typeContrat)';
 
-  let email: string | undefined;
-  if (b.email !== undefined) {
-    const e = validerEmail(b.email, domain);
-    if (e.ok) email = e.email;
-    else details.email = e.message;
-  }
+  const email = lireEmail(b.email, domain);
+  if (email.erreur) details.email = email.erreur;
 
-  if (Object.keys(details).length > 0 || !typeContrat || !prenom || !nom || !poste || !service) {
+  if (Object.keys(details).length > 0 || !typeContrat || !estComplet(valeurs)) {
     return { ok: false, details };
   }
-  return { ok: true, value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, ...(email ? { email } : {}) } };
+  const { prenom, nom, poste, service } = valeurs;
+  return {
+    ok: true,
+    value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, ...(email.email ? { email: email.email } : {}) },
+  };
 }
 
 export type MotifValidation = { ok: true; motif: string } | { ok: false; details: Record<string, string> };
