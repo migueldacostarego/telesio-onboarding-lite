@@ -43,26 +43,30 @@ export interface EntreeChronologie {
   etat?: EtatLigne;
 }
 
-/**
- * La chronologie d'une demande, d'après ce que `GET /api/demandes/:id` fournit et l'issue de la dernière action tentée dans
- * l'écran. Une étape « en échec » vient de deux sources seulement : l'action qui y mène vient d'échouer, ou la lecture de
- * l'onboarding a échoué. Une étape faite avant l'enregistrement de l'historique a `le: null` : elle est dite « non enregistrée »,
- * jamais inventée.
- */
-export function chronologie({ detail, etape: n, onboarding, actions, etat }: EntreeChronologie): Jalon[] {
-  const h = detail.historique;
-  const echecDe = (action: 'valider' | 'activer') => etat?.phase === 'erreur' && etat.action === action;
-  const jalons: Jalon[] = [];
+const echecDe = (etat: EtatLigne | undefined, action: 'valider' | 'activer') => etat?.phase === 'erreur' && etat.action === action;
 
-  jalons.push({
+/** Ce que la lecture de l'onboarding dit : `verificationImpossible` (Graph a échoué), ou `lu`, l'état d'un compte Actif. */
+function lectureOnboarding(onboarding: EtatOnboarding | undefined) {
+  return {
+    verificationImpossible: onboarding !== undefined && 'verification' in onboarding,
+    lu: onboarding !== undefined && 'termine' in onboarding ? onboarding : undefined,
+  };
+}
+
+export function jalonCreee({ detail }: EntreeChronologie): Jalon {
+  const { creation } = detail.historique;
+  return {
     cle: 'creee',
     titre: 'Demande créée',
     etat: 'fait',
-    le: h.creation.le,
-    par: texteActeur(h.creation.par),
-    ...(h.creation.par === null ? { detail: 'Auteur non enregistré.' } : {}),
-  });
+    le: creation.le,
+    par: texteActeur(creation.par),
+    ...(creation.par === null ? { detail: 'Auteur non enregistré.' } : {}),
+  };
+}
 
+export function jalonValidee({ detail, etape: n, actions, etat }: EntreeChronologie): Jalon {
+  const h = detail.historique;
   const validee: Jalon = { cle: 'validee', titre: 'Validée par la direction', etat: n >= 2 ? 'fait' : 'en_cours' };
   if (n >= 2) Object.assign(validee, { le: h.validation?.le ?? null, par: texteActeur(h.validation?.par) });
   // Compte Validé dont le dossier SharePoint manque : la validation n'est pas terminée tant que le dossier n'existe pas.
@@ -73,64 +77,80 @@ export function chronologie({ detail, etape: n, onboarding, actions, etat }: Ent
     if (etat?.phase === 'erreur' && etat.action === 'reprendre') validee.detail = 'La nouvelle tentative a échoué : voir le message, puis réessayer.';
   }
   if (n < 2) {
-    if (echecDe('valider')) Object.assign(validee, { etat: 'echec', detail: 'La validation a échoué : voir le message, puis réessayer.' } satisfies Partial<Jalon>);
+    if (echecDe(etat, 'valider')) Object.assign(validee, { etat: 'echec', detail: 'La validation a échoué : voir le message, puis réessayer.' } satisfies Partial<Jalon>);
     else if (etat?.phase === 'compte_en_creation') validee.detail = 'Compte en cours de création : nouvel essai automatique.';
     else if (etat?.phase === 'licence_en_cours') validee.detail = 'Licence en cours d’attribution : revalidation automatique.';
     else if (etat?.phase === 'licence_lente') validee.detail = 'La licence tarde à être attribuée : revalider dans quelques minutes.';
     else validee.detail = 'En attente de la direction.';
   }
-  jalons.push(validee);
+  return validee;
+}
 
+export function jalonActivee({ detail, etape: n, etat }: EntreeChronologie): Jalon {
+  const h = detail.historique;
   const activee: Jalon = { cle: 'activee', titre: 'Compte activé', etat: n >= 3 ? 'fait' : n === 2 ? 'en_cours' : 'a_venir' };
   if (n >= 3) Object.assign(activee, { le: h.activation?.le ?? null, par: texteActeur(h.activation?.par) });
   if (n === 2) {
-    if (echecDe('activer')) Object.assign(activee, { etat: 'echec', detail: 'L’activation a échoué : voir le message, puis réessayer.' } satisfies Partial<Jalon>);
+    if (echecDe(etat, 'activer')) Object.assign(activee, { etat: 'echec', detail: 'L’activation a échoué : voir le message, puis réessayer.' } satisfies Partial<Jalon>);
     else activee.detail = detail.dateArrivee ? `À activer le jour de l’arrivée (${formatArrivee(detail.dateArrivee)}).` : 'À activer le jour de l’arrivée (date non renseignée).';
   }
-  jalons.push(activee);
+  return activee;
+}
 
-  if (n >= 3 && h.regeneration) {
-    const { nombre } = h.regeneration;
-    jalons.push({
-      cle: 'regeneration',
-      titre: nombre > 1 ? `Mot de passe régénéré (${nombre} fois, dernière remise)` : 'Mot de passe régénéré',
-      etat: 'fait',
-      sous: true,
-      le: h.regeneration.le,
-      par: texteActeur(h.regeneration.par),
-    });
+/** Présent seulement si le mot de passe a été régénéré après l'activation. */
+export function jalonRegeneration({ detail, etape: n }: EntreeChronologie): Jalon | null {
+  const { regeneration } = detail.historique;
+  if (n < 3 || !regeneration) return null;
+  const { nombre } = regeneration;
+  return {
+    cle: 'regeneration',
+    titre: nombre > 1 ? `Mot de passe régénéré (${nombre} fois, dernière remise)` : 'Mot de passe régénéré',
+    etat: 'fait',
+    sous: true,
+    le: regeneration.le,
+    par: texteActeur(regeneration.par),
+  };
+}
+
+/** Sous-étape de l'arrivant : présente une fois le compte activé. Ordre constaté sur le tenant de test : Authenticator d'abord, puis le changement du mot de passe. */
+export function jalonAuthenticator({ detail, etape: n, onboarding }: EntreeChronologie): Jalon | null {
+  if (n < 3) return null;
+  const { verificationImpossible, lu } = lectureOnboarding(onboarding);
+  const authenticator: Jalon = { cle: 'authenticator', titre: 'Authenticator inscrit', etat: 'a_venir', sous: true };
+  const inscrit = detail.historique.authenticator;
+  if (inscrit || lu?.authenticator) {
+    authenticator.etat = 'fait';
+    authenticator.le = inscrit?.le ?? null;
+    if (authenticator.le === null) authenticator.detail = 'Date non fournie par Entra.';
+  } else if (verificationImpossible) {
+    Object.assign(authenticator, { etat: 'echec', detail: 'Lecture impossible : relue à la prochaine actualisation.' } satisfies Partial<Jalon>);
+  } else if (n === 4) {
+    Object.assign(authenticator, { etat: 'fait', le: null });
+  } else {
+    authenticator.detail = 'À la première connexion de l’arrivant.';
   }
+  return authenticator;
+}
 
-  if (n >= 3) {
-    const verificationImpossible = onboarding !== undefined && 'verification' in onboarding;
-    const lu = onboarding !== undefined && 'termine' in onboarding ? onboarding : undefined;
-    // Ordre constaté sur le tenant de test : Authenticator d'abord, puis le changement du mot de passe.
-    const authenticator: Jalon = { cle: 'authenticator', titre: 'Authenticator inscrit', etat: 'a_venir', sous: true };
-    if (h.authenticator || lu?.authenticator) {
-      authenticator.etat = 'fait';
-      authenticator.le = h.authenticator?.le ?? null;
-      if (authenticator.le === null) authenticator.detail = 'Date non fournie par Entra.';
-    } else if (verificationImpossible) {
-      Object.assign(authenticator, { etat: 'echec', detail: 'Lecture impossible : relue à la prochaine actualisation.' } satisfies Partial<Jalon>);
-    } else if (n === 4) {
-      Object.assign(authenticator, { etat: 'fait', le: null });
-    } else {
-      authenticator.detail = 'À la première connexion de l’arrivant.';
-    }
-    const motDePasse: Jalon = { cle: 'motDePasse', titre: 'Mot de passe changé par l’arrivant', etat: 'a_venir', sous: true };
-    if (h.motDePasse || lu?.motDePasse) {
-      motDePasse.etat = 'fait';
-      motDePasse.le = h.motDePasse?.le ?? null;
-    } else if (n === 4) {
-      Object.assign(motDePasse, { etat: 'fait', le: null });
-    } else if (!verificationImpossible) {
-      motDePasse.detail = 'Après l’inscription d’Authenticator.';
-    }
-    jalons.push(authenticator, motDePasse);
+export function jalonMotDePasse({ detail, etape: n, onboarding }: EntreeChronologie): Jalon | null {
+  if (n < 3) return null;
+  const { verificationImpossible, lu } = lectureOnboarding(onboarding);
+  const motDePasse: Jalon = { cle: 'motDePasse', titre: 'Mot de passe changé par l’arrivant', etat: 'a_venir', sous: true };
+  const change = detail.historique.motDePasse;
+  if (change || lu?.motDePasse) {
+    motDePasse.etat = 'fait';
+    motDePasse.le = change?.le ?? null;
+  } else if (n === 4) {
+    Object.assign(motDePasse, { etat: 'fait', le: null });
+  } else if (!verificationImpossible) {
+    motDePasse.detail = 'Après l’inscription d’Authenticator.';
   }
+  return motDePasse;
+}
 
+export function jalonTerminee({ detail, etape: n, onboarding }: EntreeChronologie): Jalon {
   const terminee: Jalon = { cle: 'terminee', titre: 'Onboarding terminé', etat: n >= 4 ? 'fait' : n === 3 ? 'en_cours' : 'a_venir' };
-  if (n >= 4) Object.assign(terminee, { le: h.termine?.le ?? null, par: texteActeur(h.termine?.par) });
+  if (n >= 4) Object.assign(terminee, { le: detail.historique.termine?.le ?? null, par: texteActeur(detail.historique.termine?.par) });
   if (n === 3) {
     if (onboarding && 'verification' in onboarding) {
       Object.assign(terminee, { etat: 'echec', detail: 'L’état du mot de passe et d’Authenticator n’a pas pu être lu : il sera relu à la prochaine actualisation.' } satisfies Partial<Jalon>);
@@ -138,6 +158,24 @@ export function chronologie({ detail, etape: n, onboarding, actions, etat }: Ent
       terminee.detail = 'Tout est fait : le serveur passe le compte à Terminé automatiquement (vérification toutes les 5 minutes).';
     }
   }
-  jalons.push(terminee);
-  return jalons;
+  return terminee;
+}
+
+/**
+ * La chronologie d'une demande, d'après ce que `GET /api/demandes/:id` fournit et l'issue de la dernière action tentée dans
+ * l'écran. Une étape « en échec » vient de deux sources seulement : l'action qui y mène vient d'échouer, ou la lecture de
+ * l'onboarding a échoué. Une étape faite avant l'enregistrement de l'historique a `le: null` : elle est dite « non enregistrée »,
+ * jamais inventée.
+ */
+export function chronologie(entree: EntreeChronologie): Jalon[] {
+  const jalons = [
+    jalonCreee(entree),
+    jalonValidee(entree),
+    jalonActivee(entree),
+    jalonRegeneration(entree),
+    jalonAuthenticator(entree),
+    jalonMotDePasse(entree),
+    jalonTerminee(entree),
+  ];
+  return jalons.filter((j): j is Jalon => j !== null);
 }
