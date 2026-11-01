@@ -11,7 +11,7 @@ export type ActivationDeps = Pick<DirectionDeps, 'config' | 'directory' | 'audit
 const maintenant = (deps: Pick<ActivationDeps, 'now'>): Date => (deps.now ?? (() => new Date()))();
 
 /** Parallélisme des lectures Graph de contrôle d'onboarding (deux appels par compte Actif). */
-const INSPECT_CONCURRENCY = 5;
+export const INSPECT_CONCURRENCY = 5;
 
 export interface OnboardingState {
   /** lastPasswordChangeDateTime postérieur à la date d'activation. */
@@ -23,7 +23,7 @@ export interface OnboardingState {
 }
 
 /** Exécute fn sur chaque élément, au plus `limit` à la fois, en gardant l'ordre. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
   await Promise.all(
@@ -140,15 +140,15 @@ export async function activerDemande(deps: ActivationDeps, actor: string, id: st
   const { config, directory, audit } = deps;
   const { groupId, activationExt } = activationConfig(deps);
   const user = await loadUser(deps, actor, id);
-  const refuse = (raison: string) => conflict(deps, actor, user, id, raison);
+  const refuse: (raison: string) => never = (raison) => conflict(deps, actor, user, id, raison);
 
   if (user.statut === 'Terminé') refuse('onboarding_termine');
   if (user.statut === 'Actif') refuse('deja_actif');
   if (user.statut !== 'Validé') refuse('statut');
   if (user.dateArrivee === null) refuse('date_arrivee_absente');
-  if ((user.dateArrivee as string) > todayIn(config.timeZone, now)) refuse('date_arrivee_future');
+  if (user.dateArrivee > todayIn(config.timeZone, now)) refuse('date_arrivee_future');
 
-  const fail = { statut: user.statut as string };
+  const fail = { statut: user.statut };
   if (!user.accountEnabled) {
     await step(deps, actor, 'activation_compte', id, fail, () => directory.setAccountEnabled(id, true));
     audit.track({ action: 'demande.compte_active', actor, outcome: 'ok', cible: id });
@@ -175,7 +175,7 @@ export async function regenererMotDePasse(deps: ActivationDeps, actor: string, i
   const { groupId, activationExt } = activationConfig(deps);
   const { config } = deps;
   const user = await loadUser(deps, actor, id, config.history ? [config.history.regeneration] : []);
-  const refuse = (raison: string) => conflict(deps, actor, user, id, raison);
+  const refuse: (raison: string) => never = (raison) => conflict(deps, actor, user, id, raison);
 
   if (user.statut === 'Terminé') refuse('onboarding_termine');
   if (user.statut !== 'Actif') refuse('statut');

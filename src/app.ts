@@ -1,6 +1,18 @@
-import express, { type ErrorRequestHandler } from 'express';
+import express, { type ErrorRequestHandler, type RequestHandler } from 'express';
 import { createApiRouter, type ApiDeps } from './routes/api';
 import { createWebRouter } from './routes/web';
+
+// Sur toutes les réponses, erreurs comprises (la CSP du front est posée par routes/web.ts). Pas d'includeSubDomains pour HSTS : le
+// domaine est celui d'App Service, pas le nôtre.
+const securityHeaders: RequestHandler = (_req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+    'Strict-Transport-Security': 'max-age=31536000',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+  });
+  next();
+};
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   if (res.headersSent) return next(err);
@@ -20,6 +32,7 @@ export interface AppOptions {
 export function createApp(deps: ApiDeps, options: AppOptions = {}): express.Express {
   const app = express();
   app.disable('x-powered-by');
+  app.use(securityHeaders);
   app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
   app.get('/', (_req, res) => res.redirect('/app/'));
   app.use('/app', createWebRouter(options.webDir));

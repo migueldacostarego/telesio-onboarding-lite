@@ -68,8 +68,12 @@ async function loadForAction(
     deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
     throw new ServiceError(404, { error: 'Demande introuvable' });
   }
-  if (user.accountEnabled || user.statut === null || !allowed.includes(user.statut)) {
-    const statut = user.accountEnabled || user.statut === null ? 'inconnu' : user.statut;
+  // Un compte activé n'est jamais validé ni refusé (refuser supprime). Reprendre le dossier d'un Validé l'accepte : après une
+  // activation partielle (compte activé, puis échec du mot de passe ou du statut) le dossier manquant doit rester récupérable.
+  const activeAcceptee = action === 'reprendre' && user.statut === 'Validé';
+  const activeRefuse = user.accountEnabled && !activeAcceptee;
+  if (activeRefuse || user.statut === null || !allowed.includes(user.statut)) {
+    const statut = activeRefuse || user.statut === null ? 'inconnu' : user.statut;
     deps.audit.track({ action: 'demande.conflit', actor, outcome: 'refuse', cible: id, statut });
     throw new ServiceError(409, { error: 'Action impossible dans le statut actuel', statut });
   }

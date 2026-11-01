@@ -1,5 +1,6 @@
 import { PlusIcon } from 'lucide-react';
 import { Suspense, lazy, useRef, useState } from 'react';
+import { LimiteErreur } from '@/components/LimiteErreur';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
@@ -34,25 +35,37 @@ export function NouvelleDemande({ onCree, onRelire }: { onCree: (creee: DemandeC
         }}
       >
         {ouvert && (
-          <Suspense
-            fallback={
-              <DialogHeader className="px-6 py-6 pr-12">
-                <DialogTitle className="text-base">Nouvelle demande</DialogTitle>
-                <DialogDescription role="status">Chargement du formulaire…</DialogDescription>
+          // Chunk introuvable (redéploiement pendant que l'onglet est ouvert) : un message dans la fenêtre, pas une page blanche.
+          <LimiteErreur
+            message="Impossible de charger le formulaire : la page a été mise à jour. Rechargez-la."
+            className="m-6 w-auto"
+            entete={
+              <DialogHeader className="sr-only">
+                <DialogTitle>Nouvelle demande</DialogTitle>
+                <DialogDescription>Le formulaire n’a pas pu être chargé.</DialogDescription>
               </DialogHeader>
             }
           >
-            <FormulaireDemande
-              controleListe={liste}
-              onEnvoi={setEnvoi}
-              onAnnuler={() => setOuvert(false)}
-              onRelire={onRelire}
-              onCree={(creee, valeurs) => {
-                setOuvert(false);
-                onCree(creee, valeurs);
-              }}
-            />
-          </Suspense>
+            <Suspense
+              fallback={
+                <DialogHeader className="px-6 py-6 pr-12">
+                  <DialogTitle className="text-base">Nouvelle demande</DialogTitle>
+                  <DialogDescription role="status">Chargement du formulaire…</DialogDescription>
+                </DialogHeader>
+              }
+            >
+              <FormulaireDemande
+                controleListe={liste}
+                onEnvoi={setEnvoi}
+                onAnnuler={() => setOuvert(false)}
+                onRelire={onRelire}
+                onCree={(creee, valeurs) => {
+                  setOuvert(false);
+                  onCree(creee, valeurs);
+                }}
+              />
+            </Suspense>
+          </LimiteErreur>
         )}
       </DialogContent>
     </Dialog>

@@ -201,7 +201,6 @@ export interface Directory {
   /** extensions : attributs d'extension (nom complet -> valeur) posés à la création. */
   createUser(user: NewUser, extensions?: Record<string, string>): Promise<string>;
   setManager(userId: string, managerId: string): Promise<void>;
-  setExtension(userId: string, name: string, value: string): Promise<void>;
 }
 
 interface GraphErrorLike {
@@ -243,8 +242,10 @@ export class GraphDirectory implements Directory {
   constructor(private readonly client: Pick<Client, 'api'>) {}
 
   async search(q: string): Promise<DirectoryUser[]> {
-    // Les guillemets et antislashs sont retirés : ils sortiraient de la chaîne $search.
-    const term = q.replace(/["\\]/g, '');
+    // Le SDK Graph n'encode pas les paramètres : `&` ajouterait un paramètre, `#` couperait l'URL (filtre accountEnabled compris), `%22` deviendrait
+    // un guillemet. Liste blanche : lettres, chiffres, espace, point, apostrophes, tiret et arobase (noms, adresses).
+    const term = q.replace(/[^\p{L}\p{M}\p{N} .'’@_-]/gu, '').replace(/\s+/g, ' ').trim();
+    if (term.length < 2) return [];
     try {
       const res = await this.client
         .api('/users')
@@ -313,16 +314,8 @@ export class GraphDirectory implements Directory {
     }
   }
 
-  async setExtension(userId: string, name: string, value: string): Promise<void> {
-    try {
-      await this.client.api(`/users/${userId}`).patch({ [name]: value });
-    } catch (err) {
-      throw wrap(err);
-    }
-  }
-
   async listByStatut(ext: string, statut: string, hiredSince?: string, withNames = false, extras: readonly string[] = []) {
-    // `ext` est validé à la config, `statut` vient de STATUTS : sûrs dans le filtre.
+    // `ext` est validé à la config, `statut` vient de STATUTS (suivi.ts) : sûrs dans le filtre.
     // Graph refuse (400 Request_UnsupportedQuery) statut + employeeHireDate combinés à $expand=manager :
     // il ne filtre que sur le statut, et la date (hiredSince) est filtrée ici, après lecture des pages.
     try {

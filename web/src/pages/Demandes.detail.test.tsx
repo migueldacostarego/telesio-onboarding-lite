@@ -62,6 +62,17 @@ describe('page de détail /demandes/:id', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Éloïse Dupont');
   });
 
+  it('un lien de dossier qui n’est pas en https (javascript:, http:) n’est jamais rendu comme lien', async () => {
+    for (const url of ['javascript:alert(1)', 'http://sp.exemple.test/dossier', 'pas une adresse']) {
+      const d = valide(ELOISE);
+      monter({ demandes: [d], ecrire: rien, chemin: `/demandes/${ELOISE.id}`, details: { [ELOISE.id]: detailDe(d, { dossier: { etat: 'present', url } }) } });
+      const compte = await screen.findByRole('region', { name: 'Compte et accès' });
+      expect(within(compte).queryByRole('link', { name: /SharePoint/ })).not.toBeInTheDocument();
+      expect(within(compte).getByText('Créé')).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
   it('demande en attente : licence réservée, groupe et dossier créés à la validation', async () => {
     monter({ demandes: [enAttente(ELOISE)], ecrire: rien, chemin: `/demandes/${ELOISE.id}` });
     const compte = await screen.findByRole('region', { name: 'Compte et accès' });

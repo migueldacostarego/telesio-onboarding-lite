@@ -46,11 +46,20 @@ function Licence({ d }: { d: DemandeDetail }) {
   );
 }
 
+function estHttps(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function Dossier({ d }: { d: DemandeDetail }) {
   if (d.statut === 'EnAttente') return <span className="text-muted-foreground">Créé à la validation</span>;
   if (!d.dossier) return <span className="text-muted-foreground">Indisponible</span>;
   if (d.dossier.etat === 'absent') return <span className="text-destructive">Non créé</span>;
-  if (!d.dossier.url) return <>Créé</>;
+  // L'adresse vient de Graph : seule une adresse https devient un lien (jamais javascript: ni une adresse mal formée).
+  if (!d.dossier.url || !estHttps(d.dossier.url)) return <>Créé</>;
   return (
     <a href={d.dossier.url} target="_blank" rel="noopener noreferrer" className="inline-flex flex-wrap items-center gap-x-1 rounded-sm font-medium underline underline-offset-4 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
       Ouvrir dans SharePoint

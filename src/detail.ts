@@ -8,6 +8,7 @@ import { buildFolderName } from './folder';
 import { ACTEUR_SYSTEME, decoderEvenement, type Evenement } from './history';
 import { STATUTS, actionsFor, type Statut, type SuiviAction } from './suivi';
 import type { TypeContrat } from './typeContrat';
+import { GUID_RE } from './validation';
 
 /** Auteur d'une étape : son nom affiché, `null` si le compte n'existe plus ou n'a pas pu être lu ; `systeme` : la tâche du serveur. */
 export interface Acteur {
@@ -115,7 +116,9 @@ export async function lireDemande(deps: DetailDeps, actor: string, id: string, n
   const activation = evt(h?.activation);
   const regeneration = evt(h?.regeneration);
   const termine = evt(h?.termine);
-  const createur = config.creatorExtension ? (u.extensions[config.creatorExtension] ?? null) : null;
+  // L'extension est écrivable par un administrateur d'utilisateurs : seul un objectId sert de chemin Graph (comme les auteurs de l'historique, validés par decoderEvenement).
+  const createurBrut = config.creatorExtension ? (u.extensions[config.creatorExtension] ?? null) : null;
+  const createur = createurBrut !== null && GUID_RE.test(createurBrut) ? createurBrut : null;
 
   // Noms des auteurs : un appel par objectId distinct (trois au plus), jamais tracés.
   const ids = [...new Set([createur, validation?.par, activation?.par, regeneration?.par, termine?.par].filter((x): x is string => !!x && x !== ACTEUR_SYSTEME).map((x) => x.toLowerCase()))];

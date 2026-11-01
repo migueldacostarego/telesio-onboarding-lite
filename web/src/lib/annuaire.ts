@@ -25,6 +25,7 @@ export function useAnnuaire(terme: string) {
     queryKey: ['annuaire', t],
     enabled: t.length >= TERME_MIN && t.length <= TERME_MAX,
     gcTime: 0,
+    refetchOnWindowFocus: false, // staleTime 0 : sans cela, chaque retour sur la fenêtre relancerait la requête (et le terme/l’adresse avec)
     staleTime: 0,
     queryFn: async (): Promise<Personne[]> => {
       const res = await api.get<Personne[]>(`/api/annuaire?q=${encodeURIComponent(t)}`);

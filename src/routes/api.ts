@@ -46,8 +46,8 @@ const jsonOnly: RequestHandler = (req, res, next) => {
   next();
 };
 
-// inflate:false : les corps compressés sont refusés (415). Atténue l'avis body-parser < 2.4.0
-// (DoS sur corps compressé) tant que la 2.4.0 a moins de 7 jours ; aucun client légitime n'en envoie.
+// inflate:false : les corps compressés sont refusés (415). Défense en profondeur (avis body-parser < 2.4.0, corrigé
+// par la 2.4.0 du verrou) : aucun client légitime n'envoie de corps compressé.
 const json = express.json({ limit: '16kb', inflate: false });
 
 export function createApiRouter(deps: ApiDeps): Router {

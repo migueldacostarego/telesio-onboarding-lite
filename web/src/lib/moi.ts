@@ -31,7 +31,10 @@ export function useMoi(enabled = true) {
     queryKey: MOI_KEY,
     queryFn: async () => {
       const res = await api.get<Moi>('/api/moi');
-      if (res.kind !== 'ok') throw new ApiError({ status: res.status, kind: 'serveur', message: 'Réponse inattendue du serveur.' });
+      // Forme vérifiée : l'écran lit `droits.acces` sans garde, une réponse tronquée donnerait une page blanche.
+      if (res.kind !== 'ok' || typeof res.data?.droits?.acces !== 'boolean') {
+        throw new ApiError({ status: res.kind === 'ok' ? 200 : res.status, kind: 'serveur', message: 'Réponse inattendue du serveur.' });
+      }
       return res.data;
     },
     // Revérifié au retour sur l'onglet après une minute : une session expirée est détectée sans attendre une action.
