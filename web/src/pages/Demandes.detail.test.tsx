@@ -179,6 +179,17 @@ describe('page de détail /demandes/:id', () => {
     expect(await screen.findByText('Historique')).toBeInTheDocument();
   });
 
+  it('relecture en échec alors que le détail est déjà affiché : le détail reste, avec l’alerte', async () => {
+    let panne = false;
+    monter({ demandes: [enAttente(HUGO)], ecrire: rien, chemin: `/demandes/${HUGO.id}`, lire: (url) => (panne && url === `/api/demandes/${HUGO.id}` ? reply(503, { error: 'Activation non configurée' }) : undefined) });
+    expect(await screen.findByText('Historique')).toBeInTheDocument();
+    panne = true;
+    await avancer(40_000); // actualisation à 30 s, puis les nouveaux essais bornés (lib/query.ts)
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('Historique')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: HUGO.nom })).toBeInTheDocument();
+  });
+
   it('la liste a la demande mais pas encore le détail (404 de réplication) : nouveaux essais bornés, pas de « introuvable »', async () => {
     let cree = false;
     const m = monter({ demandes: [enAttente(ELOISE)], ecrire: rien, chemin: `/demandes/${ELOISE.id}` });
