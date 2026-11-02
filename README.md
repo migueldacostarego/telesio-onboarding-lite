@@ -112,6 +112,8 @@ Si un rôle est affecté à un **groupe** : l'affectation d'un rôle à un group
 
 L'identité managée sert à la fois d'assertion Easy Auth et d'identité d'appel à Graph : ne l'affecter à aucune autre ressource.
 
+**CORS : le site lui-même, obligatoire.** La protection CSRF intégrée d'Easy Auth refuse tout POST authentifié par le cookie `AppServiceAuthSession` venant d'un navigateur quand son en-tête `Origin` n'est pas dans la liste CORS de l'app, **même pour un appel same-origin**. La réponse est un 403 au corps vide, avec l'en-tête `x-ms-middleware-request-id`. Ce refus a lieu avant Express, donc sans `acces.refuse`, et l'écran affiche « Accès refusé / Erreur du serveur ». Les GET passent : la lecture marche, mais aucune écriture ne passe. C'est arrivé sur test le 2026-11-02, alors que les POST passaient le 2026-10-30. `site_config.cors.allowed_origins` contient donc l'adresse du site, et seulement elle (sans `support_credentials`, inutile en same-origin). Voir [Azure/azure-functions-host#1602](https://github.com/Azure/azure-functions-host/issues/1602).
+
 ## Permissions Microsoft Graph
 
 Application permissions accordées par Terraform ([infra/graph.tf](infra/graph.tf), `azuread_app_role_assignment`) à l'identité managée de l'App Service (suppression d'un compte : couverte par `User.ReadWrite.All`). Aucun secret : sur App Service (`IDENTITY_ENDPOINT` présent), l'app utilise `ManagedIdentityCredential` visé sur `AZURE_CLIENT_ID` (démarrage refusé s'il manque) ; en local, `DefaultAzureCredential` (`az login`).
