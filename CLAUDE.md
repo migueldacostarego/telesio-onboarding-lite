@@ -30,3 +30,4 @@ MVP d'onboarding : RH saisit une demande → la direction valide → compte Entr
 - Ne jamais commiter sans mon accord.
 - PR avec CI verte avant toute fusion.
 - Logs : jamais de nom, UPN ni mot de passe (seulement des objectId).
+- CORS de la Web App (`infra/main.tf`) : garder l'adresse du site dans `allowed_origins`. Sans elle, la protection CSRF d'Easy Auth répond 403 (corps vide) à tous les POST, même same-origin ; voir README, « Easy Auth ».

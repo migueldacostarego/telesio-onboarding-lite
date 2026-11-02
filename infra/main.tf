@@ -126,6 +126,13 @@ resource "azurerm_linux_web_app" "main" {
     application_stack {
       node_version = "22-lts"
     }
+
+    # Le middleware Easy Auth refuse (403, corps vide) tout POST qui porte le cookie de session et un en-tête Origin
+    # absent de cette liste, même celui du site : sans elle, aucune écriture de /app ne passe. Seul le site lui-même.
+    cors {
+      allowed_origins     = ["https://${local.app_name}.azurewebsites.net"]
+      support_credentials = false
+    }
   }
 
   app_settings = local.app_settings
