@@ -152,7 +152,9 @@ variable "time_zone" {
   default     = "Europe/Paris"
 }
 
-# --- Affectation des rôles d'application (optionnelle) ---
+# --- Affectation des rôles d'application ---
+# Lues par scripts/grant-app-roles.sh (action d'administrateur), pas par Terraform : déclarées pour que les tfvars restent
+# la seule liste.
 
 variable "rh_principal_object_ids" {
   description = "objectIds d'utilisateurs ou groupes à qui affecter le rôle RH."

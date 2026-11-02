@@ -6,6 +6,11 @@
 provider "azurerm" {
   features {}
 
+  # Pas d'enregistrement des fournisseurs de ressources : il agit sur tout l'abonnement, alors que l'identité d'apply de
+  # la CI n'a de droits que sur le groupe de ressources de l'environnement. Les fournisseurs utilisés (Web, Insights,
+  # OperationalInsights, ManagedIdentity) sont déjà enregistrés ; sur un nouvel abonnement, les enregistrer à la main.
+  resource_provider_registrations = "none"
+
   subscription_id = var.subscription_id # null : lit ARM_SUBSCRIPTION_ID
 }
 
