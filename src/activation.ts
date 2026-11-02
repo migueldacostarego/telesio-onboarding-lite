@@ -47,10 +47,12 @@ export function activationConfig(deps: ActivationDeps): { groupId: string; activ
 }
 
 /**
- * La remise du mot de passe temporaire met elle-même à jour lastPasswordChangeDateTime, quelques secondes après la date
- * d'activation écrite juste avant. Seul un changement postérieur à cette marge compte comme le changement de l'arrivant.
+ * La remise du mot de passe temporaire met elle-même à jour lastPasswordChangeDateTime, environ une seconde après la date
+ * de remise lue juste avant (PATCH de la date puis réinitialisation). Seul un changement postérieur à cette marge compte
+ * comme le changement de l'arrivant. Borne haute : après une régénération, Authenticator est déjà inscrit et l'arrivant
+ * peut changer son mot de passe en une vingtaine de secondes (55 s observées sur test avec l'inscription : 60 s le manquait).
  */
-export const MARGE_REMISE_MS = 60_000;
+export const MARGE_REMISE_MS = 10_000;
 
 /**
  * Ajoute l'état d'onboarding à chaque compte Actif. Un échec de lecture pour un compte (déjà tracé par step)
@@ -119,11 +121,14 @@ function conflict(deps: ActivationDeps, actor: string, user: OnboardingUser, id:
  * cette dernière pose (lastPasswordChangeDateTime) tombe donc après la référence, mais dans la marge MARGE_REMISE_MS.
  * Puis mot de passe temporaire, changement imposé à la première connexion. Il n'est ni tracé ni conservé.
  */
-async function issuePassword(deps: ActivationDeps, actor: string, id: string, now: Date, activationExt: string, fail: Record<string, unknown>, historique: Record<string, string> = {}) {
+async function issuePassword(deps: ActivationDeps, actor: string, id: string, activationExt: string, fail: Record<string, unknown>, historique: Record<string, string> = {}) {
   const { directory, audit } = deps;
+  // Date lue ici, pas au début de la requête : les appels Graph qui précèdent (lecture, compte, groupe) ne doivent pas
+  // repousser la remise réelle au-delà de MARGE_REMISE_MS.
+  const remise = maintenant(deps);
   // La régénération s'enregistre ici, avec la date de remise et avant le mot de passe : une écriture séparée après la remise qui
   // échouerait ferait répondre 502 alors que le mot de passe est déjà posé (et perdu).
-  await step(deps, actor, 'activation_date', id, fail, () => directory.setExtensions(id, { [activationExt]: now.toISOString(), ...historique }));
+  await step(deps, actor, 'activation_date', id, fail, () => directory.setExtensions(id, { [activationExt]: remise.toISOString(), ...historique }));
   const motDePasseTemporaire = temporaryPassword();
   await step(deps, actor, 'mot_de_passe', id, fail, () => directory.resetPassword(id, motDePasseTemporaire));
   audit.track({ action: 'demande.mdp_temporaire', actor, outcome: 'ok', cible: id });
@@ -156,7 +161,7 @@ export async function activerDemande(deps: ActivationDeps, actor: string, id: st
   await step(deps, actor, 'groupe_arrivants', id, fail, () => directory.addGroupMember(groupId, id));
   audit.track({ action: 'demande.arrivants_ajout', actor, outcome: 'ok', cible: id, groupe: groupId });
 
-  const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail);
+  const motDePasseTemporaire = await issuePassword(deps, actor, id, activationExt, fail);
   // Échec ici : 502 sans mot de passe dans la réponse ; le compte reste Validé et RH clique à nouveau sur « Activer ».
   // Statut et auteur de l'activation dans le même PATCH. Une régénération ne l'écrase pas (elle a sa propre extension).
   const historique = config.history ? { [config.history.activation]: encoderEvenement(actor, now) } : {};
@@ -186,7 +191,7 @@ export async function regenererMotDePasse(deps: ActivationDeps, actor: string, i
   // Dernière régénération (auteur, date) et nombre de remises depuis l'activation.
   const precedent = config.history ? decoderEvenement(user.extensions[config.history.regeneration] ?? null) : null;
   const historique = config.history ? { [config.history.regeneration]: encoderEvenement(actor, now, (precedent?.nombre ?? 0) + 1) } : {};
-  const motDePasseTemporaire = await issuePassword(deps, actor, id, now, activationExt, fail, historique);
+  const motDePasseTemporaire = await issuePassword(deps, actor, id, activationExt, fail, historique);
   audit.track({ action: 'demande.mdp_regenere', actor, outcome: 'ok', cible: id, motif });
   return { id, statut: 'Actif', regeneration: true, motDePasseTemporaire };
 }

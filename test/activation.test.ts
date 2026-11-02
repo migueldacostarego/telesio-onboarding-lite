@@ -13,8 +13,8 @@ const TODAY = '2026-10-27';
 const MDP_RE = /^([A-HJ-NP-Z][a-km-z][2-9][a-km-z]-){3}[A-HJ-NP-Z][a-km-z][2-9][a-km-z]$/;
 
 /** Contexte commun : un compte d'onboarding par statut, et les lectures de Graph qui en découlent. */
-function suite(env: Record<string, string | undefined> = {}) {
-  const h = harness(env);
+function suite(env: Record<string, string | undefined> = {}, opts: Parameters<typeof harness>[1] = {}) {
+  const h = harness(env, opts);
   beforeEach(async () => {
     if (h.ctx) await h.stop();
     await h.start();
@@ -197,6 +197,19 @@ describe('temporaryPassword', () => {
   });
 });
 
+describe('activer : date de remise lue juste avant la réinitialisation', () => {
+  // Horloge qui avance de 5 s à chaque lecture : la requête lit la date en entrant, la remise la relit avant le PATCH.
+  let lectures = 0;
+  const { h, g, account } = suite({}, { now: () => new Date(NOW.getTime() + 5_000 * lectures++) });
+
+  it('la référence n’est pas la date d’entrée de la requête : les appels Graph qui précèdent ne la repoussent pas', async () => {
+    lectures = 0;
+    const id = account();
+    expect((await h.callRh('POST', `/api/demandes/${id}/activer`)).status).toBe(200);
+    expect(Date.parse(g().users.get(id)!.props[EXT_ACT] as string)).toBeGreaterThan(NOW.getTime());
+  });
+});
+
 describe('POST /api/demandes/:id/regenerer', () => {
   const { h, g, account, actif, writes } = suite();
   const regenerer = (id: string, body: unknown = { motif: 'code_perdu' }) => h.callRh('POST', `/api/demandes/${id}/regenerer`, body);
@@ -270,7 +283,7 @@ describe('POST /api/demandes/:id/terminer', () => {
   });
 
   it('mot de passe inchangé depuis la remise (avant, à la même seconde, ou dans la marge : c’est la remise elle-même) : pas de transition', async () => {
-    for (const quand of ['2026-10-25T09:00:00Z', '2026-10-26T10:00:00Z', '2026-10-26T10:00:30Z']) {
+    for (const quand of ['2026-10-25T09:00:00Z', '2026-10-26T10:00:00Z', '2026-10-26T10:00:05Z']) {
       const id = complet(quand);
       const res = await terminer(id);
       expect(res.status).toBe(409);
@@ -280,10 +293,16 @@ describe('POST /api/demandes/:id/terminer', () => {
     expect(writes()).toEqual([]);
   });
 
-  it('compare des instants, pas des chaînes : remise à 10:00:00.000Z + marge de 60 s, 10:01:00Z ne compte pas, 10:01:01Z compte', async () => {
-    const egal = await terminer(complet('2026-10-26T10:01:00Z'));
+  it('compare des instants, pas des chaînes : remise à 10:00:00.000Z + marge de 10 s, 10:00:10Z ne compte pas, 10:00:11Z compte', async () => {
+    const egal = await terminer(complet('2026-10-26T10:00:10Z'));
     expect(egal.status).toBe(409);
-    expect((await terminer(complet('2026-10-26T10:01:01Z'))).status).toBe(200);
+    expect((await terminer(complet('2026-10-26T10:00:11Z'))).status).toBe(200);
+  });
+
+  it('cas de test (2026-11-02) : régénération à 10:27:02.931Z, remise vue à 10:27:03Z, changement par l’arrivant 55 s plus tard', async () => {
+    const remise = { [EXT_ACT]: '2026-11-02T10:27:02.931Z' };
+    expect((await terminer(actif({ ...remise, lastPasswordChangeDateTime: '2026-11-02T10:27:03Z' }, { authenticator: true }))).status).toBe(409);
+    expect((await terminer(actif({ ...remise, lastPasswordChangeDateTime: '2026-11-02T10:27:58Z' }, { authenticator: true }))).status).toBe(200);
   });
 
   it('sans méthode Microsoft Authenticator : pas de transition', async () => {
