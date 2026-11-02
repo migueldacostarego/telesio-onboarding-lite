@@ -5,7 +5,7 @@ import { KeyedLock } from '../src/lock';
 import { ACTEUR_TERMINAISON, demarrerTerminaisonAuto, terminerComptesAcheves } from '../src/terminaison';
 import { ARRIVANTS_GROUP, EXT, EXT_ACT, HISTORY, HISTORY_ENV, RH_ID, listen, principal, setup } from './helpers/ctx';
 
-// NOW (ctx) = 2026-10-27 10:00 UTC. Activation le 26 à 10:00 ; mot de passe changé plus de 60 s après la remise = complet.
+// NOW (ctx) = 2026-10-27 10:00 UTC. Activation le 26 à 10:00 ; mot de passe changé plus de 10 s après la remise = complet.
 const ACTIVATION = '2026-10-26T10:00:00.000Z';
 
 function monter(env: Record<string, string | undefined> = {}) {
@@ -35,7 +35,7 @@ describe('terminerComptesAcheves : passage à Terminé par le serveur', () => {
     const { ctx, g, deps, actif, statut, lock } = monter();
     const complet = actif('Complet');
     const sansAuth = actif('SansAuth', { authenticator: false });
-    const sansMdp = actif('SansMdp', { motDePasse: '2026-10-26T10:00:30Z' }); // dans la marge de 60 s : c'est la remise, pas l'arrivant
+    const sansMdp = actif('SansMdp', { motDePasse: '2026-10-26T10:00:05Z' }); // dans la marge de 10 s : c'est la remise, pas l'arrivant
     const bilan = await terminerComptesAcheves(deps, lock);
 
     expect(bilan).toEqual({ lus: 3, termines: 1, ignores: 0 });
