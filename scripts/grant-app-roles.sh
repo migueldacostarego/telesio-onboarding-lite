@@ -4,8 +4,14 @@
 #   - rôles RH et Direction de l'application, d'après rh_principal_object_ids et direction_principal_object_ids
 #     de infra/envs/<env>.tfvars ;
 #   - unité administrative à gestion restreinte des comptes d'onboarding (audit M8) : création, rôle User Administrator de
-#     l'identité managée limité à l'unité, et ajout des demandes en cours (EnAttente, Validé, Actif) qui n'y sont pas encore.
-#     L'objectId de l'unité est à reporter dans onboarding_unit_id (tfvars), puis terraform apply.
+#     l'identité managée limité à l'unité. L'objectId de l'unité est à reporter dans onboarding_unit_id (tfvars), puis
+#     terraform apply.
+#
+# MIGRER=true (une seule fois, à la mise en place de l'unité) : ajoute aussi à l'unité les demandes en cours créées avant
+# elle (EnAttente, Validé, Actif). À ne jamais laisser actif ensuite : un administrateur d'utilisateurs peut poser un statut
+# sur n'importe quel compte, et ce script le ferait entrer dans l'unité (l'application l'accepterait alors comme demande).
+# Garde-fous : un compte EnAttente ou Validé déjà activé (l'application ne crée que des comptes désactivés) ou qui porte un
+# rôle d'annuaire est écarté et signalé. Sans APPLY=true, la liste des candidats est affichée pour relecture.
 # Terraform ne les gère plus : affecter un rôle d'application exige AppRoleAssignment.ReadWrite.All, qui permettrait à
 # l'identité d'apply de la CI de s'accorder n'importe quel droit Graph (tier 0). Voir README, « Prérequis ».
 #
@@ -184,31 +190,45 @@ if [[ -n "$unit_id" ]]; then
     MISSING=$((MISSING + 1))
   fi
 
-  # Demandes en cours créées avant l'unité : sans elles dans l'unité, l'application les refuse (404).
-  status_ext="$(az webapp config appsettings list -g "rg-${NAME}" -n "app-${NAME}" \
-    --query "[?name=='ENTRA_STATUS_EXTENSION'].value | [0]" -o tsv)"
-  if [[ -z "$status_ext" ]]; then
-    echo "ENTRA_STATUS_EXTENSION introuvable sur app-${NAME} : appliquer Terraform d'abord." >&2
-    exit 1
+  # Demandes en cours créées avant l'unité (MIGRER=true seulement) : sans elles dans l'unité, l'application les refuse (404).
+  [[ "${MIGRER:-false}" == "true" ]] && migrer=true || migrer=false
+  if [[ "$migrer" == "true" ]]; then
+    status_ext="$(az webapp config appsettings list -g "rg-${NAME}" -n "app-${NAME}" \
+      --query "[?name=='ENTRA_STATUS_EXTENSION'].value | [0]" -o tsv)"
+    if [[ -z "$status_ext" ]]; then
+      echo "ENTRA_STATUS_EXTENSION introuvable sur app-${NAME} : appliquer Terraform d'abord." >&2
+      exit 1
+    fi
+    members="$(az rest --method GET --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}/members?\$select=id&\$top=999" \
+      --query "value[].id" -o tsv)"
+    for statut in EnAttente Validé Actif; do
+      while IFS=$'\t' read -r uid enabled; do
+        [[ -z "$uid" ]] && continue
+        if grep -qx "$uid" <<<"$members"; then continue; fi
+        if [[ "$statut" != "Actif" && "$enabled" == "true" ]]; then
+          log "Demande $uid ($statut) : ÉCARTÉE, compte déjà activé (l'application ne crée que des comptes désactivés)"
+          continue
+        fi
+        roles="$(az rest --method GET \
+          --url "https://graph.microsoft.com/v1.0/users/${uid}/transitiveMemberOf/microsoft.graph.directoryRole?\$select=id" \
+          --query "length(value)" -o tsv)"
+        if [[ "$roles" != "0" ]]; then
+          log "Demande $uid ($statut) : ÉCARTÉE, le compte porte un rôle d'annuaire (statut posé à la main ?)"
+          continue
+        fi
+        if [[ "$APPLY" == "true" ]]; then
+          log "Demande $uid ($statut) : ajout à l'unité"
+          az rest --method POST --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}/members/\$ref" \
+            --body "{\"@odata.id\":\"https://graph.microsoft.com/v1.0/directoryObjects/${uid}\"}" -o none
+        else
+          log "Demande $uid ($statut) : candidate, à ajouter à l'unité (relire, puis APPLY=true MIGRER=true)"
+          MISSING=$((MISSING + 1))
+        fi
+      done < <(az rest --method GET --headers "ConsistencyLevel=eventual" \
+        --url "https://graph.microsoft.com/v1.0/users?\$filter=${status_ext} eq '${statut}'&\$select=id,accountEnabled&\$count=true&\$top=999" \
+        --query "value[].[id, to_string(accountEnabled)]" -o tsv)
+    done
   fi
-  members="$(az rest --method GET --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}/members?\$select=id&\$top=999" \
-    --query "value[].id" -o tsv)"
-  for statut in EnAttente Validé Actif; do
-    while IFS= read -r uid; do
-      [[ -z "$uid" ]] && continue
-      if grep -qx "$uid" <<<"$members"; then continue; fi
-      if [[ "$APPLY" == "true" ]]; then
-        log "Demande $uid ($statut) : ajout à l'unité"
-        az rest --method POST --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}/members/\$ref" \
-          --body "{\"@odata.id\":\"https://graph.microsoft.com/v1.0/directoryObjects/${uid}\"}" -o none
-      else
-        log "Demande $uid ($statut) : HORS UNITÉ (APPLY=true pour l'ajouter)"
-        MISSING=$((MISSING + 1))
-      fi
-    done < <(az rest --method GET --headers "ConsistencyLevel=eventual" \
-      --url "https://graph.microsoft.com/v1.0/users?\$filter=${status_ext} eq '${statut}'&\$select=id&\$count=true&\$top=999" \
-      --query "value[].id" -o tsv)
-  done
 
   echo
   echo "Unité des comptes d'onboarding : ${unit_id}"
