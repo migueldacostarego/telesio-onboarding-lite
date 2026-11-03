@@ -13,6 +13,7 @@ const valide = {
   service: 'Technique',
   managerId: MANAGER,
   typeContrat: 'Employé',
+  pays: 'FR',
 };
 
 const run = (body: unknown) => validateDemande(body, TODAY, DOMAIN);
@@ -27,7 +28,7 @@ describe('validateDemande : demande valide', () => {
     const v = run({ ...valide, prenom: '  Camille ', poste: 'Développeuse\t ' });
     expect(v).toEqual({ ok: true, value: valide });
     if (v.ok) {
-      expect(Object.keys(v.value)).toEqual(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'typeContrat']);
+      expect(Object.keys(v.value)).toEqual(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'typeContrat', 'pays']);
     }
   });
 
@@ -42,6 +43,19 @@ describe('validateDemande : demande valide', () => {
       ok: true,
       value: { ...valide, dateArrivee: TODAY, typeContrat: 'Contractor' },
     });
+  });
+});
+
+describe('validateDemande : pays', () => {
+  it('accepte Maurice, et pose France quand le client n’envoie pas de pays', () => {
+    expect(run({ ...valide, pays: 'MU' })).toEqual({ ok: true, value: { ...valide, pays: 'MU' } });
+    const sansPays: Record<string, unknown> = { ...valide };
+    delete sansPays.pays;
+    expect(run(sansPays)).toEqual({ ok: true, value: { ...valide, pays: 'FR' } });
+  });
+
+  it('refuse un pays hors liste', () => {
+    for (const pays of ['', 'fr', 'France', 'BE', 42, null]) expect(details({ ...valide, pays })).toEqual({ pays: 'requis, parmi : FR, MU' });
   });
 });
 

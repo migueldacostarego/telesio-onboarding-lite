@@ -55,6 +55,7 @@ export const detailDe = (d: Demande, surcharge: Partial<DemandeDetail> = {}): De
   poste: d.poste,
   service: d.service,
   manager: { nom: 'Chef Exemple' },
+  pays: 'MU',
   dateArrivee: d.dateArrivee,
   statut: d.statut,
   etape: d.etape as DemandeDetail['etape'],

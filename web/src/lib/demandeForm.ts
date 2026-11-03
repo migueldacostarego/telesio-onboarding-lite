@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { erreurEmail } from '@/lib/email';
 import { aujourdhui } from '@/lib/suivi';
+import { CODES_PAYS } from '@/lib/pays';
 import { TYPES_CONTRAT } from '@/lib/typeContrat';
 
 // CSP de /app sans 'unsafe-eval' : zod compile ses schémas avec `new Function` s'il le peut, et sonde pour cela (la CSP signale
@@ -46,6 +47,7 @@ export const schemaDemande = (domaine: string) =>
       .transform((s) => s.trim().toLowerCase())
       .refine((s) => erreurEmail(s, domaine) === null, { error: (issue) => erreurEmail(String(issue.input), domaine) ?? 'Adresse invalide' }),
     typeContrat: z.enum(TYPES_CONTRAT, { error: 'Choisissez un type de contrat' }),
+    pays: z.enum(CODES_PAYS, { error: 'Choisissez un pays' }),
     dateArrivee: z
       .string()
       .refine(dateReelle, 'Date d’arrivée requise')
@@ -59,7 +61,7 @@ export const schemaDemande = (domaine: string) =>
 export type DemandeEntree = z.input<ReturnType<typeof schemaDemande>>;
 export type DemandeSortie = z.output<ReturnType<typeof schemaDemande>>;
 /** Dans l'ordre de la page : le premier champ en erreur reçoit le focus. */
-export const CHAMPS = ['prenom', 'nom', 'email', 'typeContrat', 'dateArrivee', 'poste', 'service', 'managerId'] as const;
+export const CHAMPS = ['prenom', 'nom', 'email', 'typeContrat', 'pays', 'dateArrivee', 'poste', 'service', 'managerId'] as const;
 export type Champ = (typeof CHAMPS)[number];
 export const estChamp = (c: string): c is Champ => (CHAMPS as readonly string[]).includes(c);
 

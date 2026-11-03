@@ -1,5 +1,6 @@
 import type { Client } from '@microsoft/microsoft-graph-client';
 import { latestTokenInfo, tokenAuditProps } from './tokenRoles';
+import { paysLu, type CodePays } from './pays';
 import { typeLu, type TypeContrat } from './typeContrat';
 
 export interface DirectoryUser {
@@ -65,6 +66,8 @@ export interface NewUser {
   employeeType: string;
   /** Requis pour qu'Entra attribue une licence (licence par groupe). */
   usageLocation: string;
+  /** Nom du pays (attribut natif `country`), lisible dans le portail. */
+  country: string;
   passwordProfile: { password: string; forceChangePasswordNextSignIn: boolean };
 }
 
@@ -97,6 +100,8 @@ export interface DemandeLue {
   service: string | null;
   /** employeeType, si c'est un type connu ; null pour un compte antérieur au formulaire par type. */
   typeContrat: TypeContrat | null;
+  /** Code du pays (usageLocation), s'il est connu ; null sinon. */
+  pays: CodePays | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
   createdDateTime: string | null;
@@ -395,7 +400,7 @@ export class GraphDirectory implements Directory {
     try {
       const u = await this.client
         .api(`/users/${id}`)
-        .select(`id,displayName,givenName,surname,userPrincipalName,jobTitle,department,employeeType,employeeHireDate,createdDateTime,lastPasswordChangeDateTime,accountEnabled${extensions.map((e) => `,${e}`).join('')}`)
+        .select(`id,displayName,givenName,surname,userPrincipalName,jobTitle,department,employeeType,usageLocation,employeeHireDate,createdDateTime,lastPasswordChangeDateTime,accountEnabled${extensions.map((e) => `,${e}`).join('')}`)
         .expand('manager($select=id,displayName)')
         .get();
       const str = (v: unknown) => (typeof v === 'string' ? v : null);
@@ -408,6 +413,7 @@ export class GraphDirectory implements Directory {
         poste: str(u.jobTitle),
         service: str(u.department),
         typeContrat: typeLu(u.employeeType),
+        pays: paysLu(u.usageLocation),
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
         createdDateTime: str(u.createdDateTime),
         lastPasswordChange: str(u.lastPasswordChangeDateTime),

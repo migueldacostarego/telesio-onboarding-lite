@@ -20,6 +20,7 @@ import { erreurEmail, proposerEmail } from '@/lib/email';
 import { useMoi } from '@/lib/moi';
 import { isSessionExpiredError } from '@/lib/session';
 import { aujourdhui } from '@/lib/suivi';
+import { CODES_PAYS, PAYS, PAYS_PAR_DEFAUT, type CodePays } from '@/lib/pays';
 import { TYPES_CONTRAT, TYPE_PAR_DEFAUT, type TypeContrat } from '@/lib/typeContrat';
 
 interface Props {
@@ -81,7 +82,7 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
     mode: 'onTouched',
     // Le focus du premier champ en erreur est posé ici (focaliser) : l’ordre de la page, y compris le type et le responsable.
     shouldFocusError: false,
-    defaultValues: { prenom: '', nom: '', email: '', typeContrat: TYPE_PAR_DEFAUT, dateArrivee: '', poste: '', service: '', managerId: '' },
+    defaultValues: { prenom: '', nom: '', email: '', typeContrat: TYPE_PAR_DEFAUT, pays: PAYS_PAR_DEFAUT, dateArrivee: '', poste: '', service: '', managerId: '' },
   });
   const { register, handleSubmit, setError, setValue, getValues, trigger, control, formState } = form;
   const { errors, isSubmitting } = formState;
@@ -94,7 +95,7 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
   // le basculement de `isSubmitted` relancerait la proposition et effacerait l'erreur que le serveur vient de poser sur l'adresse.
   const tente = useRef(false);
 
-  const [prenom, nom, email, typeContrat] = useWatch({ control, name: ['prenom', 'nom', 'email', 'typeContrat'] });
+  const [prenom, nom, email, typeContrat, pays] = useWatch({ control, name: ['prenom', 'nom', 'email', 'typeContrat', 'pays'] });
   const proposition = proposerEmail(prenom, nom, domaine);
   useEffect(() => {
     if (!edite) setValue('email', proposition, { shouldValidate: tente.current });
@@ -110,7 +111,7 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
    * Champ qui n'est pas un `<input>` enregistré (type, responsable) : `setValue` ne le valide pas (la bibliothèque ne valide que les
    * champs enregistrés), donc l'erreur affichée (du serveur, ou d'un envoi à vide) resterait jusqu'au prochain envoi.
    */
-  const poser = (champ: 'typeContrat' | 'managerId', valeur: string) => {
+  const poser = (champ: 'typeContrat' | 'pays' | 'managerId', valeur: string) => {
     setValue(champ, valeur, { shouldDirty: true, shouldTouch: true });
     void trigger(champ);
   };
@@ -122,7 +123,8 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
   const focaliser = (champs: readonly string[]) => {
     const premier = CHAMPS.find((c) => champs.includes(c));
     if (!premier) return;
-    document.getElementById(premier === 'typeContrat' ? `f-type-${getValues('typeContrat')}` : `f-${premier}`)?.focus();
+    const id = premier === 'typeContrat' ? `f-type-${getValues('typeContrat')}` : premier === 'pays' ? `f-pays-${getValues('pays')}` : `f-${premier}`;
+    document.getElementById(id)?.focus();
   };
 
   // Le serveur n'est appelé qu'une fois par envoi : une création n'est jamais rejouée (doublon de compte).
@@ -291,6 +293,31 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
                 ))}
               </RadioGroup>
               {errors.typeContrat?.message && <FieldError id="err-typeContrat">{errors.typeContrat.message}</FieldError>}
+            </Field>
+            <Field data-invalid={bad('pays') || undefined}>
+              <span id="legende-pays" className="text-sm leading-none font-medium">
+                Pays
+              </span>
+              <RadioGroup
+                id="f-pays"
+                aria-labelledby="legende-pays"
+                aria-describedby={desc('pays')}
+                value={pays}
+                onValueChange={(v) => poser('pays', v as CodePays)}
+                className="grid-cols-2 gap-2"
+              >
+                {CODES_PAYS.map((c) => (
+                  <Label
+                    key={c}
+                    htmlFor={`f-pays-${c}`}
+                    className="cursor-pointer rounded-md border px-3 py-2 has-data-checked:border-primary has-data-checked:bg-muted/60 has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
+                  >
+                    <RadioGroupItem id={`f-pays-${c}`} value={c} aria-invalid={bad('pays') || undefined} />
+                    {PAYS[c]}
+                  </Label>
+                ))}
+              </RadioGroup>
+              {errors.pays?.message && <FieldError id="err-pays">{errors.pays.message}</FieldError>}
             </Field>
             <Field data-invalid={bad('dateArrivee') || undefined}>
               <Label htmlFor="f-dateArrivee">Date d’arrivée</Label>

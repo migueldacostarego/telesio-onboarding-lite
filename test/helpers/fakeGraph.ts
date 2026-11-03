@@ -254,6 +254,7 @@ export class FakeGraph {
         jobTitle: u.props.jobTitle,
         department: u.props.department,
         employeeType: u.props.employeeType,
+        usageLocation: u.props.usageLocation,
         manager: call.expand && u.manager ? this.managerOf(u.manager) : undefined,
         employeeHireDate: u.props.employeeHireDate,
         lastPasswordChangeDateTime: u.props.lastPasswordChangeDateTime,

@@ -1,3 +1,4 @@
+import { CODES_PAYS, estCodePays, PAYS_PAR_DEFAUT, type CodePays } from './pays';
 import { estTypeContrat, TYPES_CONTRAT, type TypeContrat } from './typeContrat';
 import { MAX_LOCAL_BASE, normalizePart, upnBase } from './upn';
 
@@ -15,6 +16,8 @@ export interface DemandeInput {
   managerId: string;
   /** Type de contrat (`employeeType`) : il détermine la licence (LICENCES_PAR_TYPE), qui ne se choisit plus. */
   typeContrat: TypeContrat;
+  /** Pays de l'arrivant (code ISO) : `usageLocation` et `country` du compte. FR quand le client ne l'envoie pas. */
+  pays: CodePays;
   /** Adresse professionnelle voulue (UPN), en minuscules, sur le domaine de l'application. Absente : l'identifiant prenom.nom est attribué, avec un suffixe en cas d'homonyme. */
   email?: string;
 }
@@ -136,16 +139,19 @@ export function validateDemande(body: unknown, today: string, domain: string): V
   // La licence découle du type : un client qui l'envoie encore (formulaire d'avant) est refusé plutôt qu'ignoré en silence.
   if (b.licence !== undefined) details.licence = 'ne se choisit plus : elle dépend du type de contrat (typeContrat)';
 
+  const pays = b.pays === undefined ? PAYS_PAR_DEFAUT : estCodePays(b.pays) ? b.pays : undefined;
+  if (!pays) details.pays = `requis, parmi : ${CODES_PAYS.join(', ')}`;
+
   const email = lireEmail(b.email, domain);
   if (email.erreur) details.email = email.erreur;
 
-  if (Object.keys(details).length > 0 || !typeContrat || !estComplet(valeurs)) {
+  if (Object.keys(details).length > 0 || !typeContrat || !pays || !estComplet(valeurs)) {
     return { ok: false, details };
   }
   const { prenom, nom, poste, service } = valeurs;
   return {
     ok: true,
-    value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, ...(email.email ? { email: email.email } : {}) },
+    value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, pays, ...(email.email ? { email: email.email } : {}) },
   };
 }
 
