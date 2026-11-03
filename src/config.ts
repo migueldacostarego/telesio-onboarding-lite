@@ -32,6 +32,13 @@ export interface Config {
   licenseExtension?: string;
   /** Groupe de sécurité des arrivants : ajouté à la validation, retiré à Terminé. Cible de l'accès conditionnel qui impose Authenticator. Absent : activation fermée (503). */
   arrivantsGroupId?: string;
+  /**
+   * Unité administrative à gestion restreinte des comptes d'onboarding (ENTRA_ONBOARDING_UNIT_ID) : chaque compte créé y est
+   * ajouté, retiré à Terminé, et toute action refuse (404) un compte qui n'en est pas membre. Seule l'application (rôle limité à
+   * l'unité) peut alors modifier ces comptes : un administrateur d'utilisateurs du tenant ne peut ni changer leur statut ni
+   * faire passer un autre compte pour une demande. Absente : aucun contrôle (dev, avant la mise en place). Obligatoire avant la prod.
+   */
+  onboardingUnitId?: string;
   /** Extension qui porte la date d'activation : extension_<appId sans tirets>_activationOnboarding. Absente : activation fermée (503). */
   activationExtension?: string;
   /** Extension qui porte l'objectId du créateur de la demande (extension_<appId>_createurOnboarding) : écrite à la création, lue pour tracer l'auto-approbation (demande.auto_approbation). */
@@ -178,6 +185,13 @@ export function parseArrivantsGroupId(raw: string | undefined): string | undefin
   return v?.toLowerCase();
 }
 
+/** ENTRA_ONBOARDING_UNIT_ID : GUID facultatif, mis en minuscules. */
+export function parseOnboardingUnitId(raw: string | undefined): string | undefined {
+  const v = opt(raw);
+  if (v !== undefined && !GUID_RE.test(v)) throw new Error('ENTRA_ONBOARDING_UNIT_ID invalide (attendu : GUID)');
+  return v?.toLowerCase();
+}
+
 /** TZ_METIER : fuseau IANA, Europe/Paris si absent. */
 export function parseTimeZone(raw: string | undefined): string {
   const v = opt(raw) ?? 'Europe/Paris';
@@ -209,6 +223,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const licenseByType = parseLicenseByType(env.LICENCES_PAR_TYPE, licenses);
   const folderPattern = parseFolderPattern(env.SHAREPOINT_FOLDER_PATTERN);
   const arrivantsGroupId = parseArrivantsGroupId(env.ARRIVANTS_GROUP_ID);
+  const onboardingUnitId = parseOnboardingUnitId(env.ENTRA_ONBOARDING_UNIT_ID);
   const activationExtension = parseExtension(env.ENTRA_ACTIVATION_EXTENSION, 'ENTRA_ACTIVATION_EXTENSION');
   const creatorExtension = parseExtension(env.ENTRA_CREATOR_EXTENSION, 'ENTRA_CREATOR_EXTENSION');
   const history = parseHistory(env);
@@ -230,6 +245,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     licenseByType,
     licenseExtension,
     arrivantsGroupId,
+    onboardingUnitId,
     activationExtension,
     creatorExtension,
     history,

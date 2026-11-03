@@ -9,7 +9,7 @@ export interface DemandeDeps {
   config: ReadyConfig;
   directory: Directory;
   audit: Audit;
-  /** Délais entre les tentatives de PUT manager (réplication Entra juste après la création). */
+  /** Délais entre les tentatives de PUT manager et d'ajout à l'unité administrative (réplication Entra juste après la création). */
   managerRetryDelaysMs?: number[];
   sleep?: (ms: number) => Promise<void>;
 }
@@ -130,6 +130,11 @@ export async function createDemande(
     }
     audit.track({ action: 'demande.compte_cree', actor, outcome: 'ok', cible: targetId, suffixe: attempt, statut: 'EnAttente', sku: licence, typeContrat: input.typeContrat });
 
+    if (config.onboardingUnitId) {
+      step = 'unite_ajout';
+      await ajouterALUnite(deps, actor, targetId, config.onboardingUnitId, delays, sleep);
+    }
+
     step = 'manager_affectation';
     try {
       await assignManager(directory, targetId, input.managerId, delays, sleep);
@@ -150,6 +155,37 @@ export async function createDemande(
   }
 }
 
+/**
+ * Compte tout juste créé dans l'unité administrative des comptes d'onboarding (Graph ne crée pas un utilisateur directement
+ * dans une unité). Avant le manager : une fois membre d'une unité à gestion restreinte, le compte n'est plus modifiable que par
+ * le rôle de l'application limité à l'unité. Échec : le compte est supprimé (jamais de demande hors unité, qu'aucune action
+ * n'accepterait), et 502 qui nomme l'étape.
+ */
+async function ajouterALUnite(
+  deps: DemandeDeps,
+  actor: string,
+  userId: string,
+  unitId: string,
+  delays: number[],
+  sleep: (ms: number) => Promise<void>,
+): Promise<void> {
+  try {
+    await retryOnNotFound(() => deps.directory.addUnitMember(unitId, userId), delays, sleep);
+  } catch (err) {
+    deps.audit.track({ action: 'demande.echec', actor, outcome: 'erreur', etape: 'unite_ajout', cible: userId, ...graphFailureProps(err) });
+    const supprime = await deps.directory.deleteUser(userId).then(
+      () => true,
+      () => false,
+    );
+    deps.audit.track({ action: 'demande.compte_supprime', actor, outcome: supprime ? 'ok' : 'erreur', cible: userId, etape: 'unite_ajout' });
+    throw new ServiceError(502, {
+      error: 'Le service d’annuaire a échoué ; la demande n’a pas abouti',
+      etape: 'unite_ajout',
+      ...(supprime ? {} : { id: userId }),
+    });
+  }
+}
+
 /** PUT manager, réessayé tant que le compte tout juste créé n'est pas répliqué (404). */
 async function assignManager(
   directory: Directory,
@@ -158,9 +194,14 @@ async function assignManager(
   delays: number[],
   sleep: (ms: number) => Promise<void>,
 ): Promise<void> {
+  return retryOnNotFound(() => directory.setManager(userId, managerId), delays, sleep);
+}
+
+/** Réessaie tant que Graph répond 404 (compte tout juste créé, pas encore répliqué), une fois par délai. */
+async function retryOnNotFound(fn: () => Promise<void>, delays: number[], sleep: (ms: number) => Promise<void>): Promise<void> {
   for (let i = 0; ; i++) {
     try {
-      await directory.setManager(userId, managerId);
+      await fn();
       return;
     } catch (err) {
       if (err instanceof DirectoryError && err.kind === 'notFound' && i < delays.length) {

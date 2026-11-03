@@ -168,6 +168,22 @@ variable "direction_principal_object_ids" {
   default     = []
 }
 
+variable "onboarding_unit_id" {
+  description = "objectId de l'unité administrative à gestion restreinte des comptes d'onboarding (ENTRA_ONBOARDING_UNIT_ID), créée par scripts/grant-app-roles.sh (action d'administrateur, pas Terraform) qui l'affiche. Vide : aucun contrôle d'unité (tout administrateur d'utilisateurs peut alors écrire le statut). Obligatoire en prod."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.onboarding_unit_id == "" || can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.onboarding_unit_id))
+    error_message = "onboarding_unit_id doit être un GUID, ou vide."
+  }
+
+  validation {
+    condition     = var.environment != "prod" || var.onboarding_unit_id != ""
+    error_message = "onboarding_unit_id est obligatoire en prod (audit M8) : lancer scripts/grant-app-roles.sh, puis reporter l'objectId affiché."
+  }
+}
+
 variable "manage_app_owner" {
   description = "Terraform ajoute l'identité d'apply comme propriétaire de l'inscription. false quand cette identité n'a que Application.ReadWrite.OwnedBy (CI) : elle devient propriétaire d'office en créant l'inscription et l'ajout échouerait (« already exists »)."
   type        = bool

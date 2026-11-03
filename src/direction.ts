@@ -44,6 +44,21 @@ export function creatorExtensionOf(deps: Pick<DirectionDeps, 'config'>): string 
   return ext;
 }
 
+/**
+ * Unité administrative des comptes d'onboarding (ENTRA_ONBOARDING_UNIT_ID) : un compte qui n'en est pas membre n'est pas une
+ * demande, quel que soit son statut (un administrateur d'utilisateurs peut écrire l'extension, pas ajouter un compte à l'unité).
+ * 404 comme une demande inexistante, tracé `demande.hors_unite`. Sans unité configurée : aucun contrôle.
+ */
+export async function exigerUnite(deps: Pick<DirectionDeps, 'config' | 'directory' | 'audit'>, actor: string, id: string): Promise<void> {
+  const unitId = deps.config.onboardingUnitId;
+  if (!unitId) return;
+  const membre = await step(deps, actor, 'unite_lecture', id, {}, () => deps.directory.isMemberOfUnit(id, unitId));
+  if (!membre) {
+    deps.audit.track({ action: 'demande.hors_unite', actor, outcome: 'refuse', cible: id });
+    throw new ServiceError(404, { error: 'Demande introuvable' });
+  }
+}
+
 /** Vrai si la demande a été créée par cette personne (comparaison d'objectId sans tenir compte de la casse). */
 export const isCreator = (createur: string | null | undefined, actor: string): boolean =>
   createur != null && createur.toLowerCase() === actor.toLowerCase();
@@ -68,6 +83,7 @@ async function loadForAction(
     deps.audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
     throw new ServiceError(404, { error: 'Demande introuvable' });
   }
+  await exigerUnite(deps, actor, id);
   // Un compte activé n'est jamais validé ni refusé (refuser supprime). Reprendre le dossier d'un Validé l'accepte : après une
   // activation partielle (compte activé, puis échec du mot de passe ou du statut) le dossier manquant doit rester récupérable.
   const activeAcceptee = action === 'reprendre' && user.statut === 'Validé';

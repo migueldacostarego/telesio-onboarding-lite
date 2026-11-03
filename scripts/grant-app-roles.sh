@@ -2,7 +2,10 @@
 # Affectations de rôles d'application d'un environnement, posées par un administrateur (pas par la CI) :
 #   - permissions Graph (application) de l'identité managée de la Web App (GRAPH_APP_ROLES ci-dessous) ;
 #   - rôles RH et Direction de l'application, d'après rh_principal_object_ids et direction_principal_object_ids
-#     de infra/envs/<env>.tfvars.
+#     de infra/envs/<env>.tfvars ;
+#   - unité administrative à gestion restreinte des comptes d'onboarding (audit M8) : création, rôle User Administrator de
+#     l'identité managée limité à l'unité, et ajout des demandes en cours (EnAttente, Validé, Actif) qui n'y sont pas encore.
+#     L'objectId de l'unité est à reporter dans onboarding_unit_id (tfvars), puis terraform apply.
 # Terraform ne les gère plus : affecter un rôle d'application exige AppRoleAssignment.ReadWrite.All, qui permettrait à
 # l'identité d'apply de la CI de s'accorder n'importe quel droit Graph (tier 0). Voir README, « Prérequis ».
 #
@@ -12,7 +15,7 @@
 # Sans APPLY=true, le script n'écrit rien : il affiche ce qu'il ferait.
 #
 # Prérequis : az login, avec Privileged Role Administrator ou Global Administrator (permissions Graph de l'identité
-# managée) ; Reader sur le groupe de ressources de l'environnement.
+# managée, unité à gestion restreinte et rôle limité à l'unité) ; Reader sur le groupe de ressources de l'environnement.
 #
 # Usage :
 #   ENVIRONMENT=dev AZURE_TENANT_ID=<tenant> AZURE_SUBSCRIPTION_ID=<abonnement> scripts/grant-app-roles.sh
@@ -36,14 +39,19 @@ GRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
 
 # Permissions Graph (application) de l'identité managée.
 GRAPH_APP_ROLES=(
-  User.ReadWrite.All                       # créer et activer le compte, écrire statutOnboarding, supprimer
+  User.ReadWrite.All                       # créer le compte (et le supprimer si l'ajout à l'unité échoue) ; dans l'unité à gestion
+                                           # restreinte, ce droit ne s'applique plus : c'est le rôle limité à l'unité qui écrit
   User.Read.All                            # manager, disponibilité de l'UPN
   GroupMember.ReadWrite.All                # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups
   LicenseAssignment.Read.All               # GET /subscribedSkus : licences disponibles
   User-PasswordProfile.ReadWrite.All       # mot de passe temporaire le jour J (changement imposé à la 1re connexion)
   UserAuthMethod-MicrosoftAuthApp.Read.All # onboarding Terminé : Authenticator inscrit
   Sites.Selected                           # un seul site, via le grant SharePoint (graph.tf)
+  AdministrativeUnit.ReadWrite.All         # ajouter le compte créé à l'unité des comptes d'onboarding, l'en retirer à Terminé
 )
+# Rôle Entra « User Administrator » (modèle fixe), affecté à l'identité managée sur l'unité seulement : seul droit d'écriture
+# sur les comptes de l'unité (statut, compte, mot de passe, suppression). Il ne peut rien sur un compte hors de l'unité.
+USER_ADMIN_ROLE="fe930be7-5e62-47db-91af-98c3a49a38b1"
 
 log() { printf '> %s\n' "$*" >&2; }
 
@@ -135,6 +143,77 @@ for pair in "RH:rh_principal_object_ids" "Direction:direction_principal_object_i
   done
   report_extra "Rôle $value" "value[?appRoleId=='${role_id}'${filter}].principalId" "$web_sp"
 done
+
+# Unité administrative à gestion restreinte (le réglage ne peut être posé qu'à la création). Retrouvée par son nom.
+unit_name="Onboarding ${NAME}"
+unit_id="$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits?\$filter=displayName eq '${unit_name}'&\$select=id,isMemberManagementRestricted" \
+  --query "value[0].id" -o tsv)"
+if [[ -z "$unit_id" ]]; then
+  if [[ "$APPLY" == "true" ]]; then
+    log "Unité « ${unit_name} » : création (gestion restreinte)"
+    unit_id="$(az rest --method POST --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits" \
+      --body "{\"displayName\":\"${unit_name}\",\"description\":\"Comptes d'onboarding de app-${NAME} : modifiables par l'application seulement.\",\"isMemberManagementRestricted\":true}" \
+      --query id -o tsv)"
+  else
+    log "Unité « ${unit_name} » : MANQUANTE (APPLY=true pour la créer)"
+    MISSING=$((MISSING + 1))
+  fi
+else
+  restricted="$(az rest --method GET --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}?\$select=isMemberManagementRestricted" --query isMemberManagementRestricted -o tsv)"
+  if [[ "$restricted" != "true" ]]; then
+    echo "L'unité « ${unit_name} » existe sans gestion restreinte (réglage fixé à la création) : la supprimer, puis relancer." >&2
+    exit 1
+  fi
+  log "Unité « ${unit_name} » : déjà créée"
+fi
+
+if [[ -n "$unit_id" ]]; then
+  scope="/administrativeUnits/${unit_id}"
+  count="$(az rest --method GET \
+    --url "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?\$filter=principalId eq '${mi_principal}' and roleDefinitionId eq '${USER_ADMIN_ROLE}'" \
+    --query "value[?directoryScopeId=='${scope}'] | length(@)" -o tsv)"
+  if [[ "$count" != "0" ]]; then
+    log "User Administrator sur l'unité pour id-${NAME} : déjà affecté"
+  elif [[ "$APPLY" == "true" ]]; then
+    log "User Administrator sur l'unité pour id-${NAME} : affectation"
+    az rest --method POST --url "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" \
+      --body "{\"principalId\":\"${mi_principal}\",\"roleDefinitionId\":\"${USER_ADMIN_ROLE}\",\"directoryScopeId\":\"${scope}\"}" -o none
+  else
+    log "User Administrator sur l'unité pour id-${NAME} : MANQUANT (APPLY=true pour l'affecter)"
+    MISSING=$((MISSING + 1))
+  fi
+
+  # Demandes en cours créées avant l'unité : sans elles dans l'unité, l'application les refuse (404).
+  status_ext="$(az webapp config appsettings list -g "rg-${NAME}" -n "app-${NAME}" \
+    --query "[?name=='ENTRA_STATUS_EXTENSION'].value | [0]" -o tsv)"
+  if [[ -z "$status_ext" ]]; then
+    echo "ENTRA_STATUS_EXTENSION introuvable sur app-${NAME} : appliquer Terraform d'abord." >&2
+    exit 1
+  fi
+  members="$(az rest --method GET --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}/members?\$select=id&\$top=999" \
+    --query "value[].id" -o tsv)"
+  for statut in EnAttente Validé Actif; do
+    while IFS= read -r uid; do
+      [[ -z "$uid" ]] && continue
+      if grep -qx "$uid" <<<"$members"; then continue; fi
+      if [[ "$APPLY" == "true" ]]; then
+        log "Demande $uid ($statut) : ajout à l'unité"
+        az rest --method POST --url "https://graph.microsoft.com/v1.0/directory/administrativeUnits/${unit_id}/members/\$ref" \
+          --body "{\"@odata.id\":\"https://graph.microsoft.com/v1.0/directoryObjects/${uid}\"}" -o none
+      else
+        log "Demande $uid ($statut) : HORS UNITÉ (APPLY=true pour l'ajouter)"
+        MISSING=$((MISSING + 1))
+      fi
+    done < <(az rest --method GET --headers "ConsistencyLevel=eventual" \
+      --url "https://graph.microsoft.com/v1.0/users?\$filter=${status_ext} eq '${statut}'&\$select=id&\$count=true&\$top=999" \
+      --query "value[].id" -o tsv)
+  done
+
+  echo
+  echo "Unité des comptes d'onboarding : ${unit_id}"
+  echo "À reporter dans infra/envs/${ENVIRONMENT}.tfvars : onboarding_unit_id = \"${unit_id}\", puis terraform apply."
+fi
 
 if [[ "$MISSING" -gt 0 ]]; then
   echo
