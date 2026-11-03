@@ -3,7 +3,9 @@
 #   - gh-telesio-onboarding-plan : lecture seule, partagée par tous les environnements (PR) ; en plus de Reader,
 #     un rôle personnalisé limité à Microsoft.Web/sites/config/list/action, sur le seul groupe de ressources de
 #     l'environnement (relire les réglages de la Web App exige cette action, que Reader n'inclut pas) ;
-#   - gh-telesio-onboarding-apply-<env> : droits de déploiement de l'environnement (apply + déploiement).
+#   - gh-telesio-onboarding-apply-<env> : droits de déploiement de l'environnement (apply + déploiement), limités à son
+#     groupe de ressources (Contributor) et sans AppRoleAssignment.ReadWrite.All : les affectations de rôles
+#     d'application (permissions Graph de l'identité managée, rôles RH/Direction) passent par scripts/grant-app-roles.sh.
 # Crée les inscriptions, les principaux de service, les credentials fédérés GitHub et les rôles Azure.
 # Les permissions Graph ne sont attribuées qu'avec GRAPH_CONSENT=true (action d'administrateur) ; sans elle,
 # le script lit et affiche l'état réel du consentement.
@@ -50,14 +52,15 @@ PLAN_APP="gh-telesio-onboarding-plan"
 APPLY_APP="gh-telesio-onboarding-apply-${ENVIRONMENT}"
 ISSUER="https://token.actions.githubusercontent.com"
 GRAPH_APP_ID="00000003-0000-0000-c000-000000000000"
-# Permissions Graph (application). Le plan ne lit que ; l'apply crée les inscriptions qu'il possède et
-# attribue les rôles (permissions de l'identité managée, rôles RH/Direction) et gère le groupe de licence.
+# Permissions Graph (application). Le plan ne lit que ; l'apply crée les inscriptions qu'il possède et gère le groupe
+# de licence. Pas d'AppRoleAssignment.ReadWrite.All : avec lui, l'identité d'apply pourrait s'accorder n'importe quel droit
+# Graph (tier 0) ; les affectations de rôles sont faites par un administrateur (scripts/grant-app-roles.sh).
 # Licence : le plan relit le groupe et sa licence ; l'apply crée le groupe (Group.Create, User.Read.All : minimum
 # documenté du provider azuread_group) et lui attribue le SKU (LicenseAssignment.ReadWrite.All, azuread_group_license).
 # Group.Read.All en plus : avant de créer un groupe, le provider azuread relit les groupes (filtre sur displayName)
 # et échoue en 403 sans ce droit (constaté sur l'apply de dev, « Could not check for existing groups »).
 PLAN_GRAPH_ROLES=(Application.Read.All Group.Read.All LicenseAssignment.Read.All)
-APPLY_GRAPH_ROLES=(Application.ReadWrite.OwnedBy AppRoleAssignment.ReadWrite.All Group.Create Group.Read.All User.Read.All LicenseAssignment.ReadWrite.All)
+APPLY_GRAPH_ROLES=(Application.ReadWrite.OwnedBy Group.Create Group.Read.All User.Read.All LicenseAssignment.ReadWrite.All)
 
 # Les journaux vont sur stderr : les fonctions renvoient leur résultat sur stdout.
 log() { printf '> %s\n' "$*" >&2; }
@@ -84,6 +87,7 @@ state_scope="$(az storage account show -g "$STATE_RG" -n "$STATE_SA" --query id 
 sub_scope="/subscriptions/${AZURE_SUBSCRIPTION_ID}"
 # Groupe de ressources de l'app (créé par Terraform, nom de main.tf), et rôle personnalisé du plan.
 APP_RESOURCE_GROUP="${APP_RESOURCE_GROUP:-rg-telesio-onboarding-${ENVIRONMENT}}"
+LOCATION="${LOCATION:-francecentral}"
 CONFIG_READER_ROLE="Telesio Web App Config Reader"
 CONFIG_READER_ACTION="Microsoft.Web/sites/config/list/action"
 
@@ -227,13 +231,28 @@ else
 fi
 grant_graph "$plan_sp" "${PLAN_GRAPH_ROLES[@]}"
 
-# Identité d'apply de l'environnement.
+# Identité d'apply de l'environnement : Contributor sur le seul groupe de ressources de l'app (dev et test partagent
+# l'abonnement). Le groupe est créé ici, pas par la CI : Terraform le gère ensuite (tags), sans droit sur l'abonnement.
 apply_app_id="$(ensure_app "$APPLY_APP")"
 apply_sp="$(ensure_sp "$apply_app_id")"
 ensure_fic "$apply_app_id" "github-environment-${ENVIRONMENT}" "${SUB_PREFIX}:environment:${ENVIRONMENT}"
-ensure_role "$apply_sp" "Contributor" "$sub_scope"
+if [[ "$(az group exists -n "$APP_RESOURCE_GROUP")" != "true" ]]; then
+  log "Groupe $APP_RESOURCE_GROUP : création (${LOCATION})"
+  az group create -n "$APP_RESOURCE_GROUP" -l "$LOCATION" -o none
+fi
+ensure_role "$apply_sp" "Contributor" "${sub_scope}/resourceGroups/${APP_RESOURCE_GROUP}"
 ensure_role "$apply_sp" "Storage Blob Data Contributor" "$state_scope"
 grant_graph "$apply_sp" "${APPLY_GRAPH_ROLES[@]}"
+
+# Droits d'avant ce découpage : signalés, jamais retirés en silence (commandes à lancer, une fois l'apply passé avec
+# les nouveaux droits).
+legacy_contributor="$(az role assignment list --assignee "$apply_sp" --scope "$sub_scope" \
+  --query "[?roleDefinitionName=='Contributor' && scope=='${sub_scope}'].id | join('', @)" -o tsv)"
+legacy_graph_role="$(az ad sp show --id "$GRAPH_APP_ID" \
+  --query "appRoles[?value=='AppRoleAssignment.ReadWrite.All'].id | join('', @)" -o tsv)"
+legacy_graph="$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/servicePrincipals/${apply_sp}/appRoleAssignments" \
+  --query "value[?appRoleId=='${legacy_graph_role}'].id | join('', @)" -o tsv)"
 
 upper="$(printf '%s' "$ENVIRONMENT" | tr '[:lower:]' '[:upper:]')"
 cat <<EOF
@@ -255,6 +274,15 @@ EOF
 if [[ "$ENVIRONMENT" == "prod" ]]; then
   echo "# prod : activer aussi « Required reviewers » dans Settings > Environments > prod."
 fi
+if [[ -n "$legacy_contributor" || -n "$legacy_graph" ]]; then
+  echo
+  echo "# Droits trop larges encore portés par ${APPLY_APP} (à retirer, administrateur) :"
+  [[ -n "$legacy_contributor" ]] && echo "az role assignment delete --ids ${legacy_contributor}"
+  [[ -n "$legacy_graph" ]] && echo "az rest --method DELETE --url https://graph.microsoft.com/v1.0/servicePrincipals/${apply_sp}/appRoleAssignments/${legacy_graph}"
+fi
+echo
+echo "# Affectations de rôles d'application (identité managée, RH/Direction), après le premier apply :"
+echo "ENVIRONMENT=${ENVIRONMENT} AZURE_TENANT_ID=${AZURE_TENANT_ID} AZURE_SUBSCRIPTION_ID=${AZURE_SUBSCRIPTION_ID} scripts/grant-app-roles.sh"
 if [[ "$GRAPH_MISSING" -gt 0 ]]; then
   echo
   echo "$GRAPH_MISSING permission(s) Graph à consentir (administrateur) : relancer avec GRAPH_CONSENT=true."

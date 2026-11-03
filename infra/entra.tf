@@ -87,29 +87,24 @@ resource "azuread_application_federated_identity_credential" "easyauth" {
   subject        = azurerm_user_assigned_identity.app.principal_id
 }
 
-resource "azuread_app_role_assignment" "rh" {
-  for_each = toset(var.rh_principal_object_ids)
+# Affectations des rôles RH et Direction : hors Terraform, pour la même raison que les permissions Graph de l'identité
+# managée (graph.tf). scripts/grant-app-roles.sh les pose d'après rh_principal_object_ids et direction_principal_object_ids
+# de envs/<env>.tfvars. Tout porteur du rôle Direction peut créer, activer, valider et refuser des demandes (y compris les
+# siennes, tracées) : c'est cette affectation qui désigne la direction. Avec app_role_assignment_required, quiconque n'a
+# aucun rôle est refusé à la connexion. Un groupe ne reçoit le rôle que s'il est direct (pas d'imbrication) et exige
+# Entra ID P1.
+removed {
+  from = azuread_app_role_assignment.rh
 
-  app_role_id         = local.rh_role_id
-  principal_object_id = each.value
-  resource_object_id  = azuread_service_principal.web.object_id
-
-  depends_on = [azuread_application_app_role.rh]
+  lifecycle {
+    destroy = false
+  }
 }
 
-locals {
-  # Tout porteur du rôle Direction peut créer, activer, valider et refuser des demandes (y compris les siennes, tracées) : c'est cette affectation
-  # qui désigne les personnes de la direction. Avec app_role_assignment_required, quiconque n'a aucun rôle est de toute façon
-  # refusé à la connexion. Un groupe ne reçoit le rôle que s'il est direct (pas d'imbrication) et exige Entra ID P1.
-  direction_role_principals = toset(compact(var.direction_principal_object_ids))
-}
+removed {
+  from = azuread_app_role_assignment.direction
 
-resource "azuread_app_role_assignment" "direction" {
-  for_each = local.direction_role_principals
-
-  app_role_id         = local.direction_role_id
-  principal_object_id = each.value
-  resource_object_id  = azuread_service_principal.web.object_id
-
-  depends_on = [azuread_application_app_role.direction]
+  lifecycle {
+    destroy = false
+  }
 }

@@ -1,28 +1,15 @@
-# Permissions Microsoft Graph (application) de l'identité managée, et ressources Graph
-# gérées via le provider msgraph (extension d'attribut, grant SharePoint).
+# Ressources Graph gérées via le provider msgraph (extensions d'attribut, grant SharePoint).
+#
+# Les permissions Graph de l'identité managée ne sont plus posées par Terraform : affecter un rôle d'application exige
+# AppRoleAssignment.ReadWrite.All, qui permettrait à l'identité d'apply de la CI de s'accorder n'importe quel droit Graph.
+# Elles sont attribuées par un administrateur avec scripts/grant-app-roles.sh, qui porte la liste (GRAPH_APP_ROLES).
+# Le bloc removed retire les affectations existantes de l'état sans les supprimer d'Entra.
+removed {
+  from = azuread_app_role_assignment.graph
 
-data "azuread_service_principal" "msgraph" {
-  client_id = "00000003-0000-0000-c000-000000000000" # Microsoft Graph
-}
-
-locals {
-  graph_app_roles = [
-    "User.ReadWrite.All",                       # créer et activer le compte, écrire statutOnboarding, supprimer
-    "User.Read.All",                            # manager, disponibilité de l'UPN
-    "GroupMember.ReadWrite.All",                # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups (valideur group)
-    "LicenseAssignment.Read.All",               # GET /subscribedSkus : licences disponibles
-    "User-PasswordProfile.ReadWrite.All",       # mot de passe temporaire le jour J (passwordProfile, changement imposé à la 1re connexion)
-    "UserAuthMethod-MicrosoftAuthApp.Read.All", # onboarding Terminé : Authenticator inscrit (GET /authentication/microsoftAuthenticatorMethods)
-    "Sites.Selected",                           # un seul site, via le grant ci-dessous
-  ]
-}
-
-resource "azuread_app_role_assignment" "graph" {
-  for_each = toset(local.graph_app_roles)
-
-  app_role_id         = data.azuread_service_principal.msgraph.app_role_ids[each.value]
-  principal_object_id = azurerm_user_assigned_identity.app.principal_id
-  resource_object_id  = data.azuread_service_principal.msgraph.object_id
+  lifecycle {
+    destroy = false
+  }
 }
 
 # Attribut d'extension statutOnboarding (EnAttente, Validé, Refusé, Actif) sur les utilisateurs.
@@ -262,5 +249,4 @@ resource "msgraph_resource" "sharepoint_site_grant" {
     id = "id"
   }
 
-  depends_on = [azuread_app_role_assignment.graph]
 }
