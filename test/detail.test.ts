@@ -115,6 +115,17 @@ describe('GET /api/demandes/:id', () => {
     expect(types).toEqual(['Employé', 'Contractor', null, null]);
   });
 
+  it('le pays vient d’usageLocation ; null pour un pays absent ou hors liste', async () => {
+    const ids = [
+      compte('Validé', { usageLocation: 'FR', [EXT_LIC]: LICENSE_SKU }),
+      compte('Validé', { usageLocation: 'MU', [EXT_LIC]: LICENSE_SKU }),
+      compte('Validé', { [EXT_LIC]: LICENSE_SKU }),
+      compte('Validé', { usageLocation: 'BE', [EXT_LIC]: LICENSE_SKU }),
+    ];
+    const pays = await Promise.all(ids.map(async (id) => ((await (await lire(id)).json()) as Detail).pays));
+    expect(pays).toEqual(['FR', 'MU', null, null]);
+  });
+
   it('un compte Actif : identité, responsable, licence, groupe, dossier, onboarding et chronologie complète', async () => {
     const chef = g().addUser('chef@exemple.test', 'Chef Dupont');
     const id = compte('Actif', {

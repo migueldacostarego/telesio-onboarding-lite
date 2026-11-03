@@ -64,6 +64,7 @@ describe('API', () => {
         jobTitle: 'Comptable',
         department: 'Finance',
         usageLocation: 'FR',
+        country: 'France',
         mailNickname: 'eloise.delacruz',
       });
       const pw = (created.passwordProfile as { password: string }).password;
@@ -93,6 +94,19 @@ describe('API', () => {
       const created = ctx.graph.calls.filter((c) => c.method === 'POST' && c.path === '/users').at(-1)!.body as Record<string, unknown>;
       expect(created).toMatchObject({ employeeType: 'Employé', [EXT_LIC]: LICENSE_SKU });
       expect(ctx.events.find((e) => e.action === 'demande.compte_cree' && e.cible === id)).toMatchObject({ typeContrat: 'Employé', sku: LICENSE_SKU });
+    });
+
+    it('Maurice : usageLocation MU et country Maurice dans le même POST ; France par défaut', async () => {
+      const res = await post({ ...valid(), prenom: 'Mia', nom: 'Maurice', pays: 'MU' });
+      expect(res.status).toBe(201);
+      const id = ((await res.json()) as { id: string }).id;
+      expect(ctx.graph.users.get(id)!.props).toMatchObject({ usageLocation: 'MU', country: 'Maurice' });
+      const sansPays: Record<string, unknown> = { ...valid(), prenom: 'Fred', nom: 'France' };
+      delete sansPays.pays;
+      const res2 = await post(sansPays);
+      expect(res2.status).toBe(201);
+      const id2 = ((await res2.json()) as { id: string }).id;
+      expect(ctx.graph.users.get(id2)!.props).toMatchObject({ usageLocation: 'FR', country: 'France' });
     });
 
     it('Contractor : la licence de son type (LICENCES_PAR_TYPE), pas celle d’Employé', async () => {

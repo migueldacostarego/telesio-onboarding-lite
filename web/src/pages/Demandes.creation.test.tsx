@@ -301,7 +301,7 @@ describe('responsable : recherche dans l’annuaire', () => {
 });
 
 describe('envoi', () => {
-  it('POST /api/demandes avec les huit champs (nettoyés, type et adresse, sans licence), la fenêtre se ferme, la liste est relue et la nouvelle ligne mise en évidence', async () => {
+  it('POST /api/demandes avec les neuf champs (nettoyés, type, pays et adresse, sans licence), la fenêtre se ferme, la liste est relue et la nouvelle ligne mise en évidence', async () => {
     const { etat, fetchMock, user } = monter({
       ...base,
       ecrire: () => {
@@ -315,7 +315,7 @@ describe('envoi', () => {
     await user.click(creer(panneau));
 
     expect(ecritures(fetchMock)).toEqual([
-      { url: '/api/demandes', corps: { prenom: 'Camille', nom: 'Durand', email: EMAIL, typeContrat: 'Employé', dateArrivee: '2026-11-16', poste: 'Analyste', service: 'Finance', managerId: MANAGER.id } },
+      { url: '/api/demandes', corps: { prenom: 'Camille', nom: 'Durand', email: EMAIL, typeContrat: 'Employé', pays: 'FR', dateArrivee: '2026-11-16', poste: 'Analyste', service: 'Finance', managerId: MANAGER.id } },
     ]);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('Demande créée pour Camille Durand')).toBeInTheDocument();
@@ -342,6 +342,17 @@ describe('envoi', () => {
     expect(ecritures(fetchMock)[0]?.corps).not.toHaveProperty('licence');
     const ligne = await screen.findByRole('row', { name: /Camille Durand/ });
     expect(within(ligne).getByText('Contractor')).toBeInTheDocument();
+  });
+
+  it('Maurice : le pays choisi part au serveur', async () => {
+    const { etat, fetchMock, user } = monter({ ...base, ecrire: () => { etat.demandes = [...etat.demandes, nouvelleLigne()]; return reply(201, CREEE); } });
+    await screen.findByText('Hugo Lambert');
+    const panneau = await ouvrir(user);
+    expect(screen.getByRole('radio', { name: 'France' })).toBeChecked();
+    await remplir(user);
+    await user.click(screen.getByRole('radio', { name: 'Maurice' }));
+    await user.click(creer(panneau));
+    expect(ecritures(fetchMock)).toMatchObject([{ corps: { pays: 'MU' } }]);
   });
 
   it('la ligne créée n’est pas encore répliquée : elle est affichée tout de suite avec « synchronisation… », la liste est relue toutes les 5 s, l’indicateur part quand l’API la rend', async () => {

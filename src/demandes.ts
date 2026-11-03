@@ -1,6 +1,7 @@
 import type { Audit } from './audit';
 import type { ReadyConfig } from './config';
 import { DirectoryError, graphFailureProps, type Directory } from './directory';
+import { PAYS } from './pays';
 import { randomPassword } from './password';
 import { upnBase, upnCandidate } from './upn';
 import type { DemandeInput } from './validation';
@@ -23,8 +24,6 @@ export class ServiceError extends Error {
   }
 }
 
-/** Pays d'usage posé à la création : Entra n'attribue aucune licence (par groupe) sans usageLocation. */
-export const USAGE_LOCATION = 'FR';
 const MAX_UPN_ATTEMPTS = 20;
 const DEFAULT_RETRY_DELAYS = [500, 1500, 3000, 5000];
 
@@ -104,7 +103,9 @@ export async function createDemande(
           jobTitle: input.poste,
           department: input.service,
           employeeType: input.typeContrat,
-          usageLocation: USAGE_LOCATION,
+          // Code du pays : Entra n'attribue aucune licence (par groupe) sans usageLocation.
+          usageLocation: input.pays,
+          country: PAYS[input.pays],
           passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
         }, {
           [config.licenseExtension as string]: licence,

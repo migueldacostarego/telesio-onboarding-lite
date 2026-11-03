@@ -2,6 +2,7 @@ import { ExternalLinkIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { BoutonCopier } from '@/components/demandes/Adresse';
 import type { DemandeDetail } from '@/lib/detail';
+import { PAYS } from '@/lib/pays';
 import { formatArrivee } from '@/lib/suivi';
 
 const ABSENT = <span className="text-muted-foreground">Non renseigné</span>;
@@ -81,6 +82,7 @@ export function Identite({ d }: { d: DemandeDetail }) {
         <Email d={d} />
       </Ligne>
       <Ligne libelle="Type de contrat">{ouAbsent(d.typeContrat)}</Ligne>
+      <Ligne libelle="Pays">{ouAbsent(d.pays ? PAYS[d.pays] : null)}</Ligne>
       <Ligne libelle="Poste">{ouAbsent(d.poste)}</Ligne>
       <Ligne libelle="Service">{ouAbsent(d.service)}</Ligne>
       <Ligne libelle="Responsable">{ouAbsent(d.manager?.nom)}</Ligne>

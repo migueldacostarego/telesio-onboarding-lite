@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiError, api } from '@/lib/api';
 import type { EtatOnboarding, Statut } from '@/lib/suivi';
 import { shouldRetry } from '@/lib/query';
+import type { CodePays } from '@/lib/pays';
 import type { TypeContrat } from '@/lib/typeContrat';
 
 /** Auteur d'une étape : `nom` null si le compte n'existe plus ; `systeme` : la tâche du serveur. */
@@ -36,6 +37,8 @@ export interface DemandeDetail {
   service: string | null;
   /** Type de contrat (employeeType) ; null : compte antérieur au formulaire par type. */
   typeContrat?: TypeContrat | null;
+  /** Pays (code de usageLocation) ; null : non renseigné ou hors liste. */
+  pays?: CodePays | null;
   manager: { nom: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;

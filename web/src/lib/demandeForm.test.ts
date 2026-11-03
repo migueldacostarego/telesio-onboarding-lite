@@ -5,7 +5,7 @@ import { schemaDemande } from '@/lib/demandeForm';
 const GUID = '11111111-2222-4333-8444-555555555555';
 const DOMAINE = 'exemple.test';
 const schema = schemaDemande(DOMAINE);
-const valide = { prenom: ' Camille ', nom: 'Durand', email: ' Camille.Durand@Exemple.Test ', typeContrat: 'Employé', poste: 'Analyste', service: 'Finance', dateArrivee: '2099-11-16', managerId: GUID };
+const valide = { prenom: ' Camille ', nom: 'Durand', email: ' Camille.Durand@Exemple.Test ', typeContrat: 'Employé', pays: 'FR', poste: 'Analyste', service: 'Finance', dateArrivee: '2099-11-16', managerId: GUID };
 
 describe('schemaDemande', () => {
   it('zod ne compile pas ses schémas (new Function) : la CSP de /app n’autorise pas eval', () => {
@@ -19,7 +19,12 @@ describe('schemaDemande', () => {
   it('met l’adresse en minuscules et retire les espaces ; aucune licence dans la sortie', () => {
     const sortie = schema.parse(valide);
     expect(sortie.email).toBe('camille.durand@exemple.test');
-    expect(Object.keys(sortie).sort()).toEqual(['dateArrivee', 'email', 'managerId', 'nom', 'poste', 'prenom', 'service', 'typeContrat']);
+    expect(Object.keys(sortie).sort()).toEqual(['dateArrivee', 'email', 'managerId', 'nom', 'pays', 'poste', 'prenom', 'service', 'typeContrat']);
+  });
+
+  it('pays : France ou Maurice seulement', () => {
+    expect(schema.parse({ ...valide, pays: 'MU' }).pays).toBe('MU');
+    expect(schema.safeParse({ ...valide, pays: 'BE' }).error?.issues[0]).toMatchObject({ path: ['pays'], message: 'Choisissez un pays' });
   });
 
   it.each([
