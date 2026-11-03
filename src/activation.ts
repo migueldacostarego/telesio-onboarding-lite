@@ -1,6 +1,6 @@
 import { todayIn } from './dates';
 import { ServiceError } from './demandes';
-import { step, type DirectionDeps } from './direction';
+import { exigerUnite, step, type DirectionDeps } from './direction';
 import type { OnboardingProgress, OnboardingUser } from './directory';
 import { decoderEvenement, encoderEvenement } from './history';
 import { temporaryPassword } from './password';
@@ -108,7 +108,28 @@ async function loadUser(deps: ActivationDeps, actor: string, id: string, extra: 
     audit.track({ action: 'demande.introuvable', actor, outcome: 'refuse', cible: id });
     throw new ServiceError(404, { error: 'Demande introuvable' });
   }
+  // Un compte Terminé n'est plus dans l'unité (retiré à la fin) : aucune action ne l'accepte de toute façon (409, ou « déjà
+  // Terminé » sans écriture pour terminer). Tout autre statut exige l'unité.
+  if (user.statut !== 'Terminé') await exigerUnite(deps, actor, id);
   return user;
+}
+
+/**
+ * Fin de l'onboarding : le compte quitte l'unité administrative, et redevient gérable par les administrateurs du tenant.
+ * Après le statut Terminé (sortir avant laisserait un compte Actif hors unité, que plus aucune action n'accepterait). Un échec
+ * ne défait pas Terminé : 502 qui nomme l'étape, et un nouvel appel de POST /terminer refait le retrait (la tâche de terminaison,
+qui ne lit que les comptes Actif, ne le refait pas).
+ */
+async function sortirDeLUnite(deps: ActivationDeps, actor: string, id: string): Promise<void> {
+  const unitId = deps.config.onboardingUnitId;
+  if (!unitId) return;
+  // Comme pour le groupe des arrivants : on ne retire que si le compte est encore membre.
+  const retire = await step(deps, actor, 'unite_retrait', id, { statut: 'Terminé' }, async () => {
+    if (!(await deps.directory.isMemberOfUnit(id, unitId))) return false;
+    await deps.directory.removeUnitMember(unitId, id);
+    return true;
+  });
+  if (retire) deps.audit.track({ action: 'onboarding.unite_retrait', actor, outcome: 'ok', cible: id });
 }
 
 function conflict(deps: ActivationDeps, actor: string, user: OnboardingUser, id: string, raison: string, extra: Record<string, unknown> = {}): never {
@@ -212,7 +233,10 @@ export async function terminerOnboarding(deps: ActivationDeps, actor: string, id
   const { config, directory, audit } = deps;
   const { groupId } = activationConfig(deps);
   const user = await loadUser(deps, actor, id);
-  if (user.statut === 'Terminé') return { id, statut: 'Terminé', deja: true };
+  if (user.statut === 'Terminé') {
+    await sortirDeLUnite(deps, actor, id); // reprise d'un retrait en échec ; sans effet si le compte n'est plus membre
+    return { id, statut: 'Terminé', deja: true };
+  }
   if (user.statut !== 'Actif') conflict(deps, actor, user, id, 'statut');
 
   const etat = await inspectOnboarding(deps, actor, id);
@@ -233,5 +257,6 @@ export async function terminerOnboarding(deps: ActivationDeps, actor: string, id
   const historique = config.history ? { [config.history.termine]: encoderEvenement(actor, maintenant(deps)) } : {};
   await step(deps, actor, 'statut', id, fail, () => directory.setExtensions(id, { [config.statusExtension]: 'Terminé', ...historique }));
   audit.track({ action: 'onboarding.termine', actor, outcome: 'ok', cible: id });
+  await sortirDeLUnite(deps, actor, id);
   return { id, statut: 'Terminé', deja: false };
 }

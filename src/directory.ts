@@ -195,6 +195,12 @@ export interface Directory {
   setExtensions(userId: string, values: Record<string, string>): Promise<void>;
   deleteUser(id: string): Promise<void>;
   isMemberOfGroup(userId: string, groupId: string): Promise<boolean>;
+  /** POST /directory/administrativeUnits/{id}/members/$ref ; sans effet si le compte est déjà membre. */
+  addUnitMember(unitId: string, userId: string): Promise<void>;
+  /** DELETE /directory/administrativeUnits/{id}/members/{userId}/$ref ; sans effet si le compte n'est pas membre. */
+  removeUnitMember(unitId: string, userId: string): Promise<void>;
+  /** POST /users/{id}/checkMemberObjects : le compte est-il membre de l'unité administrative ? */
+  isMemberOfUnit(userId: string, unitId: string): Promise<boolean>;
   search(q: string): Promise<DirectoryUser[]>;
   getUser(id: string): Promise<{ id: string; accountEnabled: boolean } | null>;
   upnTaken(upn: string): Promise<boolean>;
@@ -505,6 +511,38 @@ export class GraphDirectory implements Directory {
     try {
       const res = await this.client.api(`/users/${userId}/checkMemberGroups`).post({ groupIds: [groupId] });
       return ((res?.value ?? []) as string[]).some((g) => g.toLowerCase() === groupId.toLowerCase());
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async addUnitMember(unitId: string, userId: string): Promise<void> {
+    try {
+      await this.client
+        .api(`/directory/administrativeUnits/${unitId}/members/$ref`)
+        .post({ '@odata.id': `https://graph.microsoft.com/v1.0/directoryObjects/${userId}` });
+    } catch (err) {
+      const e = err as { statusCode?: number; message?: string };
+      // Même réponse que pour un groupe : 400 « One or more added object references already exist » si déjà membre.
+      if (e?.statusCode === 400 && /already exist/i.test(e.message ?? '')) return;
+      throw wrap(err);
+    }
+  }
+
+  async removeUnitMember(unitId: string, userId: string): Promise<void> {
+    try {
+      await this.client.api(`/directory/administrativeUnits/${unitId}/members/${userId}/$ref`).delete();
+    } catch (err) {
+      const e = wrap(err);
+      if (e.kind === 'notFound') return;
+      throw e;
+    }
+  }
+
+  async isMemberOfUnit(userId: string, unitId: string): Promise<boolean> {
+    try {
+      const res = await this.client.api(`/users/${userId}/checkMemberObjects`).post({ ids: [unitId] });
+      return ((res?.value ?? []) as string[]).some((g) => g.toLowerCase() === unitId.toLowerCase());
     } catch (err) {
       throw wrap(err);
     }

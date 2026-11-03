@@ -2,7 +2,7 @@ import type { AccessToken, TokenCredential } from '@azure/identity';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AuditEvent } from '../src/audit';
 import { createGraphClient, observeCredential } from '../src/graph';
-import { decodeTokenInfo, latestTokenInfo, recordTokenInfo } from '../src/tokenRoles';
+import { decodeTokenInfo, latestTokenInfo, recordTokenInfo, tokenAuditProps } from '../src/tokenRoles';
 
 const jwt = (claims: Record<string, unknown>) => `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.sig`;
 
@@ -27,6 +27,13 @@ describe('decodeTokenInfo', () => {
       expiresAt: new Date((IAT + 3600) * 1000).toISOString(),
     });
     expect(JSON.stringify(info)).not.toContain('a@b.c');
+  });
+
+  it('lit aussi les rôles d’annuaire (wids, triés), tracés par tokenAuditProps ; absents : pas de champ', () => {
+    const info = decodeTokenInfo(jwt({ roles: [], wids: ['fe930be7-5e62-47db-91af-98c3a49a38b1', '0997a1d0-0d1d-4acb-b408-d5ca73121e90'], iat: IAT }));
+    expect(info?.wids).toEqual(['0997a1d0-0d1d-4acb-b408-d5ca73121e90', 'fe930be7-5e62-47db-91af-98c3a49a38b1']);
+    expect(tokenAuditProps(info).jetonWids).toBe('0997a1d0-0d1d-4acb-b408-d5ca73121e90,fe930be7-5e62-47db-91af-98c3a49a38b1');
+    expect(tokenAuditProps(decodeTokenInfo(jwt({ roles: [] })))).not.toHaveProperty('jetonWids');
   });
 
   it('jeton sans revendication roles : liste vide ; jeton illisible : undefined', () => {

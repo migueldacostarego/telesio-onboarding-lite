@@ -80,6 +80,7 @@ locals {
     ARRIVANTS_GROUP_ID         = lower(azuread_group.arrivants.object_id)
     ENTRA_ACTIVATION_EXTENSION = msgraph_resource.activation_extension.output.name
     ENTRA_CREATOR_EXTENSION    = msgraph_resource.creator_extension.output.name
+    ENTRA_ONBOARDING_UNIT_ID   = lower(var.onboarding_unit_id)
 
     ENTRA_HISTORY_VALIDATION_EXTENSION   = msgraph_resource.history_validation.output.name
     ENTRA_HISTORY_ACTIVATION_EXTENSION   = msgraph_resource.history_activation.output.name

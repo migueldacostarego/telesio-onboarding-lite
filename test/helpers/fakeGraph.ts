@@ -42,6 +42,12 @@ export class FakeGraph {
     statusPatch?: number;
     groupAdd?: number;
     groupRemove?: number;
+    /** Échec de l'ajout à une unité administrative (POST members/$ref). */
+    unitAdd?: number;
+    /** Échec du retrait d'une unité administrative. */
+    unitRemove?: number;
+    /** Échec de checkMemberObjects (appartenance à une unité). */
+    unitCheck?: number;
     /** Échec de GET /subscribedSkus. */
     skus?: number;
     /** Échec de GET /authentication/microsoftAuthenticatorMethods. */
@@ -59,6 +65,10 @@ export class FakeGraph {
   authenticators = new Set<string>();
   /** groupId -> membres */
   groups = new Map<string, Set<string>>();
+  /** Unités administratives : unitId -> membres. */
+  units = new Map<string, Set<string>>();
+  /** Nombre d'ajouts à une unité qui échouent encore en 404 (compte tout juste créé, pas encore répliqué). */
+  unitAddNotFoundLeft = 0;
   /** Dossiers SharePoint : nom -> { id, folder? } (folder absent = c'est un fichier). */
   folders = new Map<string, { id: string; folder?: object }>();
   /** Lectures de la racine (GET children) faites : une seule par liste, jamais une par compte. */
@@ -296,6 +306,32 @@ export class FakeGraph {
     if (method === 'POST' && check) {
       const ids = (call.body as { groupIds: string[] }).groupIds;
       return { value: ids.filter((g) => this.groups.get(g)?.has(check[1] as string)) };
+    }
+    const unitAdd = /^\/directory\/administrativeUnits\/([^/]+)\/members\/\$ref$/.exec(path);
+    if (method === 'POST' && unitAdd) {
+      if (this.unitAddNotFoundLeft > 0) {
+        this.unitAddNotFoundLeft--;
+        throw graphError(404, 'Request_ResourceNotFound');
+      }
+      if (this.failOn.unitAdd) throw graphError(this.failOn.unitAdd, 'Authorization_RequestDenied');
+      const unit = unitAdd[1] as string;
+      const uid = (call.body as Record<string, string>)['@odata.id']!.split('/').pop() as string;
+      const members = this.units.get(unit) ?? new Set<string>();
+      if (members.has(uid)) throw graphError(400, 'Request_BadRequest', 'One or more added object references already exist');
+      this.units.set(unit, members.add(uid));
+      return undefined;
+    }
+    const unitDrop = /^\/directory\/administrativeUnits\/([^/]+)\/members\/([^/]+)\/\$ref$/.exec(path);
+    if (method === 'DELETE' && unitDrop) {
+      if (this.failOn.unitRemove) throw graphError(this.failOn.unitRemove, 'Authorization_RequestDenied');
+      if (!this.units.get(unitDrop[1] as string)?.delete(unitDrop[2] as string)) throw graphError(404, 'Request_ResourceNotFound');
+      return undefined;
+    }
+    const checkObjects = /^\/users\/([^/]+)\/checkMemberObjects$/.exec(path);
+    if (method === 'POST' && checkObjects) {
+      if (this.failOn.unitCheck) throw graphError(this.failOn.unitCheck, 'Authorization_RequestDenied');
+      const ids = (call.body as { ids: string[] }).ids;
+      return { value: ids.filter((u) => this.units.get(u)?.has(checkObjects[1] as string)) };
     }
     const children = /^\/sites\/[^/]+\/drives\/[^/]+\/root\/children$/.exec(path);
     if (method === 'POST' && children) {
