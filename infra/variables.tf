@@ -184,6 +184,17 @@ variable "onboarding_unit_id" {
   }
 }
 
+variable "salesforce_group_id" {
+  description = "objectId du groupe de sécurité affecté à l'application Salesforce d'Entra (SALESFORCE_GROUP_ID) : l'application y ajoute l'arrivant à la validation et le provisionnement d'Entra crée le compte Salesforce. Groupe et application Entra créés à la main (pas Terraform). Vide : étape ignorée."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.salesforce_group_id == "" || can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.salesforce_group_id))
+    error_message = "salesforce_group_id doit être un GUID, ou vide."
+  }
+}
+
 variable "manage_app_owner" {
   description = "Terraform ajoute l'identité d'apply comme propriétaire de l'inscription. false quand cette identité n'a que Application.ReadWrite.OwnedBy (CI) : elle devient propriétaire d'office en créant l'inscription et l'ajout échouerait (« already exists »)."
   type        = bool

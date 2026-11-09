@@ -8,6 +8,9 @@ upn_domain = "telesiosandbox.onmicrosoft.com"
 # Unité administrative à gestion restreinte des comptes d'onboarding (audit M8), créée par scripts/grant-app-roles.sh le 2026-11-03.
 onboarding_unit_id = "a0b3aaf1-755b-46e8-a1b7-23ecf8c1a94b"
 
+# Groupe affecté à l'application Entra « Salesforce Sandbox Telesio » (rôle RW-Consultant), provisionnement vers telesio-sbx.
+salesforce_group_id = "5bdc9bcb-5b23-4136-b3eb-3f877e7c971c"
+
 # Site https://telesiosandbox.sharepoint.com/sites/onboarding, bibliothèque « Documents ».
 sharepoint_site_id        = "telesiosandbox.sharepoint.com,2d8b30fc-31cb-4e5e-b1bb-78b695c96c2a,a9198d7e-8dbd-414c-8d0d-996331b8b957"
 sharepoint_drive_id       = "b!_DCLLcsxXk6xu3i2lclsKn6NGam9jUxBjQ2ZYzG4uVfzh8EO915jQYBK01W-WkX0"

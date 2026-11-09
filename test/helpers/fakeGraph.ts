@@ -41,6 +41,8 @@ export class FakeGraph {
     /** Échec des PATCH qui posent le statut (extension), pas de ceux d'accountEnabled. */
     statusPatch?: number;
     groupAdd?: number;
+    /** Limite l'échec de groupAdd à ce groupe (sinon : tous les groupes). */
+    groupAddOnly?: string;
     groupRemove?: number;
     /** Échec de l'ajout à une unité administrative (POST members/$ref). */
     unitAdd?: number;
@@ -283,8 +285,8 @@ export class FakeGraph {
     }
     const add = /^\/groups\/([^/]+)\/members\/\$ref$/.exec(path);
     if (method === 'POST' && add) {
-      if (this.failOn.groupAdd) throw graphError(this.failOn.groupAdd, 'Authorization_RequestDenied');
       const g = add[1] as string;
+      if (this.failOn.groupAdd && (this.failOn.groupAddOnly ?? g) === g) throw graphError(this.failOn.groupAdd, 'Authorization_RequestDenied');
       const uid = (call.body as Record<string, string>)['@odata.id']!.split('/').pop() as string;
       const members = this.groups.get(g) ?? new Set<string>();
       if (members.has(uid)) {

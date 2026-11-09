@@ -5,6 +5,7 @@ import {
   parseExtension,
   parseFolderPattern,
   parseGraphId,
+  parseSalesforceGroupId,
   parseTerminaisonInterval,
   parseTimeZone,
   parseUpnDomain,
@@ -81,6 +82,25 @@ describe('parseFolderPattern', () => {
     expect(() => parseFolderPattern('{inconnu}')).toThrow('champ inconnu {inconnu}');
     expect(() => parseFolderPattern('{nom} {')).toThrow('accolades non appariées');
     expect(() => parseFolderPattern(`{nom}${'x'.repeat(100)}`)).toThrow('100 caractères max');
+  });
+});
+
+describe('parseSalesforceGroupId', () => {
+  const guid = 'ffffffff-0000-4000-8000-0000000000b1';
+
+  it('rend undefined si absent (étape ignorée)', () => {
+    expect(parseSalesforceGroupId(undefined)).toBeUndefined();
+    expect(parseSalesforceGroupId('')).toBeUndefined();
+    expect(loadConfig({}).salesforceGroupId).toBeUndefined();
+  });
+
+  it('met le GUID en minuscules', () => {
+    expect(parseSalesforceGroupId(` ${guid.toUpperCase()} `)).toBe(guid);
+    expect(loadConfig({ SALESFORCE_GROUP_ID: guid }).salesforceGroupId).toBe(guid);
+  });
+
+  it('refuse ce qui n’est pas un GUID', () => {
+    expect(() => parseSalesforceGroupId('pas-un-guid')).toThrow('SALESFORCE_GROUP_ID invalide (attendu : GUID)');
   });
 });
 
