@@ -112,7 +112,7 @@ export interface Validation {
 }
 
 /**
- * Licence et groupe des arrivants (avant toute écriture de statut), puis EnAttente → Validé, puis dossier SharePoint (idempotent).
+ * Licence et groupes (arrivants, Salesforce ; avant toute écriture de statut), puis EnAttente → Validé, puis dossier SharePoint (idempotent).
  * Aucune licence disponible : 409 et le statut ne change pas.
  * Un compte déjà Validé est accepté : c'est la reprise après un échec SharePoint (le statut reste Validé) ;
  * un compte déjà licencié ne repasse pas par le décompte.
@@ -134,14 +134,7 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
   }
   const licence = await ensureLicense(deps, actor, id, option);
 
-  // Groupe des arrivants (cible de l'accès conditionnel qui impose Authenticator) dès la validation, et non à
-  // l'activation : l'appartenance a le temps de se répliquer avant le jour J. Sans risque, le compte reste désactivé jusqu'à l'activation.
-  // Avant le statut : un échec laisse la demande EnAttente, visible et revalidable par la direction.
-  if (config.arrivantsGroupId) {
-    const groupId = config.arrivantsGroupId;
-    await step(deps, actor, 'groupe_arrivants', id, {}, () => directory.addGroupMember(groupId, id));
-    audit.track({ action: 'demande.arrivants_ajout', actor, outcome: 'ok', cible: id, groupe: groupId });
-  }
+  await ajouterAuxGroupes(deps, actor, id);
 
   if (!reprise) {
     // Le statut et son auteur s'écrivent dans le même PATCH : jamais un compte Validé sans savoir qui l'a validé (si l'historique est configuré).
@@ -154,6 +147,27 @@ export async function validerDemande(deps: DirectionDeps, actor: string, id: str
 
   const dossier = await creerDossier(deps, actor, id, user, library);
   return { id, statut: 'Validé', licence, dossier, reprise };
+}
+
+/**
+ * Groupes posés à la validation, avant toute écriture de statut : un échec laisse la demande EnAttente, visible et revalidable
+ * par la direction (l'ajout est idempotent). Sans risque : le compte reste désactivé jusqu'à l'activation.
+ * - Arrivants (cible de l'accès conditionnel qui impose Authenticator) dès la validation, et non à l'activation : l'appartenance
+ *   a le temps de se répliquer avant le jour J.
+ * - Salesforce : le provisionnement d'Entra crée le compte Salesforce, inactif tant que le compte Entra est désactivé.
+ */
+async function ajouterAuxGroupes(deps: DirectionDeps, actor: string, id: string): Promise<void> {
+  const { config, directory, audit } = deps;
+  if (config.arrivantsGroupId) {
+    const groupId = config.arrivantsGroupId;
+    await step(deps, actor, 'groupe_arrivants', id, {}, () => directory.addGroupMember(groupId, id));
+    audit.track({ action: 'demande.arrivants_ajout', actor, outcome: 'ok', cible: id, groupe: groupId });
+  }
+  if (config.salesforceGroupId) {
+    const groupId = config.salesforceGroupId;
+    await step(deps, actor, 'groupe_salesforce', id, {}, () => directory.addGroupMember(groupId, id));
+    audit.track({ action: 'demande.salesforce_ajout', actor, outcome: 'ok', cible: id, groupe: groupId });
+  }
 }
 
 /** Crée le dossier SharePoint de la personne (idempotent : un dossier existant est réutilisé). Le compte reste Validé en cas d'échec. */

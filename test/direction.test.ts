@@ -1,7 +1,7 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config';
 import { buildFolderName } from '../src/folder';
-import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_LIC, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
+import { ARRIVANTS_GROUP, DIR_ID, SALESFORCE_GROUP, EXT, EXT_LIC, LICENSE_GROUP, LICENSE_GROUP_B, LICENSE_SKU, LICENSE_SKU_B, LICENSE_SKU_ZERO, RH_ID } from './helpers/ctx';
 import { harness } from './helpers/harness';
 
 const AUTRE_DIRECTION_ID = 'dddddddd-0000-4000-8000-0000000000d2';
@@ -370,6 +370,65 @@ describe('valider, refuser', () => {
     const id = pending();
     const form = await h.call('POST', `/api/demandes/${id}/valider`, DIR_ID, 'a=b', { 'content-type': 'application/x-www-form-urlencoded' });
     expect(form.status).toBe(415);
+  });
+});
+
+describe('valider : groupe Salesforce (SALESFORCE_GROUP_ID)', () => {
+  const h = harness({ SALESFORCE_GROUP_ID: SALESFORCE_GROUP });
+  beforeEach(async () => {
+    if (h.ctx) await h.stop();
+    await h.start();
+  });
+  afterAll(() => h.stop());
+
+  const pending = () => h.ctx.graph.addPending(EXT, { givenName: 'Anna', surname: 'Martin', extras: { [EXT_LIC]: LICENSE_SKU } });
+
+  it('ajoute au groupe après celui des arrivants, avant le statut, et le trace sans donnée personnelle', async () => {
+    const id = pending();
+    expect((await h.call('POST', `/api/demandes/${id}/valider`)).status).toBe(200);
+    expect(h.ctx.graph.groups.get(SALESFORCE_GROUP)?.has(id)).toBe(true);
+    const posts = h.ctx.graph.calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`);
+    expect(posts.slice(1, 4)).toEqual([
+      `POST /groups/${ARRIVANTS_GROUP}/members/$ref`,
+      `POST /groups/${SALESFORCE_GROUP}/members/$ref`,
+      expect.stringMatching(/^PATCH \/users\//),
+    ]);
+    expect(h.ctx.events.find((e) => e.action === 'demande.salesforce_ajout')).toMatchObject({ cible: id, groupe: SALESFORCE_GROUP, actor: DIR_ID });
+    const logged = JSON.stringify(h.ctx.events);
+    for (const pii of ['Martin', 'Anna', 'exemple.test']) expect(logged).not.toContain(pii);
+  });
+
+  it('déjà membre : sans erreur (reprise)', async () => {
+    const id = pending();
+    h.ctx.graph.groups.set(SALESFORCE_GROUP, new Set([id]));
+    expect((await h.call('POST', `/api/demandes/${id}/valider`)).status).toBe(200);
+    expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('Validé');
+  });
+
+  it('échec Graph : 502 à l’étape groupe_salesforce, statut inchangé, revalidable', async () => {
+    h.ctx.graph.failOn.groupAdd = 403;
+    h.ctx.graph.failOn.groupAddOnly = SALESFORCE_GROUP;
+    const id = pending();
+    const res = await h.call('POST', `/api/demandes/${id}/valider`);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ etape: 'groupe_salesforce' });
+    expect(h.ctx.graph.users.get(id)!.props[EXT]).toBe('EnAttente');
+    h.ctx.graph.failOn.groupAdd = undefined;
+    expect((await h.call('POST', `/api/demandes/${id}/valider`)).status).toBe(200);
+    expect(h.ctx.graph.groups.get(SALESFORCE_GROUP)?.has(id)).toBe(true);
+  });
+});
+
+describe('valider sans SALESFORCE_GROUP_ID', () => {
+  const h = harness();
+  beforeAll(() => h.start());
+  afterAll(() => h.stop());
+
+  it('étape ignorée : aucun appel au groupe Salesforce', async () => {
+    const id = h.ctx.graph.addPending(EXT, { givenName: 'Anna', surname: 'Martin', extras: { [EXT_LIC]: LICENSE_SKU } });
+    expect((await h.call('POST', `/api/demandes/${id}/valider`)).status).toBe(200);
+    expect(h.ctx.graph.calls.some((c) => c.path.includes(SALESFORCE_GROUP))).toBe(false);
+    expect(h.ctx.events.some((e) => e.action === 'demande.salesforce_ajout')).toBe(false);
   });
 });
 
