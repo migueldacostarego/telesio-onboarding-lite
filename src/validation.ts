@@ -1,4 +1,5 @@
 import { CODES_PAYS, estCodePays, PAYS_PAR_DEFAUT, type CodePays } from './pays';
+import { lireTrigramme } from './trigramme';
 import { estTypeContrat, TYPES_CONTRAT, type TypeContrat } from './typeContrat';
 import { MAX_LOCAL_BASE, normalizePart, upnBase } from './upn';
 
@@ -18,6 +19,8 @@ export interface DemandeInput {
   typeContrat: TypeContrat;
   /** Pays de l'arrivant (code ISO) : `usageLocation` et `country` du compte. FR quand le client ne l'envoie pas. */
   pays: CodePays;
+  /** Trigramme (trois lettres A-Z) : extensionAttribute1 du compte, unique dans Entra. Proposé d'après le prénom et le nom quand le client ne l'envoie pas. */
+  trigramme: string;
   /** Adresse professionnelle voulue (UPN), en minuscules, sur le domaine de l'application. Absente : l'identifiant prenom.nom est attribué, avec un suffixe en cas d'homonyme. */
   email?: string;
 }
@@ -121,6 +124,13 @@ export function lireEmail(raw: unknown, domain: string): { email?: string; erreu
 
 const estComplet = (valeurs: Partial<ChampsTexte>): valeurs is ChampsTexte => CHAMPS_TEXTE.every((champ) => valeurs[champ] !== undefined);
 
+/** Trigramme de la demande, ou erreur posée dans `details` ; rien n'est proposé ni signalé si le prénom ou le nom est déjà refusé. */
+function trigrammeDemande(raw: unknown, valeurs: Partial<ChampsTexte>, details: Record<string, string>): string | undefined {
+  const { trigramme, erreur } = lireTrigramme(raw, details.prenom || details.nom ? undefined : valeurs);
+  if (erreur) details.trigramme = erreur;
+  return trigramme;
+}
+
 /** `today` : AAAA-MM-JJ dans le fuseau métier (voir todayIn) ; `domain` : domaine des adresses (UPN_DOMAIN). */
 export function validateDemande(body: unknown, today: string, domain: string): Validation {
   const b = enObjet(body);
@@ -142,16 +152,18 @@ export function validateDemande(body: unknown, today: string, domain: string): V
   const pays = b.pays === undefined ? PAYS_PAR_DEFAUT : estCodePays(b.pays) ? b.pays : undefined;
   if (!pays) details.pays = `requis, parmi : ${CODES_PAYS.join(', ')}`;
 
+  const trigramme = trigrammeDemande(b.trigramme, valeurs, details);
+
   const email = lireEmail(b.email, domain);
   if (email.erreur) details.email = email.erreur;
 
-  if (Object.keys(details).length > 0 || !typeContrat || !pays || !estComplet(valeurs)) {
+  if (Object.keys(details).length > 0 || !typeContrat || !pays || !trigramme || !estComplet(valeurs)) {
     return { ok: false, details };
   }
   const { prenom, nom, poste, service } = valeurs;
   return {
     ok: true,
-    value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, pays, ...(email.email ? { email: email.email } : {}) },
+    value: { prenom, nom, dateArrivee, poste, service, managerId, typeContrat, pays, trigramme, ...(email.email ? { email: email.email } : {}) },
   };
 }
 

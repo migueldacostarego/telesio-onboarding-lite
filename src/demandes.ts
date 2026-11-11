@@ -1,6 +1,6 @@
 import type { Audit } from './audit';
 import type { ReadyConfig } from './config';
-import { DirectoryError, graphFailureProps, type Directory } from './directory';
+import { DirectoryError, graphFailureProps, type Directory, type NewUser } from './directory';
 import { PAYS } from './pays';
 import { randomPassword } from './password';
 import { upnBase, upnCandidate } from './upn';
@@ -33,6 +33,22 @@ export interface DemandeCreee {
   statut: 'EnAttente';
   /** manager_non_affecte : la demande existe (en attente), mais le manager reste à poser dans Entra. */
   avertissement?: 'manager_non_affecte';
+}
+
+/**
+ * Trigramme unique dans Entra (extensionAttribute1), vérifié avant toute écriture : 409 `trigramme_pris` sinon, pour que RH en
+ * choisisse un autre. Course possible entre deux créations simultanées (pas de contrainte d'unicité dans Entra) : acceptée,
+ * comme pour l'adresse. Le trigramme n'est jamais tracé.
+ */
+/** extensionAttribute1 = trigramme ; extensionAttribute2 = email du responsable, s'il en a un (Salesforce le résout en responsable). */
+function attributsNatifs(trigramme: string, emailResponsable: string | null): NewUser['onPremisesExtensionAttributes'] {
+  return { extensionAttribute1: trigramme, ...(emailResponsable ? { extensionAttribute2: emailResponsable } : {}) };
+}
+
+async function verifierTrigramme(deps: DemandeDeps, actor: string, trigramme: string): Promise<void> {
+  if (!(await deps.directory.trigrammeTaken(trigramme))) return;
+  deps.audit.track({ action: 'demande.trigramme_pris', actor, outcome: 'refuse' });
+  throw new ServiceError(409, { error: 'Ce trigramme est déjà utilisé', code: 'trigramme_pris' });
 }
 
 /**
@@ -81,6 +97,9 @@ export async function createDemande(
       throw new ServiceError(400, { error: 'Entrée invalide', details });
     }
 
+    step = 'trigramme_verification';
+    await verifierTrigramme(deps, actor, input.trigramme);
+
     step = 'upn_attribution';
     const base = upnBase(input.prenom, input.nom);
     // Adresse choisie par RH : une seule tentative, jamais de suffixe ajouté en silence (l'adresse est celle que la personne recevra).
@@ -106,6 +125,7 @@ export async function createDemande(
           // Code du pays : Entra n'attribue aucune licence (par groupe) sans usageLocation.
           usageLocation: input.pays,
           country: PAYS[input.pays],
+          onPremisesExtensionAttributes: attributsNatifs(input.trigramme, manager.email),
           passwordProfile: { password: randomPassword(), forceChangePasswordNextSignIn: true },
         }, {
           [config.licenseExtension as string]: licence,

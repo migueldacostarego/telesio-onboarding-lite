@@ -115,6 +115,16 @@ describe('GET /api/demandes/:id', () => {
     expect(types).toEqual(['Employé', 'Contractor', null, null]);
   });
 
+  it('le trigramme vient d’extensionAttribute1 ; null s’il est absent ou mal formé', async () => {
+    const ids = [
+      compte('Validé', { onPremisesExtensionAttributes: { extensionAttribute1: 'JSO' }, [EXT_LIC]: LICENSE_SKU }),
+      compte('Validé', { [EXT_LIC]: LICENSE_SKU }),
+      compte('Validé', { onPremisesExtensionAttributes: { extensionAttribute1: 'Centre 42' }, [EXT_LIC]: LICENSE_SKU }),
+    ];
+    const t = await Promise.all(ids.map(async (id) => ((await (await lire(id)).json()) as Detail).trigramme));
+    expect(t).toEqual(['JSO', null, null]);
+  });
+
   it('le pays vient d’usageLocation ; null pour un pays absent ou hors liste', async () => {
     const ids = [
       compte('Validé', { usageLocation: 'FR', [EXT_LIC]: LICENSE_SKU }),

@@ -53,6 +53,8 @@ export interface DemandeDetail {
   typeContrat: TypeContrat | null;
   /** Pays de l'arrivant (code de usageLocation) ; null : non renseigné ou pays hors liste. */
   pays: CodePays | null;
+  /** Trigramme (extensionAttribute1) ; null : compte antérieur au champ, ou valeur mal formée. */
+  trigramme: string | null;
   manager: { nom: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
@@ -309,6 +311,7 @@ export async function lireDemande(deps: DetailDeps, actor: string, id: string, n
     service: u.service,
     typeContrat: u.typeContrat,
     pays: u.pays,
+    trigramme: u.trigramme,
     manager: u.managerNom ? { nom: u.managerNom } : null,
     dateArrivee: u.dateArrivee,
     statut,

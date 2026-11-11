@@ -4,6 +4,7 @@ import { CheckIcon, InfoIcon, Loader2Icon, TriangleAlertIcon, XIcon } from 'luci
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
+import { ChampTrigramme } from '@/components/demandes/ChampTrigramme';
 import { ChoixManager } from '@/components/demandes/ChoixManager';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -14,7 +15,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ApiError, api } from '@/lib/api';
 import type { Personne } from '@/lib/annuaire';
-import { CHAMPS, LIMITES, estChamp, schemaDemande, type DemandeCreee, type DemandeEntree, type DemandeSortie } from '@/lib/demandeForm';
+import { CHAMPS, LIMITES, estChamp, schemaDemande, type Champ, type DemandeCreee, type DemandeEntree, type DemandeSortie } from '@/lib/demandeForm';
 import { useDisponibilite, type Disponibilite } from '@/lib/disponibilite';
 import { erreurEmail, proposerEmail } from '@/lib/email';
 import { useMoi } from '@/lib/moi';
@@ -74,6 +75,16 @@ const STATUT_EMAIL: Record<Disponibilite, { texte: string; classe: string; icone
   erreur: { texte: 'Vérification impossible pour le moment : le serveur revérifiera à l’envoi.', classe: 'text-muted-foreground', icone: <TriangleAlertIcon aria-hidden="true" className="size-3.5" /> },
 };
 
+const ADRESSE_PRISE = 'Cette adresse est déjà utilisée : modifiez-la.';
+
+/** Refus du serveur (409) rattachés à un champ, d'après leur `code` : le message s'affiche sous ce champ. */
+const REFUS_PAR_CODE: Record<string, { champ: Champ; message: string }> = {
+  email_pris: { champ: 'email', message: ADRESSE_PRISE },
+  trigramme_pris: { champ: 'trigramme', message: 'Ce trigramme est déjà utilisé : modifiez-le.' },
+  // Plus de champ licence : le type de contrat la détermine, c'est lui qui porte l'erreur.
+  licence_indisponible: { champ: 'typeContrat', message: 'Aucune licence disponible pour ce type de contrat : libérez ou commandez une licence, puis renvoyez la demande.' },
+};
+
 /** « Nouvelle demande » : react-hook-form et zod, erreurs du serveur sous chaque champ. */
 function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domaine }: Props & { domaine: string }) {
   const schema = useMemo(() => schemaDemande(domaine), [domaine]);
@@ -82,7 +93,7 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
     mode: 'onTouched',
     // Le focus du premier champ en erreur est posé ici (focaliser) : l’ordre de la page, y compris le type et le responsable.
     shouldFocusError: false,
-    defaultValues: { prenom: '', nom: '', email: '', typeContrat: TYPE_PAR_DEFAUT, pays: PAYS_PAR_DEFAUT, dateArrivee: '', poste: '', service: '', managerId: '' },
+    defaultValues: { prenom: '', nom: '', email: '', trigramme: '', typeContrat: TYPE_PAR_DEFAUT, pays: PAYS_PAR_DEFAUT, dateArrivee: '', poste: '', service: '', managerId: '' },
   });
   const { register, handleSubmit, setError, setValue, getValues, trigger, control, formState } = form;
   const { errors, isSubmitting } = formState;
@@ -135,7 +146,7 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
     if (enCours.current) return;
     tente.current = true;
     if (dispo === 'pris') {
-      setError('email', { type: 'serveur', message: 'Cette adresse est déjà utilisée : modifiez-la.' });
+      setError('email', { type: 'serveur', message: ADRESSE_PRISE });
       focaliser(['email']);
       return;
     }
@@ -158,13 +169,10 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
         }
         if (inconnu) setErreur(e);
       } else {
-        if (e instanceof ApiError && e.code === 'email_pris') {
-          setError('email', { type: 'serveur', message: 'Cette adresse est déjà utilisée : modifiez-la.' });
-          enErreur.push('email');
-        } else if (e instanceof ApiError && e.code === 'licence_indisponible') {
-          // Plus de champ licence : le type de contrat la détermine, c'est lui qui porte l'erreur.
-          setError('typeContrat', { type: 'serveur', message: 'Aucune licence disponible pour ce type de contrat : libérez ou commandez une licence, puis renvoyez la demande.' });
-          enErreur.push('typeContrat');
+        const refus = e instanceof ApiError && e.code ? REFUS_PAR_CODE[e.code] : undefined;
+        if (refus) {
+          setError(refus.champ, { type: 'serveur', message: refus.message });
+          enErreur.push(refus.champ);
         } else {
           setErreur(e);
         }
@@ -265,6 +273,7 @@ function Formulaire({ onCree, onAnnuler, onEnvoi, controleListe, onRelire, domai
               )}
             </p>
           </Field>
+          <ChampTrigramme form={form} tente={tente} />
         </Section>
 
         <Section titre="Contrat">

@@ -83,6 +83,7 @@ export function Identite({ d }: { d: DemandeDetail }) {
       </Ligne>
       <Ligne libelle="Type de contrat">{ouAbsent(d.typeContrat)}</Ligne>
       <Ligne libelle="Pays">{ouAbsent(d.pays ? PAYS[d.pays] : null)}</Ligne>
+      <Ligne libelle="Trigramme">{ouAbsent(d.trigramme ?? null)}</Ligne>
       <Ligne libelle="Poste">{ouAbsent(d.poste)}</Ligne>
       <Ligne libelle="Service">{ouAbsent(d.service)}</Ligne>
       <Ligne libelle="Responsable">{ouAbsent(d.manager?.nom)}</Ligne>

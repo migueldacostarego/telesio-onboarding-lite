@@ -39,6 +39,8 @@ export interface DemandeDetail {
   typeContrat?: TypeContrat | null;
   /** Pays (code de usageLocation) ; null : non renseigné ou hors liste. */
   pays?: CodePays | null;
+  /** Trigramme (extensionAttribute1) ; null : compte antérieur au champ. */
+  trigramme?: string | null;
   manager: { nom: string } | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;

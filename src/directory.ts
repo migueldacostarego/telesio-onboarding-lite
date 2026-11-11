@@ -1,6 +1,7 @@
 import type { Client } from '@microsoft/microsoft-graph-client';
 import { latestTokenInfo, tokenAuditProps } from './tokenRoles';
 import { paysLu, type CodePays } from './pays';
+import { trigrammeLu } from './trigramme';
 import { typeLu, type TypeContrat } from './typeContrat';
 
 export interface DirectoryUser {
@@ -68,6 +69,11 @@ export interface NewUser {
   usageLocation: string;
   /** Nom du pays (attribut natif `country`), lisible dans le portail. */
   country: string;
+  /**
+   * Attributs natifs posés à la création d'un compte cloud : extensionAttribute1 = trigramme, extensionAttribute2 = email du
+   * responsable (pour Salesforce, qui le résout en responsable ; absent si le responsable n'a ni mail ni UPN).
+   */
+  onPremisesExtensionAttributes: { extensionAttribute1: string; extensionAttribute2?: string };
   passwordProfile: { password: string; forceChangePasswordNextSignIn: boolean };
 }
 
@@ -102,6 +108,8 @@ export interface DemandeLue {
   typeContrat: TypeContrat | null;
   /** Code du pays (usageLocation), s'il est connu ; null sinon. */
   pays: CodePays | null;
+  /** Trigramme (extensionAttribute1), s'il est bien formé ; null sinon. */
+  trigramme: string | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
   createdDateTime: string | null;
@@ -207,8 +215,11 @@ export interface Directory {
   /** POST /users/{id}/checkMemberObjects : le compte est-il membre de l'unité administrative ? */
   isMemberOfUnit(userId: string, unitId: string): Promise<boolean>;
   search(q: string): Promise<DirectoryUser[]>;
-  getUser(id: string): Promise<{ id: string; accountEnabled: boolean } | null>;
+  /** email : mail, à défaut userPrincipalName (null si aucun). */
+  getUser(id: string): Promise<{ id: string; accountEnabled: boolean; email: string | null } | null>;
   upnTaken(upn: string): Promise<boolean>;
+  /** Un compte porte-t-il déjà ce trigramme (extensionAttribute1, requête avancée) ? */
+  trigrammeTaken(trigramme: string): Promise<boolean>;
   /** extensions : attributs d'extension (nom complet -> valeur) posés à la création. */
   createUser(user: NewUser, extensions?: Record<string, string>): Promise<string>;
   setManager(userId: string, managerId: string): Promise<void>;
@@ -279,8 +290,9 @@ export class GraphDirectory implements Directory {
 
   async getUser(id: string) {
     try {
-      const u = await this.client.api(`/users/${id}`).select('id,accountEnabled').get();
-      return { id: u.id as string, accountEnabled: u.accountEnabled !== false };
+      const u = await this.client.api(`/users/${id}`).select('id,accountEnabled,mail,userPrincipalName').get();
+      const email = (typeof u.mail === 'string' && u.mail) || (typeof u.userPrincipalName === 'string' && u.userPrincipalName) || null;
+      return { id: u.id as string, accountEnabled: u.accountEnabled !== false, email };
     } catch (err) {
       const e = wrap(err);
       if (e.kind === 'notFound') return null;
@@ -295,6 +307,22 @@ export class GraphDirectory implements Directory {
         .api('/users')
         .header(...EVENTUAL)
         .filter(`userPrincipalName eq '${v}' or mail eq '${v}' or proxyAddresses/any(p:p eq 'smtp:${v}')`)
+        .select('id')
+        .top(1)
+        .count(true)
+        .get();
+      return ((res?.value ?? []) as unknown[]).length > 0;
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async trigrammeTaken(trigramme: string): Promise<boolean> {
+    try {
+      const res = await this.client
+        .api('/users')
+        .header(...EVENTUAL)
+        .filter(`onPremisesExtensionAttributes/extensionAttribute1 eq '${quote(trigramme)}'`)
         .select('id')
         .top(1)
         .count(true)
@@ -400,7 +428,7 @@ export class GraphDirectory implements Directory {
     try {
       const u = await this.client
         .api(`/users/${id}`)
-        .select(`id,displayName,givenName,surname,userPrincipalName,jobTitle,department,employeeType,usageLocation,employeeHireDate,createdDateTime,lastPasswordChangeDateTime,accountEnabled${extensions.map((e) => `,${e}`).join('')}`)
+        .select(`id,displayName,givenName,surname,userPrincipalName,jobTitle,department,employeeType,usageLocation,onPremisesExtensionAttributes,employeeHireDate,createdDateTime,lastPasswordChangeDateTime,accountEnabled${extensions.map((e) => `,${e}`).join('')}`)
         .expand('manager($select=id,displayName)')
         .get();
       const str = (v: unknown) => (typeof v === 'string' ? v : null);
@@ -414,6 +442,7 @@ export class GraphDirectory implements Directory {
         service: str(u.department),
         typeContrat: typeLu(u.employeeType),
         pays: paysLu(u.usageLocation),
+        trigramme: trigrammeLu(u.onPremisesExtensionAttributes),
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
         createdDateTime: str(u.createdDateTime),
         lastPasswordChange: str(u.lastPasswordChangeDateTime),
