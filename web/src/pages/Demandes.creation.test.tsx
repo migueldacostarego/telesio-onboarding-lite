@@ -84,6 +84,26 @@ describe('fenêtre', () => {
   });
 });
 
+describe('trigramme', () => {
+  it('proposé d’après le prénom et le nom ; modifié, il reste ; « Reproposer » revient à la proposition', async () => {
+    const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    await screen.findByText('Hugo Lambert');
+    await ouvrir(user);
+    await user.type(champ('Prénom'), 'Éloïse');
+    expect(champ('Trigramme')).toHaveValue('');
+    await user.type(champ('Nom'), 'De La Cruz');
+    expect(champ('Trigramme')).toHaveValue('EDE');
+
+    await user.clear(champ('Trigramme'));
+    await user.type(champ('Trigramme'), 'edc');
+    await user.type(champ('Nom'), 'x'); // le nom change : le trigramme choisi reste
+    expect(champ('Trigramme')).toHaveValue('edc');
+    await user.click(screen.getByRole('button', { name: /Reproposer/ })); // le seul : l'adresse n'a pas été modifiée
+    expect(champ('Trigramme')).toHaveValue('EDE');
+    expect(screen.queryByRole('button', { name: /Reproposer/ })).not.toBeInTheDocument();
+  });
+});
+
 describe('email pro', () => {
   it('proposé d’après le prénom et le nom (minuscules, accents retirés, espaces et apostrophes supprimés), mis à jour en tapant', async () => {
     const { user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
@@ -315,7 +335,7 @@ describe('envoi', () => {
     await user.click(creer(panneau));
 
     expect(ecritures(fetchMock)).toEqual([
-      { url: '/api/demandes', corps: { prenom: 'Camille', nom: 'Durand', email: EMAIL, typeContrat: 'Employé', pays: 'FR', dateArrivee: '2026-11-16', poste: 'Analyste', service: 'Finance', managerId: MANAGER.id } },
+      { url: '/api/demandes', corps: { prenom: 'Camille', nom: 'Durand', email: EMAIL, trigramme: 'CDU', typeContrat: 'Employé', pays: 'FR', dateArrivee: '2026-11-16', poste: 'Analyste', service: 'Finance', managerId: MANAGER.id } },
     ]);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getByText('Demande créée pour Camille Durand')).toBeInTheDocument();
@@ -481,6 +501,15 @@ describe('erreurs de l’API', () => {
     expect(champ('Nom')).toHaveValue('Durand');
     expect(screen.getByRole('dialog', { name: 'Nouvelle demande' })).toBeInTheDocument();
     expect(within(panneau).getAllByRole('alert')).toHaveLength(1); // sous le champ seulement, pas en plus en haut de la fenêtre
+    expect(ecritures(fetchMock)).toHaveLength(1);
+  });
+
+  it('409 trigramme_pris : message sous le trigramme, focus dessus, la saisie est conservée', async () => {
+    const { panneau, fetchMock } = await soumettre(() => reply(409, { error: 'Ce trigramme est déjà utilisé', code: 'trigramme_pris' }));
+    await waitFor(() => expect(champ('Trigramme')).toHaveAccessibleDescription(/Ce trigramme est déjà utilisé : modifiez-le/));
+    expect(champ('Trigramme')).toHaveFocus();
+    expect(champ('Trigramme')).toHaveValue('CDU');
+    expect(within(panneau).getAllByRole('alert')).toHaveLength(1);
     expect(ecritures(fetchMock)).toHaveLength(1);
   });
 

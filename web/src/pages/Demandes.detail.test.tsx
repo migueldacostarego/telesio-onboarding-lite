@@ -53,6 +53,7 @@ describe('page de détail /demandes/:id', () => {
     expect(valeur(identite, 'Service')).toHaveTextContent('Finance');
     expect(valeur(identite, 'Responsable')).toHaveTextContent('Chef Exemple');
     expect(valeur(identite, 'Pays')).toHaveTextContent('Maurice');
+    expect(valeur(identite, 'Trigramme')).toHaveTextContent('ADU');
     expect(valeur(identite, 'Arrivée')).toHaveTextContent('3 nov. 2026');
     const compte = screen.getByRole('region', { name: 'Compte et accès' });
     expect(valeur(compte, 'Licence')).toHaveTextContent('Business Premium : attribuée');

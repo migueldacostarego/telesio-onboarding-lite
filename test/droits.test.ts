@@ -365,7 +365,8 @@ describe('noms de rôle configurables : les routes suivent RH_ROLE et DIRECTION_
 
   it('création : les noms configurés comptent, pas RH ni Direction', async () => {
     expect((await h.callAs(['RessourcesHumaines'], RH_ID, 'POST', '/api/demandes', body())).status).toBe(201);
-    expect((await h.callAs(['Dirigeants'], DIR_ID, 'POST', '/api/demandes', body())).status).toBe(201);
+    // Second compte du même nom : un autre trigramme (le premier est pris).
+    expect((await h.callAs(['Dirigeants'], DIR_ID, 'POST', '/api/demandes', { ...body(), trigramme: 'ZZZ' })).status).toBe(201);
     expect((await h.callAs(['RH', 'Direction'], AUTRE_ID, 'POST', '/api/demandes', body())).status).toBe(403);
   });
 

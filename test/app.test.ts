@@ -21,7 +21,16 @@ describe('API', () => {
   });
   afterAll(() => new Promise((r) => server.close(r)));
 
-  const valid = () => ({ prenom: 'Éloïse', nom: 'De La Cruz', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, typeContrat: 'Employé' });
+  // Contexte partagé par les tests : chaque demande reçoit son propre trigramme (QAA, QAB…), sinon le second homonyme serait refusé (409).
+  let n = 0;
+  const unique = () => `Q${String.fromCharCode(65 + Math.floor(n / 26))}${String.fromCharCode(65 + (n++ % 26))}`;
+  const valid = () => ({ prenom: 'Éloïse', nom: 'De La Cruz', dateArrivee: '2026-11-03', poste: 'Comptable', service: 'Finance', managerId, typeContrat: 'Employé', trigramme: unique() });
+  const sansTrigramme = (b: Record<string, unknown>) => {
+    const reste = { ...b };
+    delete reste.trigramme;
+    return reste;
+  };
+  const postsUsers = () => ctx.graph.calls.filter((c) => c.method === 'POST' && c.path === '/users').length;
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     fetch(`${base}/api/demandes`, {
       method: 'POST',
@@ -94,6 +103,53 @@ describe('API', () => {
       const created = ctx.graph.calls.filter((c) => c.method === 'POST' && c.path === '/users').at(-1)!.body as Record<string, unknown>;
       expect(created).toMatchObject({ employeeType: 'Employé', [EXT_LIC]: LICENSE_SKU });
       expect(ctx.events.find((e) => e.action === 'demande.compte_cree' && e.cible === id)).toMatchObject({ typeContrat: 'Employé', sku: LICENSE_SKU });
+    });
+
+    it('trigramme : extensionAttribute1 dans le même POST, proposé d’après le prénom et le nom ou saisi', async () => {
+      const res = await post(sansTrigramme({ ...valid(), prenom: 'Edith', nom: 'Derain' }));
+      expect(res.status).toBe(201);
+      const id = ((await res.json()) as { id: string }).id;
+      expect(ctx.graph.users.get(id)!.props.onPremisesExtensionAttributes).toMatchObject({ extensionAttribute1: 'EDE' });
+      const res2 = await post({ ...valid(), prenom: 'Tom', nom: 'Trig', trigramme: 'tgx' });
+      expect(res2.status).toBe(201);
+      const id2 = ((await res2.json()) as { id: string }).id;
+      expect(ctx.graph.users.get(id2)!.props.onPremisesExtensionAttributes).toMatchObject({ extensionAttribute1: 'TGX' });
+      // Jamais tracé : le trigramme désigne une personne.
+      for (const t of ['EDE', 'TGX']) expect(JSON.stringify(ctx.events)).not.toContain(t);
+    });
+
+    it('email du responsable dans extensionAttribute2 (mail, à défaut UPN) ; jamais tracé', async () => {
+      const res = await post(valid());
+      const id = ((await res.json()) as { id: string }).id;
+      const attrs = ctx.graph.users.get(id)!.props.onPremisesExtensionAttributes as Record<string, string>;
+      expect(attrs.extensionAttribute2).toBe('chef@exemple.test');
+      const sansMail = ctx.graph.addUser('chef2@exemple.test', 'Chef Deux');
+      ctx.graph.users.get(sansMail)!.mail = undefined as unknown as string;
+      const res2 = await post({ ...valid(), managerId: sansMail });
+      const id2 = ((await res2.json()) as { id: string }).id;
+      expect((ctx.graph.users.get(id2)!.props.onPremisesExtensionAttributes as Record<string, string>).extensionAttribute2).toBe('chef2@exemple.test');
+      expect(JSON.stringify(ctx.events)).not.toContain('chef');
+    });
+
+    it('trigramme déjà porté par un compte : 409 trigramme_pris, aucun compte créé', async () => {
+      const existant = ctx.graph.addUser('autre@exemple.test', 'Autre');
+      ctx.graph.users.get(existant)!.props.onPremisesExtensionAttributes = { extensionAttribute1: 'PRI' };
+      const avant = postsUsers();
+      const res = await post({ ...valid(), trigramme: 'pri' });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: 'trigramme_pris' });
+      expect(postsUsers()).toBe(avant);
+      expect(ctx.events.find((e) => e.action === 'demande.trigramme_pris')).toMatchObject({ outcome: 'refuse' });
+    });
+
+    it('recherche du trigramme en échec : 502 à l’étape trigramme_verification, aucun compte créé', async () => {
+      ctx.graph.failOn.trigramme = 403;
+      const avant = postsUsers();
+      const res = await post(valid());
+      ctx.graph.failOn.trigramme = undefined;
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ etape: 'trigramme_verification' });
+      expect(postsUsers()).toBe(avant);
     });
 
     it('Maurice : usageLocation MU et country Maurice dans le même POST ; France par défaut', async () => {

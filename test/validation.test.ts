@@ -15,6 +15,8 @@ const valide = {
   typeContrat: 'Employé',
   pays: 'FR',
 };
+/** Valeur rendue : le trigramme est proposé d'après le prénom et le nom quand le client ne l'envoie pas. */
+const rendu = { ...valide, trigramme: 'CDU' };
 
 const run = (body: unknown) => validateDemande(body, TODAY, DOMAIN);
 const details = (body: unknown) => {
@@ -26,36 +28,66 @@ const details = (body: unknown) => {
 describe('validateDemande : demande valide', () => {
   it('rend les champs nettoyés, dans l’ordre, sans email quand il est absent', () => {
     const v = run({ ...valide, prenom: '  Camille ', poste: 'Développeuse\t ' });
-    expect(v).toEqual({ ok: true, value: valide });
+    expect(v).toEqual({ ok: true, value: rendu });
     if (v.ok) {
-      expect(Object.keys(v.value)).toEqual(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'typeContrat', 'pays']);
+      expect(Object.keys(v.value)).toEqual(['prenom', 'nom', 'dateArrivee', 'poste', 'service', 'managerId', 'typeContrat', 'pays', 'trigramme']);
     }
   });
 
   it('ajoute l’email en minuscules quand il est valide', () => {
     const v = run({ ...valide, email: ' Camille.Durand@Telesio.test ' });
-    expect(v).toEqual({ ok: true, value: { ...valide, email: 'camille.durand@telesio.test' } });
+    expect(v).toEqual({ ok: true, value: { ...rendu, email: 'camille.durand@telesio.test' } });
     if (v.ok) expect(Object.keys(v.value).at(-1)).toBe('email');
   });
 
   it('accepte une arrivée aujourd’hui et un type Contractor', () => {
     expect(run({ ...valide, dateArrivee: TODAY, typeContrat: 'Contractor' })).toEqual({
       ok: true,
-      value: { ...valide, dateArrivee: TODAY, typeContrat: 'Contractor' },
+      value: { ...rendu, dateArrivee: TODAY, typeContrat: 'Contractor' },
     });
   });
 });
 
 describe('validateDemande : pays', () => {
   it('accepte Maurice, et pose France quand le client n’envoie pas de pays', () => {
-    expect(run({ ...valide, pays: 'MU' })).toEqual({ ok: true, value: { ...valide, pays: 'MU' } });
+    expect(run({ ...valide, pays: 'MU' })).toEqual({ ok: true, value: { ...rendu, pays: 'MU' } });
     const sansPays: Record<string, unknown> = { ...valide };
     delete sansPays.pays;
-    expect(run(sansPays)).toEqual({ ok: true, value: { ...valide, pays: 'FR' } });
+    expect(run(sansPays)).toEqual({ ok: true, value: { ...rendu, pays: 'FR' } });
   });
 
   it('refuse un pays hors liste', () => {
     for (const pays of ['', 'fr', 'France', 'BE', 42, null]) expect(details({ ...valide, pays })).toEqual({ pays: 'requis, parmi : FR, MU' });
+  });
+});
+
+describe('validateDemande : trigramme', () => {
+  it('rogne et met en majuscules le trigramme saisi, qui remplace la proposition', () => {
+    expect(run({ ...valide, trigramme: ' cdr ' })).toEqual({ ok: true, value: { ...rendu, trigramme: 'CDR' } });
+  });
+
+  it.each([
+    ['Camille', 'Durand', 'CDU'],
+    ['Éloïse', 'de la Cruz', 'EDE'],
+    ['Jean-Marc', "O'Neil", 'JON'],
+    ['Ærin', 'Œuvre', 'AOE'],
+  ])('propose %s %s : %s (mêmes cas que web/src/lib/trigramme.test.ts)', (prenom, nom, attendu) => {
+    const v = run({ ...valide, prenom, nom });
+    expect(v.ok && v.value.trigramme).toBe(attendu);
+  });
+
+  it('refuse un trigramme qui n’est pas fait de trois lettres A-Z', () => {
+    for (const trigramme of ['', 'AB', 'ABCD', 'A1B', 'ÉLO', 42, null]) {
+      expect(details({ ...valide, trigramme })).toEqual({ trigramme: 'trois lettres sans accent requises (A-Z)' });
+    }
+  });
+
+  it('refuse un nom trop court pour proposer un trigramme, sans en envoyer', () => {
+    expect(details({ ...valide, nom: 'O' })).toEqual({ trigramme: 'trois lettres sans accent requises (A-Z)' });
+  });
+
+  it('n’ajoute pas d’erreur de trigramme quand le prénom ou le nom est déjà refusé', () => {
+    expect(Object.keys(details({ ...valide, nom: '' }))).toEqual(['nom']);
   });
 });
 

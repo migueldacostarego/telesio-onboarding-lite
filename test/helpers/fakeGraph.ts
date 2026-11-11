@@ -41,6 +41,8 @@ export class FakeGraph {
     /** Échec des PATCH qui posent le statut (extension), pas de ceux d'accountEnabled. */
     statusPatch?: number;
     groupAdd?: number;
+    /** Échec de la recherche d'un trigramme (extensionAttribute1). */
+    trigramme?: number;
     /** Limite l'échec de groupAdd à ce groupe (sinon : tous les groupes). */
     groupAddOnly?: string;
     groupRemove?: number;
@@ -235,6 +237,12 @@ export class FakeGraph {
         const q = [`$filter=${encodeURIComponent(call.filter ?? '')}`, call.expand ? `$expand=${encodeURIComponent(call.expand)}` : '', `$skiptoken=${skip + this.pageSize}`];
         return { value, '@odata.nextLink': `https://graph.microsoft.com/v1.0/users?${q.filter(Boolean).join('&')}` };
       }
+      const trigramme = /extensionAttribute1 eq '([^']+)'/.exec(call.filter ?? '')?.[1];
+      if (trigramme !== undefined) {
+        if (this.failOn.trigramme) throw graphError(this.failOn.trigramme, 'Authorization_RequestDenied');
+        const avec = (u: FakeUser) => (u.props.onPremisesExtensionAttributes as { extensionAttribute1?: string } | undefined)?.extensionAttribute1 === trigramme;
+        return { value: [...this.users.values()].filter(avec).map((u) => ({ id: u.id })) };
+      }
       const upn = /userPrincipalName eq '([^']+)'/.exec(call.filter ?? '')?.[1];
       if (upn && this.failOn.upn) throw graphError(this.failOn.upn, 'Authorization_RequestDenied');
       if (upn && this.hiddenOnce.delete(upn)) return { value: [] };
@@ -253,10 +261,12 @@ export class FakeGraph {
         givenName: u.props.givenName,
         surname: u.props.surname,
         userPrincipalName: u.upn,
+        mail: u.mail,
         jobTitle: u.props.jobTitle,
         department: u.props.department,
         employeeType: u.props.employeeType,
         usageLocation: u.props.usageLocation,
+        onPremisesExtensionAttributes: u.props.onPremisesExtensionAttributes,
         manager: call.expand && u.manager ? this.managerOf(u.manager) : undefined,
         employeeHireDate: u.props.employeeHireDate,
         lastPasswordChangeDateTime: u.props.lastPasswordChangeDateTime,
