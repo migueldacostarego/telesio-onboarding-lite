@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>68.0</apiVersion>
+    <description>Comptes provisionnés par Entra : Street porte l'email du responsable (extensionAttribute2). Retrouve le responsable par Federation ID et remplit ManagerId et TLS_Manager_TELESIO__c, à la création et à chaque changement.</description>
+    <label>TLS Manager depuis Entra</label>
+    <processType>AutoLaunchedFlow</processType>
+    <status>Active</status>
+    <start>
+        <locationX>50</locationX>
+        <locationY>0</locationY>
+        <connector>
+            <targetReference>Chercher_responsable</targetReference>
+        </connector>
+        <filterFormula>AND(CONTAINS({!$Record.Street}, &quot;@&quot;), OR(ISNEW(), ISCHANGED({!$Record.Street})))</filterFormula>
+        <object>User</object>
+        <recordTriggerType>CreateAndUpdate</recordTriggerType>
+        <triggerType>RecordAfterSave</triggerType>
+    </start>
+    <recordLookups>
+        <name>Chercher_responsable</name>
+        <label>Chercher le responsable</label>
+        <locationX>50</locationX>
+        <locationY>150</locationY>
+        <assignNullValuesIfNoRecordsFound>true</assignNullValuesIfNoRecordsFound>
+        <connector>
+            <targetReference>Responsable_trouve</targetReference>
+        </connector>
+        <filterLogic>and</filterLogic>
+        <filters>
+            <field>FederationIdentifier</field>
+            <operator>EqualTo</operator>
+            <value>
+                <elementReference>$Record.Street</elementReference>
+            </value>
+        </filters>
+        <getFirstRecordOnly>true</getFirstRecordOnly>
+        <object>User</object>
+        <queriedFields>Id</queriedFields>
+        <storeOutputAutomatically>true</storeOutputAutomatically>
+    </recordLookups>
+    <decisions>
+        <name>Responsable_trouve</name>
+        <label>Responsable trouvé ?</label>
+        <locationX>50</locationX>
+        <locationY>300</locationY>
+        <defaultConnectorLabel>Non</defaultConnectorLabel>
+        <rules>
+            <name>Oui</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>Chercher_responsable.Id</leftValueReference>
+                <operator>IsNull</operator>
+                <rightValue>
+                    <booleanValue>false</booleanValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Poser_responsable</targetReference>
+            </connector>
+            <label>Oui</label>
+        </rules>
+    </decisions>
+    <recordUpdates>
+        <name>Poser_responsable</name>
+        <label>Poser le responsable</label>
+        <locationX>50</locationX>
+        <locationY>450</locationY>
+        <inputAssignments>
+            <field>ManagerId</field>
+            <value>
+                <elementReference>Chercher_responsable.Id</elementReference>
+            </value>
+        </inputAssignments>
+        <inputAssignments>
+            <field>TLS_Manager_TELESIO__c</field>
+            <value>
+                <elementReference>Chercher_responsable.Id</elementReference>
+            </value>
+        </inputAssignments>
+        <inputReference>$Record</inputReference>
+    </recordUpdates>
+</Flow>
