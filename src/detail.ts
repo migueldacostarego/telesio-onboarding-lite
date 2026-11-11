@@ -6,6 +6,7 @@ import type { DirectionDeps } from './direction';
 import { graphFailureProps, type DemandeLue, type LicenseRead } from './directory';
 import { buildFolderName } from './folder';
 import { ACTEUR_SYSTEME, decoderEvenement, type Evenement } from './history';
+import { lireStatutSalesforce, type StatutSalesforce } from './statutSalesforce';
 import { STATUTS, actionsFor, type Statut, type SuiviAction } from './suivi';
 import type { CodePays } from './pays';
 import type { TypeContrat } from './typeContrat';
@@ -64,6 +65,8 @@ export interface DemandeDetail {
   licence: { libelle: string | null; etat: 'choisie' | 'attribuee' | 'en_cours' | 'erreur' | 'inconnu' } | null;
   /** Appartenance au groupe des arrivants (Validé et Actif) ; null : sans objet (EnAttente) ou lecture impossible. */
   groupeArrivants: { membre: boolean } | null;
+  /** Statut Salesforce (journaux de provisionnement d'Entra) ; absent si Salesforce n'est pas configuré. */
+  salesforce?: StatutSalesforce;
   /** Dossier SharePoint ; null : sans objet (EnAttente), SharePoint non configuré ou lecture impossible. */
   dossier: { etat: 'present'; url: string | null } | { etat: 'absent' } | null;
   /** Comptes Actif ; { verification: 'echec' } si la lecture d'Authenticator a échoué. */
@@ -291,11 +294,12 @@ export async function lireDemande(deps: DetailDeps, actor: string, id: string, n
   const apresValidation = statut !== 'EnAttente';
   const actifOuTermine = statut === 'Actif' || statut === 'Terminé';
   const sku = skuDe(config.licenseExtension, u.extensions);
-  const [methodes, groupe, etatLicence, dossier] = await Promise.all([
+  const [methodes, groupe, etatLicence, dossier, salesforce] = await Promise.all([
     lireAuthenticator(doux, directory, id, actifOuTermine),
     lireGroupe(doux, directory, id, statut, config.arrivantsGroupId, apresValidation),
     lireLicence(doux, directory, id, sku, apresValidation),
     lireDossier(doux, library, apresValidation, nomDossierDe(config.sharePoint.folderPattern, u, id)),
+    lireStatutSalesforce(doux, deps, id, u.emailResponsable, now.getTime()),
   ]);
 
   const authenticator = authenticatorPresent(methodes);
@@ -319,6 +323,7 @@ export async function lireDemande(deps: DetailDeps, actor: string, id: string, n
     licence: licenceDetail(sku, libelleLicence(config.licenses, sku), apresValidation, etatLicence),
     groupeArrivants: groupeArrivantsDe(groupe),
     dossier: dossierEtat,
+    ...(salesforce ? { salesforce } : {}),
     ...(onboarding ? { onboarding } : {}),
     // Dossier prouvé absent (lecture réussie) : `reprendre` ; lecture en échec : jamais de reprise à l'aveugle.
     actions: actionsFor(u, statut, droits, todayIn(config.timeZone, now), statut === 'Validé' && dossierEtat?.etat === 'absent'),

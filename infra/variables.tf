@@ -195,6 +195,17 @@ variable "salesforce_group_id" {
   }
 }
 
+variable "salesforce_service_principal_id" {
+  description = "objectId du principal de service de l'application Salesforce d'Entra (SALESFORCE_SERVICE_PRINCIPAL_ID) : la page de détail lit ses journaux de provisionnement (AuditLog.Read.All, posé par scripts/grant-app-roles.sh). Application créée à la main. Vide : pas de statut Salesforce."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.salesforce_service_principal_id == "" || can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.salesforce_service_principal_id))
+    error_message = "salesforce_service_principal_id doit être un GUID, ou vide."
+  }
+}
+
 variable "manage_app_owner" {
   description = "Terraform ajoute l'identité d'apply comme propriétaire de l'inscription. false quand cette identité n'a que Application.ReadWrite.OwnedBy (CI) : elle devient propriétaire d'office en créant l'inscription et l'ajout échouerait (« already exists »)."
   type        = bool

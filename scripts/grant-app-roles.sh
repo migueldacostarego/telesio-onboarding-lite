@@ -48,6 +48,7 @@ GRAPH_APP_ROLES=(
   User.ReadWrite.All                       # créer le compte (et le supprimer si l'ajout à l'unité échoue) ; dans l'unité à gestion
                                            # restreinte, ce droit ne s'applique plus : c'est le rôle limité à l'unité qui écrit
   User.Read.All                            # manager, disponibilité de l'UPN
+  AuditLog.Read.All                        # journaux de provisionnement : statut Salesforce sur la page de détail
   GroupMember.ReadWrite.All                # ajouter/retirer un compte du groupe de licence ; inclut checkMemberGroups
   LicenseAssignment.Read.All               # GET /subscribedSkus : licences disponibles
   User-PasswordProfile.ReadWrite.All       # mot de passe temporaire le jour J (changement imposé à la 1re connexion)

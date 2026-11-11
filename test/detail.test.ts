@@ -3,6 +3,7 @@ import { loadConfig } from '../src/config';
 import { ACTEUR_SYSTEME, decoderEvenement, encoderEvenement } from '../src/history';
 import { ARRIVANTS_GROUP, DIR_ID, EXT, EXT_ACT, EXT_CREATOR, EXT_LIC, HISTORY, HISTORY_ENV, LICENSE_GROUP, LICENSE_SKU, NOW, RH_ID } from './helpers/ctx';
 import { harness } from './helpers/harness';
+import { viderCacheSalesforce } from '../src/statutSalesforce';
 
 const ENV_BASE = { UPN_DOMAIN: 'exemple.test', ENTRA_STATUS_EXTENSION: EXT };
 
@@ -261,5 +262,68 @@ describe('GET /api/demandes/:id : extension du créateur falsifiée', () => {
     expect(res.status).toBe(200);
     expect(g().calls.filter((c) => c.path.includes('memberOf') || c.path.includes('..'))).toEqual([]);
     expect(((await res.json()) as { historique: { creation: { par: unknown } } }).historique.creation.par).toBeNull();
+  });
+});
+
+describe('GET /api/demandes/:id : statut Salesforce (journaux de provisionnement d’Entra)', () => {
+  const SF_GROUP = 'ffffffff-0000-4000-8000-0000000000b1';
+  const SF_SP = 'ffffffff-0000-4000-8000-0000000000c1';
+  const { h, g, compte } = suite({ ...HISTORY_ENV, SALESFORCE_GROUP_ID: SF_GROUP, SALESFORCE_SERVICE_PRINCIPAL_ID: SF_SP });
+  beforeEach(() => viderCacheSalesforce());
+  type Detail = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const lire = async (id: string) => (await (await h.callRh('GET', `/api/demandes/${id}`)).json()) as Detail;
+  const dansGroupe = (id: string) => g().groups.set(SF_GROUP, new Set([...(g().groups.get(SF_GROUP) ?? []), id]));
+  const journal = (id: string, ...entrees: Record<string, unknown>[]) => g().provisioning.set(`${id}|${SF_SP}`, entrees);
+  const entree = (le: string, status: string, raison?: string) => ({ activityDateTime: le, provisioningStatusInfo: { status, errorInformation: raison ? { reason: raison } : null }, provisioningSteps: [] });
+
+  it('OK : la dernière entrée réussie ; email du responsable envoyé (extensionAttribute2)', async () => {
+    const id = compte('Actif', { [EXT_LIC]: LICENSE_SKU, onPremisesExtensionAttributes: { extensionAttribute1: 'AMA', extensionAttribute2: 'chef@exemple.test' } });
+    dansGroupe(id);
+    journal(id, entree('2026-11-10T17:00:00Z', 'skipped'), entree('2026-11-10T17:28:58Z', 'success'));
+    expect((await lire(id)).salesforce).toEqual({ etat: 'ok', le: '2026-11-10T17:28:58Z', raison: null, emailResponsable: 'chef@exemple.test' });
+  });
+
+  it('KO : échec avec la raison du connecteur', async () => {
+    const id = compte('Actif', { [EXT_LIC]: LICENSE_SKU });
+    dansGroupe(id);
+    journal(id, entree('2026-11-10T17:00:00Z', 'failure', 'DUPLICATE_COMMUNITY_NICKNAME'));
+    expect((await lire(id)).salesforce).toMatchObject({ etat: 'ko', raison: 'DUPLICATE_COMMUNITY_NICKNAME', emailResponsable: null });
+  });
+
+  it('en attente : pas encore d’entrée, ou sautée (compte désactivé) avec la raison', async () => {
+    const id = compte('Validé', { [EXT_LIC]: LICENSE_SKU });
+    dansGroupe(id);
+    expect((await lire(id)).salesforce).toMatchObject({ etat: 'en_attente', le: null });
+    viderCacheSalesforce();
+    journal(id, { activityDateTime: '2026-11-10T17:01:30Z', provisioningStatusInfo: { status: 'skipped' }, provisioningSteps: [{ status: 'skipped', description: 'This object is not active in the source system.' }] });
+    expect((await lire(id)).salesforce).toMatchObject({ etat: 'en_attente', raison: 'This object is not active in the source system.' });
+  });
+
+  it('hors périmètre : pas dans le groupe Salesforce, sans lecture des journaux', async () => {
+    const id = compte('Actif', { [EXT_LIC]: LICENSE_SKU });
+    expect((await lire(id)).salesforce).toMatchObject({ etat: 'hors_perimetre', le: null, raison: null });
+    expect(g().calls.some((c) => c.path === '/auditLogs/provisioning')).toBe(false);
+  });
+
+  it('illisible : journaux en échec (tracé, la page répond quand même) ; rien n’est mis en cache', async () => {
+    const id = compte('Actif', { [EXT_LIC]: LICENSE_SKU });
+    dansGroupe(id);
+    g().failOn.provisioning = 403;
+    const res = await h.callRh('GET', `/api/demandes/${id}`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as Detail).salesforce).toMatchObject({ etat: 'illisible' });
+    expect(h.ctx.events.find((e) => e.action === 'demande.echec' && e.etape === 'detail_salesforce')).toBeDefined();
+    g().failOn.provisioning = undefined;
+    journal(id, entree('2026-11-10T17:28:58Z', 'success'));
+    expect((await lire(id)).salesforce).toMatchObject({ etat: 'ok' });
+  });
+
+  it('cache d’une minute : une seule lecture des journaux pour deux affichages rapprochés', async () => {
+    const id = compte('Actif', { [EXT_LIC]: LICENSE_SKU });
+    dansGroupe(id);
+    journal(id, entree('2026-11-10T17:28:58Z', 'success'));
+    await lire(id);
+    await lire(id);
+    expect(g().calls.filter((c) => c.path === '/auditLogs/provisioning')).toHaveLength(1);
   });
 });

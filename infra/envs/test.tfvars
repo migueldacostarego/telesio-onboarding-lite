@@ -10,6 +10,8 @@ onboarding_unit_id = "a0b3aaf1-755b-46e8-a1b7-23ecf8c1a94b"
 
 # Groupe affecté à l'application Entra « Salesforce Sandbox Telesio » (rôle RW-Consultant), provisionnement vers telesio-sbx.
 salesforce_group_id = "5bdc9bcb-5b23-4136-b3eb-3f877e7c971c"
+# Principal de service de cette application : statut Salesforce sur la page de détail (journaux de provisionnement).
+salesforce_service_principal_id = "e6218f0d-e494-4713-8dcb-a65db55afc98"
 
 # Site https://telesiosandbox.sharepoint.com/sites/onboarding, bibliothèque « Documents ».
 sharepoint_site_id        = "telesiosandbox.sharepoint.com,2d8b30fc-31cb-4e5e-b1bb-78b695c96c2a,a9198d7e-8dbd-414c-8d0d-996331b8b957"

@@ -41,6 +41,8 @@ export class FakeGraph {
     /** Échec des PATCH qui posent le statut (extension), pas de ceux d'accountEnabled. */
     statusPatch?: number;
     groupAdd?: number;
+    /** Échec de la lecture des journaux de provisionnement. */
+    provisioning?: number;
     /** Échec de la recherche d'un trigramme (extensionAttribute1). */
     trigramme?: number;
     /** Limite l'échec de groupAdd à ce groupe (sinon : tous les groupes). */
@@ -67,6 +69,8 @@ export class FakeGraph {
   passwords = new Map<string, { password: string; forceChangePasswordNextSignIn: boolean }[]>();
   /** Comptes qui ont une méthode Microsoft Authenticator inscrite. */
   authenticators = new Set<string>();
+  /** Journaux de provisionnement par « userId|servicePrincipalId » (GET /auditLogs/provisioning). */
+  provisioning = new Map<string, Record<string, unknown>[]>();
   /** groupId -> membres */
   groups = new Map<string, Set<string>>();
   /** Unités administratives : unitId -> membres. */
@@ -286,6 +290,11 @@ export class FakeGraph {
       if (this.failOn.authenticator) throw graphError(this.failOn.authenticator, 'Authorization_RequestDenied');
       const has = this.authenticators.has(authApp[1] as string);
       return { value: has ? [{ id: 'auth-1', displayName: 'Appareil', createdDateTime: '2026-10-27T11:00:00Z' }] : [] };
+    }
+    if (method === 'GET' && path === '/auditLogs/provisioning') {
+      if (this.failOn.provisioning) throw graphError(this.failOn.provisioning, 'Authorization_RequestDenied');
+      const m = /sourceIdentity\/id eq '([^']+)' and servicePrincipal\/id eq '([^']+)'/.exec(call.filter ?? '');
+      return { value: m ? (this.provisioning.get(`${m[1]}|${m[2]}`) ?? []) : [] };
     }
     if (method === 'GET' && path === '/subscribedSkus') {
       if (this.failOn.skus) throw graphError(this.failOn.skus, 'Authorization_RequestDenied');

@@ -2,6 +2,7 @@ import { ExternalLinkIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { BoutonCopier } from '@/components/demandes/Adresse';
 import type { DemandeDetail } from '@/lib/detail';
+import { formatInstant } from '@/lib/dates';
 import { PAYS } from '@/lib/pays';
 import { formatArrivee } from '@/lib/suivi';
 
@@ -64,6 +65,31 @@ function Groupe({ d }: { d: DemandeDetail }) {
   return <>{d.groupeArrivants.membre ? 'Membre' : 'Non membre'}</>;
 }
 
+const ETATS_SALESFORCE = {
+  ok: { texte: 'OK', classe: 'text-green-800' },
+  ko: { texte: 'KO', classe: 'text-destructive' },
+  en_attente: { texte: 'En attente', classe: 'text-muted-foreground' },
+  hors_perimetre: { texte: '—', classe: 'text-muted-foreground' },
+  illisible: { texte: 'Indisponible', classe: 'text-muted-foreground' },
+} as const;
+
+/** Statut d'après les journaux de provisionnement d'Entra (quelques minutes de retard) ; la raison d'un échec ou d'une attente, l'email du responsable envoyé. */
+function Salesforce({ s }: { s: NonNullable<DemandeDetail['salesforce']> }) {
+  const etat = ETATS_SALESFORCE[s.etat];
+  return (
+    <span className="space-y-0.5">
+      <span className={`block font-medium ${etat.classe}`}>
+        {etat.texte}
+        {s.le && <span className="font-normal text-muted-foreground"> · {formatInstant(s.le)}</span>}
+      </span>
+      {s.raison && <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">{s.raison}</span>}
+      {s.etat !== 'hors_perimetre' && (
+        <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">Manager envoyé : {s.emailResponsable ?? 'aucun'}</span>
+      )}
+    </span>
+  );
+}
+
 function Email({ d }: { d: DemandeDetail }) {
   if (!d.upn) return ABSENT;
   return (
@@ -105,6 +131,11 @@ export function CompteEtAcces({ d }: { d: DemandeDetail }) {
       <Ligne libelle="Dossier">
         <Dossier d={d} />
       </Ligne>
+      {d.salesforce && (
+        <Ligne libelle="Salesforce">
+          <Salesforce s={d.salesforce} />
+        </Ligne>
+      )}
     </Rubrique>
   );
 }
