@@ -39,6 +39,12 @@ export interface Config {
    */
   salesforceGroupId?: string;
   /**
+   * objectId du principal de service de l'application Salesforce d'Entra (SALESFORCE_SERVICE_PRINCIPAL_ID) : le détail d'une
+   * demande lit ses journaux de provisionnement (AuditLog.Read.All) pour afficher le statut Salesforce. Absent (ou sans groupe
+   * Salesforce) : pas de statut Salesforce.
+   */
+  salesforceServicePrincipalId?: string;
+  /**
    * Unité administrative à gestion restreinte des comptes d'onboarding (ENTRA_ONBOARDING_UNIT_ID) : chaque compte créé y est
    * ajouté, retiré à Terminé, et toute action refuse (404) un compte qui n'en est pas membre. Seule l'application (rôle limité à
    * l'unité) peut alors modifier ces comptes : un administrateur d'utilisateurs du tenant ne peut ni changer leur statut ni
@@ -198,6 +204,13 @@ export function parseSalesforceGroupId(raw: string | undefined): string | undefi
   return v?.toLowerCase();
 }
 
+/** SALESFORCE_SERVICE_PRINCIPAL_ID : GUID facultatif, mis en minuscules. */
+export function parseSalesforceServicePrincipalId(raw: string | undefined): string | undefined {
+  const v = opt(raw);
+  if (v !== undefined && !GUID_RE.test(v)) throw new Error('SALESFORCE_SERVICE_PRINCIPAL_ID invalide (attendu : GUID)');
+  return v?.toLowerCase();
+}
+
 /** ENTRA_ONBOARDING_UNIT_ID : GUID facultatif, mis en minuscules. */
 export function parseOnboardingUnitId(raw: string | undefined): string | undefined {
   const v = opt(raw);
@@ -237,6 +250,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const folderPattern = parseFolderPattern(env.SHAREPOINT_FOLDER_PATTERN);
   const arrivantsGroupId = parseArrivantsGroupId(env.ARRIVANTS_GROUP_ID);
   const salesforceGroupId = parseSalesforceGroupId(env.SALESFORCE_GROUP_ID);
+  const salesforceServicePrincipalId = parseSalesforceServicePrincipalId(env.SALESFORCE_SERVICE_PRINCIPAL_ID);
   const onboardingUnitId = parseOnboardingUnitId(env.ENTRA_ONBOARDING_UNIT_ID);
   const activationExtension = parseExtension(env.ENTRA_ACTIVATION_EXTENSION, 'ENTRA_ACTIVATION_EXTENSION');
   const creatorExtension = parseExtension(env.ENTRA_CREATOR_EXTENSION, 'ENTRA_CREATOR_EXTENSION');
@@ -260,6 +274,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     licenseExtension,
     arrivantsGroupId,
     salesforceGroupId,
+    salesforceServicePrincipalId,
     onboardingUnitId,
     activationExtension,
     creatorExtension,

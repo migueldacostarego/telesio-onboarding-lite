@@ -77,6 +77,26 @@ describe('CompteEtAcces', () => {
     });
   });
 
+  describe('Salesforce', () => {
+    it('absent quand Salesforce n’est pas configuré', () => {
+      render(<CompteEtAcces d={detail({})} />);
+      expect(within(zone()).queryByText('Salesforce')).not.toBeInTheDocument();
+    });
+
+    it('OK avec la date, KO avec la raison, manager envoyé ; hors périmètre : « — » seul', () => {
+      const { rerender } = render(<CompteEtAcces d={detail({ salesforce: { etat: 'ok', le: '2026-11-10T17:28:58Z', raison: null, emailResponsable: 'chef@exemple.test' } })} />);
+      expect(valeur(zone(), 'Salesforce')).toHaveTextContent(/^OK · .+Manager envoyé : chef@exemple\.test$/);
+      rerender(<CompteEtAcces d={detail({ salesforce: { etat: 'ko', le: '2026-11-10T17:28:58Z', raison: 'DUPLICATE_COMMUNITY_NICKNAME', emailResponsable: null } })} />);
+      expect(valeur(zone(), 'Salesforce')).toHaveTextContent(/KO.*DUPLICATE_COMMUNITY_NICKNAME.*Manager envoyé : aucun/);
+      rerender(<CompteEtAcces d={detail({ salesforce: { etat: 'en_attente', le: null, raison: null, emailResponsable: 'chef@exemple.test' } })} />);
+      expect(valeur(zone(), 'Salesforce')).toHaveTextContent(/^En attente/);
+      rerender(<CompteEtAcces d={detail({ salesforce: { etat: 'hors_perimetre', le: null, raison: null, emailResponsable: null } })} />);
+      expect(valeur(zone(), 'Salesforce')).toHaveTextContent(/^—$/);
+      rerender(<CompteEtAcces d={detail({ salesforce: { etat: 'illisible', le: null, raison: null, emailResponsable: null } })} />);
+      expect(valeur(zone(), 'Salesforce')).toHaveTextContent(/^Indisponible/);
+    });
+  });
+
   describe('dossier SharePoint', () => {
     it('demande en attente : créé à la validation, sans lien', () => {
       render(<CompteEtAcces d={detailDe(enAttente(ELOISE))} />);

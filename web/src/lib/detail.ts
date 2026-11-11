@@ -48,6 +48,14 @@ export interface DemandeDetail {
   etape: 1 | 2 | 3 | 4;
   licence: { libelle: string | null; etat: 'choisie' | 'attribuee' | 'en_cours' | 'erreur' | 'inconnu' } | null;
   groupeArrivants: { membre: boolean } | null;
+  /** Statut Salesforce (journaux de provisionnement d'Entra) ; absent si Salesforce n'est pas configuré. */
+  salesforce?: {
+    etat: 'ok' | 'ko' | 'en_attente' | 'hors_perimetre' | 'illisible';
+    /** Date de la dernière entrée des journaux. */
+    le: string | null;
+    raison: string | null;
+    emailResponsable: string | null;
+  };
   dossier: { etat: 'present'; url: string | null } | { etat: 'absent' } | null;
   onboarding?: EtatOnboarding;
   actions: string[];

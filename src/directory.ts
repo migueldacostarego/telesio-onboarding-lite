@@ -110,6 +110,8 @@ export interface DemandeLue {
   pays: CodePays | null;
   /** Trigramme (extensionAttribute1), s'il est bien formé ; null sinon. */
   trigramme: string | null;
+  /** Email du responsable envoyé à Salesforce (extensionAttribute2) ; null s'il est absent. */
+  emailResponsable: string | null;
   /** AAAA-MM-JJ */
   dateArrivee: string | null;
   createdDateTime: string | null;
@@ -153,6 +155,15 @@ export interface PendingDemande {
 export interface SkuAvailability {
   enabled: number;
   consumed: number;
+}
+
+/** Entrée des journaux de provisionnement : `statut` tel que Graph le rend (success, warning, failure, skipped). */
+export interface Provisionnement {
+  statut: string;
+  /** Date de l'entrée (ISO 8601). */
+  le: string;
+  /** Raison de l'échec ou du saut donnée par le connecteur ; null s'il n'y en a pas. */
+  raison: string | null;
 }
 
 /** Entrée licenseAssignmentStates de l'utilisateur pour un SKU (null : pas encore traitée par Entra). */
@@ -218,6 +229,11 @@ export interface Directory {
   /** email : mail, à défaut userPrincipalName (null si aucun). */
   getUser(id: string): Promise<{ id: string; accountEnabled: boolean; email: string | null } | null>;
   upnTaken(upn: string): Promise<boolean>;
+  /**
+   * Dernière entrée des journaux de provisionnement d'Entra pour ce compte et cette application (GET /auditLogs/provisioning,
+   * AuditLog.Read.All) ; null s'il n'y en a pas encore.
+   */
+  lireProvisionnement(userId: string, servicePrincipalId: string): Promise<Provisionnement | null>;
   /** Un compte porte-t-il déjà ce trigramme (extensionAttribute1, requête avancée) ? */
   trigrammeTaken(trigramme: string): Promise<boolean>;
   /** extensions : attributs d'extension (nom complet -> valeur) posés à la création. */
@@ -256,6 +272,21 @@ interface RawPending {
 }
 
 const quote = (s: string) => s.replace(/'/g, "''");
+
+interface EntreeProvisionnement {
+  activityDateTime?: string;
+  provisioningStatusInfo?: { status?: string; errorInformation?: { reason?: string | null } | null } | null;
+  provisioningSteps?: { status?: string; description?: string | null }[];
+}
+
+/** L'entrée la plus récente (Graph ne garantit pas l'ordre) ; la raison vient de l'erreur, sinon de l'étape sautée ou en échec. */
+export function dernierProvisionnement(entrees: EntreeProvisionnement[]): Provisionnement | null {
+  const e = entrees.filter((x) => x.activityDateTime).sort((a, b) => (b.activityDateTime as string).localeCompare(a.activityDateTime as string))[0];
+  if (!e) return null;
+  const etape = e.provisioningSteps?.find((s) => s.status === 'failure' || s.status === 'skipped');
+  const raison = e.provisioningStatusInfo?.errorInformation?.reason || etape?.description || null;
+  return { statut: e.provisioningStatusInfo?.status ?? 'unknown', le: e.activityDateTime as string, raison: raison ? raison.trim() : null };
+}
 const EVENTUAL = ['ConsistencyLevel', 'eventual'] as const;
 /** Pages de 100 suivies au plus par liste : au-delà, la réponse est marquée tronquée. */
 const MAX_PAGES = 10;
@@ -312,6 +343,19 @@ export class GraphDirectory implements Directory {
         .count(true)
         .get();
       return ((res?.value ?? []) as unknown[]).length > 0;
+    } catch (err) {
+      throw wrap(err);
+    }
+  }
+
+  async lireProvisionnement(userId: string, servicePrincipalId: string): Promise<Provisionnement | null> {
+    try {
+      const res = await this.client
+        .api('/auditLogs/provisioning')
+        .filter(`sourceIdentity/id eq '${quote(userId)}' and servicePrincipal/id eq '${quote(servicePrincipalId)}'`)
+        .top(10)
+        .get();
+      return dernierProvisionnement((res?.value ?? []) as EntreeProvisionnement[]);
     } catch (err) {
       throw wrap(err);
     }
@@ -443,6 +487,7 @@ export class GraphDirectory implements Directory {
         typeContrat: typeLu(u.employeeType),
         pays: paysLu(u.usageLocation),
         trigramme: trigrammeLu(u.onPremisesExtensionAttributes),
+        emailResponsable: str(u.onPremisesExtensionAttributes?.extensionAttribute2),
         dateArrivee: typeof u.employeeHireDate === 'string' ? u.employeeHireDate.slice(0, 10) : null,
         createdDateTime: str(u.createdDateTime),
         lastPasswordChange: str(u.lastPasswordChangeDateTime),
