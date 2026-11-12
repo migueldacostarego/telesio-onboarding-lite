@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { AppHeader } from '@/components/AppHeader';
-import { LimiteErreurParPage } from '@/components/LimiteErreur';
+import { LimiteErreur, LimiteErreurParPage } from '@/components/LimiteErreur';
 import { UserMenu, UserMenuSkeleton } from '@/components/UserMenu';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,7 +23,10 @@ function Frame({ menu, children }: { menu?: ReactNode; children: ReactNode }) {
       >
         Aller au contenu
       </a>
-      <AppHeader>{menu}</AppHeader>
+      {/* L'en-tête (menu utilisateur compris) a sa propre limite : une exception n'y emporte pas la page. */}
+      <LimiteErreur message="L’en-tête n’a pas pu s’afficher. Rechargez la page ; si le problème persiste, contactez l’administrateur." className="m-4 w-auto">
+        <AppHeader>{menu}</AppHeader>
+      </LimiteErreur>
       <main id="contenu" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 focus:outline-none">
         {children}
       </main>

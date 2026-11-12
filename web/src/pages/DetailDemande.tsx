@@ -1,5 +1,5 @@
 import { ArrowLeftIcon } from 'lucide-react';
-import { Link, useParams } from 'react-router';
+import { Link } from 'react-router';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { ActionsLigne, MessageLigne } from '@/components/demandes/ActionsLigne';
 import { EnTeteDetail } from '@/components/demandes/EnTeteDetail';
@@ -10,9 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { chronologie } from '@/lib/chronologie';
 import { useDemandes } from '@/lib/contexteDemandes';
-import { useDemande, type DemandeDetail } from '@/lib/detail';
+import type { DemandeDetail } from '@/lib/detail';
 import { reconcilier } from '@/lib/detailDemande';
-import type { Demande } from '@/lib/suivi';
 
 function Chargement() {
   return (
@@ -43,24 +42,24 @@ const Retour = () => (
 );
 
 /** Le détail est lu : en-tête avec ses actions, historique, fiche. `erreur` : une relecture en arrière-plan a échoué, les données gardées restent affichées. */
-function CorpsDemande({ d, ligne, erreur }: { d: DemandeDetail; ligne: Demande | undefined; erreur: unknown }) {
-  const { actions, surAction } = useDemandes();
+function CorpsDemande({ d, erreur }: { d: DemandeDetail; erreur: unknown }) {
+  const { actions, surAction, ligneListe, ligneDetail } = useDemandes();
   const etat = actions.etats[d.id];
-  const { etape, statut, onboarding, actions: permises } = reconcilier(d, ligne);
+  const { etape, statut, onboarding, actions: permises } = reconcilier(d, ligneListe);
   const jalons = chronologie({ detail: d, etape, onboarding, actions: permises, etat });
   return (
     <div className="space-y-6">
       <EnTeteDetail d={d} statut={statut}>
-        {ligne && <ActionsLigne demande={ligne} etat={etat} onAction={(action) => surAction(ligne, action)} />}
+        {ligneDetail && <ActionsLigne demande={ligneDetail} etat={etat} onAction={(action) => surAction(ligneDetail, action)} />}
       </EnTeteDetail>
-      {ligne && <MessageLigne etat={etat} onFermer={() => actions.fermer(d.id)} />}
+      <MessageLigne etat={etat} onFermer={() => actions.fermer(d.id)} />
       {erreur ? <ApiErrorAlert error={erreur} /> : null}
 
       <div className="grid items-start gap-6 lg:grid-cols-[1fr_22rem]">
         <HistoriqueDetail jalons={jalons} enregistre={d.historique.enregistre} />
         <div className="space-y-4">
           <Identite d={d} />
-          <CompteEtAcces d={d} />
+          <CompteEtAcces d={d} statut={statut} />
         </div>
       </div>
     </div>
@@ -69,20 +68,18 @@ function CorpsDemande({ d, ligne, erreur }: { d: DemandeDetail; ligne: Demande |
 
 /**
  * Page d'une demande : `/demandes/:id` (l'objectId est la seule donnée de l'adresse). Identité, licence, groupe des arrivants,
- * dossier SharePoint et chronologie complète, d'après `GET /api/demandes/:id`. Les boutons d'action et leur état sont ceux de la
- * liste (contexte partagé) : ils viennent de `GET /api/suivi`, comme la ligne de synchronisation d'Entra (lib/synchro.ts).
+ * dossier SharePoint et chronologie complète, d'après `GET /api/demandes/:id`, lu par le fournisseur (au-dessus des routes). Les
+ * boutons d'action portent sur `ligneDetail` : la ligne de la liste, ou celle du détail s'il est plus avancé ou si la liste ne la
+ * contient pas (lib/detailDemande.ts).
  */
 export function DetailDemande() {
-  const { id = '' } = useParams();
-  const { suivi } = useDemandes();
-  const ligne: Demande | undefined = suivi.data?.demandes.find((d) => d.id === id);
-  const requete = useDemande(id, { attendue: ligne !== undefined, synchro: ligne?.synchro === true });
+  const { detail: requete } = useDemandes();
   const d = requete.data;
 
   let corps;
   if (requete.isPending) corps = <Chargement />;
   else if (!d) corps = <ErreurDetail error={requete.error} enCours={requete.isFetching} onReessayer={() => void requete.refetch()} />;
-  else corps = <CorpsDemande d={d} ligne={ligne} erreur={requete.isError ? requete.error : null} />;
+  else corps = <CorpsDemande d={d} erreur={requete.isError ? requete.error : null} />;
 
   return (
     <div className="space-y-4">

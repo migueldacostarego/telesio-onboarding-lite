@@ -8,9 +8,27 @@ import { SUIVI_KEY, type Demande, type Suivi } from '@/lib/suivi';
  * true`) à chaque lecture suivante tant que l'API ne la rend pas à ce statut (ou un statut plus avancé), 3 minutes au plus.
  * Passé ce délai, l'API fait foi : la ligne disparaît si elle n'est toujours pas revenue.
  *
- * Un refus n'en fait pas partie : la ligne est retirée comme avant.
+ * Un refus n'en fait pas partie : la ligne est retirée, et oubliée ici (`oublier`) si elle était gardée (créée ou validée il y a
+ * moins de 3 minutes), sinon elle reviendrait en ligne fantôme.
  */
 export const DELAI_SYNCHRO_MS = 180_000;
+
+/**
+ * La ligne d'une demande que l'écran vient de créer. Ses actions sont inconnues du client (seul le serveur décide) : aucune, jusqu'à
+ * ce que `GET /api/suivi` rende la ligne avec les siennes.
+ */
+export const ligneCreee = (champs: Omit<Demande, 'statut' | 'etape' | 'actions' | 'onboarding' | 'synchro'>): Demande => ({ ...champs, statut: 'EnAttente', etape: 1, actions: [] });
+
+/**
+ * La ligne après une action réussie, quand elle change de statut : valider (Validé) et activer (Actif). Les actions à venir sont
+ * inconnues du client (le jour J, le dossier SharePoint) : aucune, jusqu'à la lecture suivante de l'API. Refuser retire la ligne ;
+ * régénérer et reprendre ne changent pas de statut (la ligne est déjà là, l'API la renvoie).
+ */
+export function ligneApres(d: Demande, action: string): Demande | undefined {
+  if (action === 'valider') return { ...d, statut: 'Validé', etape: 2, actions: [], onboarding: undefined };
+  if (action === 'activer') return { ...d, statut: 'Actif', etape: 3, actions: [], onboarding: { motDePasse: false, authenticator: false, termine: false } };
+  return undefined;
+}
 
 interface Attente {
   /** La ligne telle qu'elle doit s'afficher (nouveau statut, étape, actions inconnues). */
@@ -27,7 +45,8 @@ const tableDe = (client: QueryClient): Map<string, Attente> => {
   return table;
 };
 
-const oublier = (client: QueryClient, id: string) => {
+/** La ligne n'est plus gardée (rendue par l'API, échue, ou refusée : le compte est supprimé). Sans effet si elle ne l'était pas. */
+export const oublier = (client: QueryClient, id: string): void => {
   const table = tableDe(client);
   clearTimeout(table.get(id)?.minuteur);
   table.delete(id);
@@ -86,5 +105,5 @@ export function fusionner(client: QueryClient, serveur: readonly Demande[]): Dem
   return demandes;
 }
 
-/** Au moins une ligne est gardée en attente de l'API : la liste est relue sans attendre l'actualisation de 30 s. */
+/** Au moins une ligne est gardée en attente de l'API : la liste est relue toutes les 5 s, sans attendre l'actualisation de 30 s (`useSuivi`). */
 export const enSynchro = (demandes: readonly Demande[] | undefined): boolean => demandes?.some((d) => d.synchro === true) === true;

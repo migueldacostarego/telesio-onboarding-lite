@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api } from '@/lib/api';
-import { fusionner } from '@/lib/synchro';
+import { enSynchro, fusionner } from '@/lib/synchro';
 import type { TypeContrat } from '@/lib/typeContrat';
 
 /** Statuts renvoyés par GET /api/suivi, dans l'ordre du parcours (étape 1 à 4). */
@@ -62,6 +62,8 @@ export interface Suivi {
 export const SUIVI_KEY = ['suivi'] as const;
 /** Actualisation automatique : toutes les 30 s, et au retour sur l'onglet. */
 export const ACTUALISATION_MS = 30_000;
+/** Tant qu'une ligne attend que l'API la rende (réplication d'Entra : lib/synchro.ts), la liste est relue à cette cadence. */
+export const RELECTURE_SYNCHRO_MS = 5_000;
 
 export function useSuivi() {
   const queryClient = useQueryClient();
@@ -75,8 +77,11 @@ export function useSuivi() {
       // Les lignes que l'écran vient d'écrire (créée, validée, activée) restent affichées tant que la réplication d'Entra les rate.
       return { demandes: fusionner(queryClient, res.data.demandes), tronque: res.data.tronque === true };
     },
-    // Les données restent affichées pendant l'actualisation (pas de squelette, pas de clignotement).
-    refetchInterval: ACTUALISATION_MS,
+    // Les données restent affichées pendant l'actualisation (pas de squelette, pas de clignotement). 5 s tant qu'une ligne est en
+    // synchronisation (borné à 3 minutes par lib/synchro.ts), sur la liste comme sur une page de détail (le fournisseur est au-dessus
+    // des routes). Une relecture par intervalle se greffe sur une lecture en cours sans l'annuler (contrairement à
+    // `invalidateQueries`) : une API qui met plus de 5 s à répondre finit quand même par répondre.
+    refetchInterval: (query) => (enSynchro(query.state.data?.demandes) ? RELECTURE_SYNCHRO_MS : ACTUALISATION_MS),
     // Seulement onglet visible : au retour, refetchOnWindowFocus relit si les données ont plus de staleTime.
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,

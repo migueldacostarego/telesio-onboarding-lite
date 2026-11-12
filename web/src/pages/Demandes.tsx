@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { ApiErrorAlert } from '@/components/ApiErrorAlert';
 import { Actualisation } from '@/components/demandes/Actualisation';
@@ -17,19 +17,17 @@ import type { DemandeCreee, DemandeSortie } from '@/lib/demandeForm';
 import { useMoi } from '@/lib/moi';
 import { jourAParis } from '@/lib/dates';
 import { SUIVI_KEY, filtrerDemandes, type Demande } from '@/lib/suivi';
-import { attendre, enSynchro } from '@/lib/synchro';
+import { attendre, ligneCreee } from '@/lib/synchro';
 
 /** Plafond côté API : au plus 100 demandes par statut. */
 const PLAFOND = 100;
 /** La ligne créée reste en évidence ce temps-là. */
 const SURLIGNAGE_MS = 30_000;
-/** Tant qu'une ligne attend que l'API la rende (réplication d'Entra : lib/synchro.ts), la liste est relue à cette cadence. */
-const RELECTURE_SYNCHRO_MS = 5_000;
 
 export function Demandes() {
   // Liste, actions, recherche, filtre et tri vivent au-dessus des routes (lib/contexteDemandes.ts) : « retour » depuis une demande les retrouve.
   // Rien de tout cela ne va dans l'URL ni dans le stockage du navigateur (le terme est un nom).
-  const { suivi, actions, surAction, terme, setTerme, groupe, setGroupe, tri, setTri } = useDemandes();
+  const { suivi, actions, surAction, terme, setTerme, groupe, setGroupe, tri, setTri, nouvelle, setNouvelle } = useDemandes();
   const bureau = useIsDesktop();
   const navigate = useNavigate();
   // « À venir » et « Aujourd'hui » dépendent du jour à Paris : recalculé quand il change (passage de minuit), sans re-trier le reste du temps.
@@ -37,10 +35,9 @@ export function Demandes() {
 
   const donnees = suivi.data;
   const queryClient = useQueryClient();
-  const droits = useMoi().data?.droits;
-  const peutCreer = droits?.creer === true;
-  // Demande qui vient d'être créée : son id (ligne en évidence) et l'éventuel avertissement du serveur (responsable non posé).
-  const [nouvelle, setNouvelle] = useState<{ id: string; nom: string; avertissement?: string } | null>(null);
+  const peutCreer = useMoi().data?.droits.creer === true;
+  // Demande qui vient d'être créée : son id (ligne en évidence) et l'éventuel avertissement du serveur (responsable non posé). Gardée
+  // par le fournisseur : le message survit à une visite du détail.
   const idNouvelle = nouvelle?.id || undefined; // '' : le surlignage est terminé, le message reste
   const nouvelleVisible = idNouvelle !== undefined && donnees?.demandes.some((d) => d.id === idNouvelle) === true;
   const lignes = {
@@ -50,36 +47,23 @@ export function Demandes() {
     onFermer: (d: Demande) => actions.fermer(d.id),
     surlignee: idNouvelle || null,
   };
-  // Une ligne créée, validée ou activée par l'écran attend que la réplication d'Entra la rende à `GET /api/suivi` (elle reste affichée
-  // en attendant) : on relit la liste jusqu'à la retrouver. Le délai est borné par lib/synchro.ts (3 minutes), pas ici.
-  const synchronisation = enSynchro(donnees?.demandes);
-  useEffect(() => {
-    if (!synchronisation) return;
-    const id = setInterval(() => void queryClient.invalidateQueries({ queryKey: SUIVI_KEY }), RELECTURE_SYNCHRO_MS);
-    return () => clearInterval(id);
-  }, [synchronisation, queryClient]);
+  // Une ligne créée, validée ou activée par l'écran attend que la réplication d'Entra la rende : `useSuivi` relit alors la liste
+  // toutes les 5 s (lib/suivi.ts), borné à 3 minutes par lib/synchro.ts.
   useEffect(() => {
     if (idNouvelle === undefined || !nouvelleVisible) return;
     document.getElementById(`demande-${idNouvelle}`)?.scrollIntoView?.({ block: 'nearest' });
     const id = setTimeout(() => setNouvelle((n) => (n?.id === idNouvelle ? { ...n, id: '' } : n)), SURLIGNAGE_MS);
     return () => clearTimeout(id);
-  }, [idNouvelle, nouvelleVisible]);
+  }, [idNouvelle, nouvelleVisible, setNouvelle]);
   const surCreee = (creee: DemandeCreee, valeurs: DemandeSortie) => {
     const nom = `${valeurs.prenom} ${valeurs.nom}`; // le nom affiché que le serveur donne au compte
     setNouvelle({ id: creee.id, nom, avertissement: creee.avertissement });
-    // La ligne est dans la liste tout de suite, sans attendre la réplication d'Entra ; l'API la rendra (actions : celles de la direction, d'après droits).
-    attendre(queryClient, {
-      id: creee.id,
-      nom,
-      upn: creee.userPrincipalName,
-      poste: valeurs.poste,
-      service: valeurs.service,
-      typeContrat: valeurs.typeContrat,
-      dateArrivee: valeurs.dateArrivee,
-      statut: 'EnAttente',
-      etape: 1,
-      actions: droits?.approuver ? ['approuver', 'refuser'] : [],
-    });
+    // La ligne est dans la liste tout de suite, sans attendre la réplication d'Entra. Sans actions : seul le serveur les décide, la
+    // relecture (toutes les 5 s) les apporte avec la ligne.
+    attendre(
+      queryClient,
+      ligneCreee({ id: creee.id, nom, upn: creee.userPrincipalName, poste: valeurs.poste, service: valeurs.service, typeContrat: valeurs.typeContrat, dateArrivee: valeurs.dateArrivee }),
+    );
     // La ligne doit être visible : ni recherche ni filtre ne la masquent.
     setTerme('');
     setGroupe('tous');
@@ -117,6 +101,20 @@ export function Demandes() {
               <p>Elle attend la validation de la direction.</p>
             )}
             <Button size="sm" variant="outline" className="mt-2" onClick={() => setNouvelle(null)}>
+              Fermer ce message
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {actions.perdues.length > 0 && (
+        <Alert variant="destructive">
+          <AlertTitle>Une action n’a pas abouti</AlertTitle>
+          <AlertDescription>
+            <p>
+              L’action sur {actions.perdues.map((p) => p.nom).join(', ')} a échoué, et la demande n’est plus dans la liste : elle a sans doute été traitée ailleurs ou supprimée.
+            </p>
+            <Button size="sm" variant="outline" className="mt-2" onClick={actions.fermerPerdues}>
               Fermer ce message
             </Button>
           </AlertDescription>

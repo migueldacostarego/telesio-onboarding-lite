@@ -1,7 +1,15 @@
 import { createContext, useContext } from 'react';
 import type { ActionsDemandes } from '@/hooks/useActionsDemandes';
 import type { ActionNom } from '@/lib/actions';
+import type { useDemande } from '@/lib/detail';
 import type { Demande, FiltreGroupe, Tri, useSuivi } from '@/lib/suivi';
+
+/** Demande que l'écran vient de créer : son id (ligne en évidence ; '' quand le surlignage est fini) et l'avertissement du serveur. */
+export interface Nouvelle {
+  id: string;
+  nom: string;
+  avertissement?: string;
+}
 
 /**
  * Ce que la liste et la page de détail partagent. Tout vit **au-dessus des routes** : naviguer de l'une à l'autre ne perd ni un
@@ -10,7 +18,16 @@ import type { Demande, FiltreGroupe, Tri, useSuivi } from '@/lib/suivi';
  */
 export interface ContexteDemandes {
   suivi: ReturnType<typeof useSuivi>;
+  /** Sur `/demandes/:id` : la lecture de `GET /api/demandes/:id` (inactive ailleurs). */
+  detail: ReturnType<typeof useDemande>;
+  /** Sur `/demandes/:id` : la ligne de la liste, telle que `GET /api/suivi` la rend (absente si la liste ne la contient pas). */
+  ligneListe: Demande | undefined;
+  /** Sur `/demandes/:id` : la ligne qui porte les actions de la page (lib/detailDemande.ts, `ligneDuDetail`). */
+  ligneDetail: Demande | undefined;
   actions: ActionsDemandes;
+  /** Gardée au-dessus des routes : l'avertissement « ne renvoyez pas la demande » survit à une visite du détail. */
+  nouvelle: Nouvelle | null;
+  setNouvelle: (n: Nouvelle | null | ((n: Nouvelle | null) => Nouvelle | null)) => void;
   /** Un bouton d'action a été cliqué : valider et reprendre partent tout de suite, les autres ouvrent d'abord une boîte de dialogue. */
   surAction: (d: Demande, action: ActionNom) => void;
   terme: string;
