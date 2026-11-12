@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SUIVI_KEY, type Demande, type Suivi } from '@/lib/suivi';
-import { DELAI_SYNCHRO_MS, attendre, enSynchro, fusionner } from '@/lib/synchro';
+import { DELAI_SYNCHRO_MS, attendre, enSynchro, fusionner, purger } from '@/lib/synchro';
 
 const ligne = (o: Partial<Demande> = {}): Demande => ({
   id: 'a', nom: 'Éloïse Dupont', upn: 'a@exemple.test', poste: null, service: null, dateArrivee: null, statut: 'EnAttente', etape: 1, actions: ['approuver', 'refuser'], ...o,
@@ -70,6 +70,22 @@ describe('fusionner', () => {
   it('deux clients de requêtes ne partagent rien', () => {
     attendre(client, validee);
     expect(fusionner(new QueryClient(), [])).toEqual([]);
+  });
+});
+
+describe('purger', () => {
+  it('session expirée : plus aucune ligne gardée ni minuteur ; sans effet sur un autre client', () => {
+    const autre = new QueryClient();
+    attendre(client, validee);
+    attendre(client, ligne({ id: 'c' }));
+    attendre(autre, validee);
+    expect(vi.getTimerCount()).toBe(3);
+
+    purger(client);
+    expect(vi.getTimerCount()).toBe(1);
+    expect(fusionner(client, [])).toEqual([]);
+    expect(fusionner(autre, [])).toEqual([{ ...validee, synchro: true }]);
+    purger(client); // sans table : sans effet
   });
 });
 

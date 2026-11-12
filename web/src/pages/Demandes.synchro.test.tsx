@@ -108,7 +108,7 @@ describe('autres actions', () => {
     await screen.findByText('Hugo Lambert');
     await user.click(activer(ELOISE.nom));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
-    await screen.findByText('Kp7m-Xq4r-Tz9w-Hb3n');
+    await screen.findByDisplayValue('Kp7m-Xq4r-Tz9w-Hb3n');
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
@@ -129,7 +129,7 @@ describe('autres actions', () => {
     const boite = await screen.findByRole('dialog');
     await user.click(within(boite).getByRole('radio', { name: 'Mot de passe perdu' }));
     await user.click(within(boite).getByRole('button', { name: /Régénérer/ }));
-    await screen.findByText('Rw8c-Nd5t-Yf6v-Gj2s');
+    await screen.findByDisplayValue('Rw8c-Nd5t-Yf6v-Gj2s');
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(synchro()).toHaveLength(0);

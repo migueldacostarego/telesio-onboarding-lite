@@ -1,15 +1,31 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import type { UserEvent } from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ecritures, lecturesSuivi, reply } from '@/test/helpers';
 import { ELOISE, HUGO, actif, avancer, choisir, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 
 tempsSimule();
+// Espions (console, presse-papiers) rendus même quand un test échoue avant sa fin.
+afterEach(() => vi.restoreAllMocks());
 
 const MOT_DE_PASSE = 'Kp7m-Xq4r-Tz9w-Hb3n';
 const NOUVEAU = 'Rw8c-Nd5t-Yf6v-Gj2s';
 const activer = (nom: string) => screen.getByRole('button', { name: `Activer le compte de ${nom}` });
 const remise = (motDePasseTemporaire = MOT_DE_PASSE, regeneration = false) => reply(200, { id: ELOISE.id, statut: 'Actif', regeneration, motDePasseTemporaire });
 const aValider = [valide(ELOISE, { actions: ['activer'] }), enAttente(HUGO, { actions: [] })];
+
+/** Ouvre la confirmation d'Éloïse et la valide : activation, ou régénération pour « mot de passe perdu ». */
+async function lancer(user: UserEvent, action: 'activer' | 'régénérer') {
+  if (action === 'activer') {
+    await user.click(activer(ELOISE.nom));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
+    return;
+  }
+  await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
+  const boite = await screen.findByRole('dialog');
+  await user.click(within(boite).getByRole('radio', { name: 'Mot de passe perdu' }));
+  await user.click(within(boite).getByRole('button', { name: 'Régénérer le mot de passe' }));
+}
 
 /** Le mot de passe ne doit apparaître nulle part hors du DOM de la boîte : caches, stockage, adresse, titre, console, requêtes. */
 function nullePart(client: ReturnType<typeof monter>['client'], fetchMock: ReturnType<typeof monter>['fetchMock'], mot: string) {
@@ -51,12 +67,12 @@ describe('Activer', () => {
     expect(within(boite).getByRole('button', { name: 'Annuler' })).toBeDisabled();
     await user.keyboard('{Escape}');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.queryByText(MOT_DE_PASSE)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue(MOT_DE_PASSE)).not.toBeInTheDocument();
 
     etat.demandes = [actif(ELOISE), enAttente(HUGO, { actions: [] })];
     await act(async () => finir(remise()));
     const mdp = await screen.findByRole('dialog', { name: 'Mot de passe temporaire de Éloïse Dupont' });
-    expect(within(mdp).getByText(MOT_DE_PASSE)).toBeInTheDocument();
+    expect(within(mdp).getByDisplayValue(MOT_DE_PASSE)).toBeInTheDocument();
     expect(mdp).toHaveTextContent('Utilisable dans quelques minutes');
     expect(mdp).toHaveTextContent('plus affiché');
     // Une seule boîte à la fois : la confirmation a laissé la place.
@@ -68,7 +84,7 @@ describe('Activer', () => {
     expect(client.getMutationCache().getAll()).toHaveLength(0);
     // La liste est relue : la ligne passe à Activée, la boîte reste ouverte.
     await waitFor(() => expect(lecturesSuivi(fetchMock)).toBeGreaterThanOrEqual(2));
-    expect(screen.getByText(MOT_DE_PASSE)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(MOT_DE_PASSE)).toBeInTheDocument();
   });
 
   it('requête longue : aucun minuteur de 0 ms en boucle (mutation sans observateur), et plus rien en cache à la fin', async () => {
@@ -81,7 +97,7 @@ describe('Activer', () => {
     await avancer(10_000); // se bloquerait si TanStack réarmait un minuteur de 0 ms sans fin
     expect(vi.getTimerCount()).toBeLessThan(20);
     await act(async () => finir(remise()));
-    await screen.findByText(MOT_DE_PASSE);
+    await screen.findByDisplayValue(MOT_DE_PASSE);
     expect(client.getMutationCache().getAll()).toHaveLength(0);
   });
 
@@ -90,48 +106,83 @@ describe('Activer', () => {
     await screen.findByText('Hugo Lambert');
     await user.click(activer(ELOISE.nom));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
-    await screen.findByText(MOT_DE_PASSE);
+    await screen.findByDisplayValue(MOT_DE_PASSE);
 
     await user.keyboard('{Escape}');
-    expect(screen.getByText(MOT_DE_PASSE)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(MOT_DE_PASSE)).toBeInTheDocument();
     fireEvent.pointerDown(document.querySelector('[data-slot="dialog-overlay"]')!);
-    expect(screen.getByText(MOT_DE_PASSE)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(MOT_DE_PASSE)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(document.body.textContent).not.toContain(MOT_DE_PASSE);
+    // Tout le document, attributs compris (pas seulement le texte affiché).
+    expect(document.documentElement.outerHTML).not.toContain(MOT_DE_PASSE);
     await avancer(31_000); // l'actualisation n'en rend rien non plus
-    expect(document.body.textContent).not.toContain(MOT_DE_PASSE);
+    expect(document.documentElement.outerHTML).not.toContain(MOT_DE_PASSE);
     nullePart(client, fetchMock, MOT_DE_PASSE);
   });
 
-  it('Copier met le mot de passe dans le presse-papiers et le dit ; une copie impossible est annoncée', async () => {
+  it('champ en lecture seule, étiqueté, focalisé et sélectionné à l’ouverture (copie à la main, clavier compris) ; jamais de presse-papiers', async () => {
     const { user } = monter({ demandes: aValider, ecrire: () => remise() });
+    const ecrirePressePapiers = vi.spyOn(navigator.clipboard, 'writeText');
     await screen.findByText('Hugo Lambert');
     await user.click(activer(ELOISE.nom));
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
-    await screen.findByText(MOT_DE_PASSE);
+    const boite = await screen.findByRole('dialog', { name: 'Mot de passe temporaire de Éloïse Dupont' });
 
-    await user.click(screen.getByRole('button', { name: 'Copier' }));
-    expect(await navigator.clipboard.readText()).toBe(MOT_DE_PASSE);
-    expect(screen.getByRole('status')).toHaveTextContent('Copié dans le presse-papiers.');
+    const champ = within(boite).getByRole<HTMLInputElement>('textbox', { name: 'Mot de passe temporaire' });
+    expect(champ).toHaveValue(MOT_DE_PASSE);
+    expect(champ).toHaveAttribute('readonly');
+    await waitFor(() => expect(champ).toHaveFocus());
+    expect([champ.selectionStart, champ.selectionEnd]).toEqual([0, MOT_DE_PASSE.length]);
 
-    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(new Error('refusé'));
-    await user.click(screen.getByRole('button', { name: 'Copier' }));
-    expect(await screen.findByText(/Copie impossible/)).toBeInTheDocument();
+    // Tab vers Fermer, puis retour : le texte est de nouveau entièrement sélectionné.
+    champ.setSelectionRange(0, 0);
+    await user.tab();
+    expect(within(boite).getByRole('button', { name: 'Fermer' })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(champ).toHaveFocus();
+    expect([champ.selectionStart, champ.selectionEnd]).toEqual([0, MOT_DE_PASSE.length]);
+
+    expect(within(boite).queryByRole('button', { name: /Copier/ })).not.toBeInTheDocument();
+    expect(ecrirePressePapiers).not.toHaveBeenCalled();
   });
 
-  it('jamais rien dans la console', async () => {
+  it.each([
+    ['activer', MOT_DE_PASSE],
+    ['régénérer', NOUVEAU],
+  ] as const)('%s : jamais rien dans la console, rien dans le document une fois la boîte fermée', async (action, mot) => {
     const espions = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
-    const { user } = monter({ demandes: aValider, ecrire: () => remise() });
+    const { client, fetchMock, user } = monter({
+      demandes: action === 'activer' ? aValider : [actif(ELOISE), valide(HUGO, { actions: [] })],
+      ecrire: () => remise(mot, action !== 'activer'),
+    });
     await screen.findByText('Hugo Lambert');
-    await user.click(activer(ELOISE.nom));
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
-    await screen.findByText(MOT_DE_PASSE);
+    await lancer(user, action);
+    await screen.findByDisplayValue(mot);
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
-    expect(espions.flatMap((e) => e.mock.calls.flat().map(String)).some((t) => t.includes(MOT_DE_PASSE))).toBe(false);
-    espions.forEach((e) => e.mockRestore());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(espions.flatMap((e) => e.mock.calls.flat().map(String)).some((t) => t.includes(mot))).toBe(false);
+    expect(document.documentElement.outerHTML).not.toContain(mot);
+    nullePart(client, fetchMock, mot);
   });
+
+  it.each(['activer', 'régénérer'] as const)(
+    '%s, échec réseau (le serveur a peut-être déjà posé un mot de passe) : erreur dans la ligne, aucune boîte, jamais rejoué',
+    async (action) => {
+      const { fetchMock, user } = monter({
+        demandes: action === 'activer' ? aValider : [actif(ELOISE), valide(HUGO, { actions: [] })],
+        ecrire: () => Promise.reject(new TypeError('Failed to fetch')),
+      });
+      await screen.findByText('Hugo Lambert');
+      await lancer(user, action);
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(await screen.findByRole('alert')).toHaveTextContent('Réseau indisponible.');
+      await avancer(300_000);
+      expect(ecritures(fetchMock)).toHaveLength(1);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    },
+  );
 
   it.each([
     ['409 avant le jour J', reply(409, { error: 'Le compte ne peut pas être activé avant la date d’arrivée', raison: 'avant_arrivee' }), /avant la date d’arrivée/],
@@ -188,7 +239,7 @@ describe('Régénérer', () => {
     expect(ecritures(fetchMock)).toEqual([{ url: '/api/demandes/id-eloise/regenerer', corps: { motif: 'code_perdu' } }]);
 
     const mdp = await screen.findByRole('dialog', { name: 'Nouveau mot de passe temporaire de Éloïse Dupont' });
-    expect(within(mdp).getByText(NOUVEAU)).toBeInTheDocument();
+    expect(within(mdp).getByDisplayValue(NOUVEAU)).toBeInTheDocument();
     await avancer(50);
     nullePart(client, fetchMock, NOUVEAU);
     expect(client.getMutationCache().getAll()).toHaveLength(0);
