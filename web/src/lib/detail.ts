@@ -73,7 +73,7 @@ const ESSAIS_COMPTE_REPLIQUE = 5;
  * Détail d'une demande. L'id est la seule chose qui voyage dans l'adresse. Si la liste montre déjà la demande (`attendue`), un 404
  * est un compte pas encore répliqué : quelques nouveaux essais bornés ; sinon (lien ancien, demande refusée) il est définitif.
  */
-export function useDemande(id: string, { attendue, synchro }: { attendue: boolean; synchro: boolean }) {
+export function useDemande(id: string, { active = true, attendue, synchro }: { /** Faux hors d'une page de détail. */ active?: boolean; attendue: boolean; synchro: boolean }) {
   return useQuery({
     queryKey: [...DETAIL_KEY, id],
     queryFn: async (): Promise<DemandeDetail> => {
@@ -88,5 +88,6 @@ export function useDemande(id: string, { attendue, synchro }: { attendue: boolea
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     staleTime: 5_000,
+    enabled: active,
   });
 }

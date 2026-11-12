@@ -4,7 +4,7 @@ import { BoutonCopier } from '@/components/demandes/Adresse';
 import type { DemandeDetail } from '@/lib/detail';
 import { formatInstant } from '@/lib/dates';
 import { PAYS } from '@/lib/pays';
-import { formatArrivee } from '@/lib/suivi';
+import { STATUTS, formatArrivee, type Statut } from '@/lib/suivi';
 
 const ABSENT = <span className="text-muted-foreground">Non renseigné</span>;
 const ouAbsent = (valeur: ReactNode | undefined) => valeur ?? ABSENT;
@@ -27,11 +27,21 @@ const Ligne = ({ libelle, children }: { libelle: string; children: ReactNode }) 
 
 const LIBELLES_LICENCE = { choisie: 'prévue, attribuée à la validation', attribuee: 'attribuée', en_cours: 'attribution en cours', erreur: 'attribution en erreur', inconnu: 'état illisible' } as const;
 
-function Licence({ d }: { d: DemandeDetail }) {
+/**
+ * `validee` : la liste dit Validée alors que ce détail-ci a été lu En attente (réplication d'Entra juste après la validation). Licence,
+ * groupe et dossier sont alors en cours de mise en place, pas « Indisponible » ni « à la validation ».
+ */
+interface PropsCompte {
+  d: DemandeDetail;
+  validee: boolean;
+}
+
+function Licence({ d, validee }: PropsCompte) {
   if (!d.licence) return ABSENT;
+  const etat = validee && d.licence.etat === 'choisie' ? 'en_cours' : d.licence.etat;
   return (
     <>
-      {d.licence.libelle ?? 'Licence retirée de la liste'} <span className="text-muted-foreground">: {LIBELLES_LICENCE[d.licence.etat]}</span>
+      {d.licence.libelle ?? 'Licence retirée de la liste'} <span className="text-muted-foreground">: {LIBELLES_LICENCE[etat]}</span>
     </>
   );
 }
@@ -44,7 +54,8 @@ function estHttps(url: string): boolean {
   }
 }
 
-function Dossier({ d }: { d: DemandeDetail }) {
+function Dossier({ d, validee }: PropsCompte) {
+  if (validee) return <span className="text-muted-foreground">Création en cours</span>;
   if (d.statut === 'EnAttente') return <span className="text-muted-foreground">Créé à la validation</span>;
   if (!d.dossier) return <span className="text-muted-foreground">Indisponible</span>;
   if (d.dossier.etat === 'absent') return <span className="text-destructive">Non créé</span>;
@@ -59,7 +70,8 @@ function Dossier({ d }: { d: DemandeDetail }) {
   );
 }
 
-function Groupe({ d }: { d: DemandeDetail }) {
+function Groupe({ d, validee }: PropsCompte) {
+  if (validee) return <span className="text-muted-foreground">Ajout en cours</span>;
   if (d.statut === 'EnAttente') return <span className="text-muted-foreground">Ajouté à la validation</span>;
   if (!d.groupeArrivants) return <span className="text-muted-foreground">Indisponible</span>;
   return <>{d.groupeArrivants.membre ? 'Membre' : 'Non membre'}</>;
@@ -118,18 +130,22 @@ export function Identite({ d }: { d: DemandeDetail }) {
   );
 }
 
-/** Rubrique « Compte et accès » : licence, groupe des arrivants et dossier SharePoint, tels que Graph les a rendus. */
-export function CompteEtAcces({ d }: { d: DemandeDetail }) {
+/**
+ * Rubrique « Compte et accès » : licence, groupe des arrivants et dossier SharePoint, tels que Graph les a rendus. `statut` : celui
+ * que la page affiche (lib/detailDemande.ts, `reconcilier`), qui peut être en avance sur celui du détail lu.
+ */
+export function CompteEtAcces({ d, statut = d.statut }: { d: DemandeDetail; statut?: Statut }) {
+  const validee = d.statut === 'EnAttente' && STATUTS.indexOf(statut) > 0;
   return (
     <Rubrique titre="Compte et accès">
       <Ligne libelle="Licence">
-        <Licence d={d} />
+        <Licence d={d} validee={validee} />
       </Ligne>
       <Ligne libelle="Arrivants">
-        <Groupe d={d} />
+        <Groupe d={d} validee={validee} />
       </Ligne>
       <Ligne libelle="Dossier">
-        <Dossier d={d} />
+        <Dossier d={d} validee={validee} />
       </Ligne>
       {d.salesforce && (
         <Ligne libelle="Salesforce">

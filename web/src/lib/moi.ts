@@ -35,7 +35,10 @@ export function useMoi(enabled = true) {
       if (res.kind !== 'ok' || typeof res.data?.droits?.acces !== 'boolean') {
         throw new ApiError({ status: res.kind === 'ok' ? 200 : res.status, kind: 'serveur', message: 'Réponse inattendue du serveur.' });
       }
-      return res.data;
+      // Les rôles ne servent qu'à l'affichage (menu utilisateur) : une forme inattendue donne une liste vide, jamais un refus d'accès
+      // ni une exception de rendu.
+      const roles: unknown = res.data.roles;
+      return { ...res.data, roles: Array.isArray(roles) ? roles.filter((r): r is string => typeof r === 'string') : [] };
     },
     // Revérifié au retour sur l'onglet après une minute : une session expirée est détectée sans attendre une action.
     staleTime: 60_000,

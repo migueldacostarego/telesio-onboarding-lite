@@ -376,7 +376,8 @@ describe('envoi', () => {
   });
 
   it('la ligne créée n’est pas encore répliquée : elle est affichée tout de suite avec « synchronisation… », la liste est relue toutes les 5 s, l’indicateur part quand l’API la rend', async () => {
-    const { etat, fetchMock, user } = monter({ ...base, ecrire: () => reply(201, CREEE) });
+    // Direction : elle pourrait valider, mais les actions de la ligne ne sont décidées que par le serveur (aucune avant sa réponse).
+    const { etat, fetchMock, user } = monter({ ...base, moi: { ...CAMILLE, roles: ['Direction'], droits: DROITS_DIRECTION }, ecrire: () => reply(201, CREEE) });
     await screen.findByText('Hugo Lambert');
     const panneau = await ouvrir(user);
     await remplir(user);
@@ -391,6 +392,7 @@ describe('envoi', () => {
     // L'adresse que le serveur vient d'attribuer est là aussi, sans attendre l'API.
     expect(within(ligne).getByText(CREEE.userPrincipalName)).toBeInTheDocument();
     expect(within(ligne).getByText('synchronisation…')).toBeInTheDocument();
+    expect(within(ligne).queryByRole('button', { name: /Valider|Refuser/ })).not.toBeInTheDocument();
 
     // Relue toutes les 5 s ; toujours là tant que l'API ne la rend pas.
     const avant = lecturesSuivi(fetchMock);
@@ -402,6 +404,8 @@ describe('envoi', () => {
     await avancer(5_100);
     await waitFor(() => expect(within(screen.getByRole('row', { name: /Camille Durand/ })).queryByText('synchronisation…')).not.toBeInTheDocument());
     expect(screen.getByRole('row', { name: /Camille Durand/ })).toHaveAttribute('data-nouvelle', 'true');
+    // Les actions sont celles que l'API renvoie avec la ligne.
+    expect(within(screen.getByRole('row', { name: /Camille Durand/ })).getByRole('button', { name: 'Valider la demande de Camille Durand' })).toBeInTheDocument();
   });
 
   it('la recherche et le filtre ne masquent pas la nouvelle ligne', async () => {
@@ -423,6 +427,10 @@ describe('envoi', () => {
     await user.click(creer(panneau));
     expect(await screen.findByText(/responsable n’a pas pu être affecté/)).toBeInTheDocument();
     expect(screen.getByText(/Ne renvoyez pas la demande/)).toBeInTheDocument();
+    // L'avertissement survit à une visite du détail (il vit au-dessus des routes).
+    await user.click(screen.getByRole('link', { name: 'Voir le détail de la demande de Hugo Lambert' }));
+    await user.click(await screen.findByRole('link', { name: 'Toutes les demandes' }));
+    expect(await screen.findByText(/Ne renvoyez pas la demande/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Fermer ce message' }));
     expect(screen.queryByText('Demande créée pour Camille Durand')).not.toBeInTheDocument();
   });

@@ -235,7 +235,8 @@ describe('session expirée', () => {
     const { client } = renderApp();
     await screen.findByRole('heading', { name: 'Demandes' });
     await client.prefetchQuery({ queryKey: ['donnees', 'nominatives'], queryFn: () => Promise.resolve({ nom: 'Camille' }) });
-    expect(client.getQueryCache().getAll()).toHaveLength(3); // moi, suivi, données ci-dessus
+    // moi, suivi, détail (inactif hors d'une page de détail : sans données) et les données ci-dessus.
+    expect(client.getQueryCache().getAll().map((q) => [q.queryKey[0], q.state.data !== undefined])).toEqual([['moi', true], ['suivi', true], ['demande', false], ['donnees', true]]);
 
     await act(async () => {
       await client.fetchQuery({ queryKey: ['autre'], queryFn: () => api.get('/api/demandes') }).catch(() => undefined);

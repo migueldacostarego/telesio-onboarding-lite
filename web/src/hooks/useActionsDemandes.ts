@@ -16,7 +16,7 @@ import {
 import { isSessionExpiredError } from '@/lib/session';
 import { DETAIL_KEY } from '@/lib/detail';
 import { SUIVI_KEY, type Demande } from '@/lib/suivi';
-import { attendre } from '@/lib/synchro';
+import { attendre, ligneApres, oublier } from '@/lib/synchro';
 
 type Etats = Record<string, EtatLigne>;
 interface Appel {
@@ -32,15 +32,10 @@ interface Rejeux {
   licence: number;
 }
 
-/**
- * La ligne après une action réussie, quand elle change de statut : valider (Validé) et activer (Actif). Les actions à venir sont
- * inconnues du client (le jour J, le dossier SharePoint) : aucune, jusqu'à la lecture suivante de l'API. Refuser retire la ligne
- * comme avant ; régénérer et reprendre ne changent pas de statut (la ligne est déjà là, l'API la renvoie).
- */
-function statutApres(d: Demande, action: ActionNom): Demande | undefined {
-  if (action === 'valider') return { ...d, statut: 'Validé', etape: 2, actions: [], onboarding: undefined };
-  if (action === 'activer') return { ...d, statut: 'Actif', etape: 3, actions: [], onboarding: { motDePasse: false, authenticator: false, termine: false } };
-  return undefined;
+/** Une erreur dont la ligne a disparu (traitée ailleurs, supprimée, ou page de détail quittée) : dite dans un message de la page. */
+export interface ErreurPerdue {
+  id: string;
+  nom: string;
 }
 
 const sans = (etats: Etats, id: string): Etats => {
@@ -50,16 +45,23 @@ const sans = (etats: Etats, id: string): Etats => {
   return suite;
 };
 
-/** Ce qui ne peut plus durer : la demande a disparu, ou n'offre plus `approuver` (validée ou refusée ailleurs) pour une attente automatique. */
-function nettoyer(etats: Etats, demandes: readonly Demande[] | undefined): Etats {
-  if (!demandes) return etats;
+/**
+ * Ce qui ne peut plus durer : la demande a disparu, ou n'offre plus `approuver` (validée ou refusée ailleurs) pour une attente
+ * automatique. Une erreur dont la ligne a disparu n'est pas effacée sans un mot : elle est rendue dans `perdues` (avec le nom lu
+ * dans la liste précédente).
+ */
+function nettoyer(etats: Etats, demandes: readonly Demande[] | undefined, precedentes: readonly Demande[] | undefined): { suite: Etats; perdues: ErreurPerdue[] } {
+  const perdues: ErreurPerdue[] = [];
+  if (!demandes) return { suite: etats, perdues };
   let suite = etats;
   for (const [id, etat] of Object.entries(etats)) {
     const demande = demandes.find((d) => d.id === id);
     const attente = etat.phase === 'compte_en_creation' || etat.phase === 'licence_en_cours';
     if (!demande || (attente && !demande.actions.includes('approuver'))) suite = sans(suite, id);
+    const nom = precedentes?.find((d) => d.id === id)?.nom;
+    if (!demande && etat.phase === 'erreur' && nom !== undefined) perdues.push({ id, nom });
   }
-  return suite;
+  return { suite, perdues };
 }
 
 /**
@@ -74,12 +76,14 @@ export function useActionsDemandes(
 ) {
   const queryClient = useQueryClient();
   const [etats, setEtats] = useState<Etats>({});
+  const [perdues, setPerdues] = useState<ErreurPerdue[]>([]);
   // Mise à jour de l'état d'après de nouvelles données, pendant le rendu (modèle de React) : pas de rendu intermédiaire fautif.
   const [precedentes, setPrecedentes] = useState(demandes);
   if (demandes !== precedentes) {
     setPrecedentes(demandes);
-    const propre = nettoyer(etats, demandes);
-    if (propre !== etats) setEtats(propre);
+    const propre = nettoyer(etats, demandes, precedentes);
+    if (propre.suite !== etats) setEtats(propre.suite);
+    if (propre.perdues.length > 0) setPerdues((p) => [...p.filter((x) => !propre.perdues.some((n) => n.id === x.id)), ...propre.perdues]);
   }
 
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -116,6 +120,8 @@ export function useActionsDemandes(
   const offre = (id: string) => courantes.current?.find((d) => d.id === id)?.actions.includes('approuver') === true;
   const planifier = (id: string, ms: number, suite: () => void) => {
     annuler(id);
+    // Réponse arrivée après le démontage : aucun minuteur ne doit plus être armé (le nettoyage a déjà eu lieu).
+    if (!vivant.current) return;
     timers.current.set(
       id,
       setTimeout(() => {
@@ -198,8 +204,11 @@ export function useActionsDemandes(
     // Succès : la ligne prend tout de suite son nouveau statut dans le cache (et le garde tant que la réplication d'Entra ne l'a pas
     // rendu, 3 minutes au plus : lib/synchro.ts), puis reste verrouillée jusqu'à ce que la liste (l'état réel) soit relue.
     const avant = courantes.current?.find((d) => d.id === id);
-    const apres = avant && statutApres(avant, action);
+    const apres = avant && ligneApres(avant, action);
     if (apres) attendre(queryClient, apres);
+    // Refus : le compte est supprimé. Une ligne gardée par la synchronisation (créée ou validée il y a moins de 3 minutes) ne doit
+    // pas revenir en ligne fantôme, avec un Valider qui répondrait 404.
+    if (action === 'refuser') oublier(queryClient, id);
     poser(id, { phase: 'en_cours', action });
     surSucces.current?.(id, action);
     void rafraichir().finally(() => poser(id));
@@ -222,6 +231,9 @@ export function useActionsDemandes(
     regenerer: (id: string, motif: string) => demarrer(id, 'regenerer', motif),
     /** Ferme l'erreur ou l'avertissement d'une ligne. */
     fermer: (id: string) => poser(id),
+    /** Erreurs dont la ligne a disparu, à dire dans la page (sinon elles s'effaceraient sans explication). */
+    perdues,
+    fermerPerdues: () => setPerdues([]),
   };
 }
 
