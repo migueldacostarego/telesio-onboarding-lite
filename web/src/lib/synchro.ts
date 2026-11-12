@@ -33,6 +33,14 @@ const oublier = (client: QueryClient, id: string) => {
   table.delete(id);
 };
 
+/** Session expirée : plus aucune ligne gardée (noms, adresses) ni minuteur pour ce client. */
+export function purger(client: QueryClient): void {
+  const table = attentes.get(client);
+  if (!table) return;
+  table.forEach((a) => clearTimeout(a.minuteur));
+  attentes.delete(client);
+}
+
 /**
  * Écrit la ligne dans le cache tout de suite et la garde jusqu'à ce que l'API la rende (ou 3 minutes). Sans liste en cache
  * (premier chargement pas fini), rien à mettre à jour : la lecture en cours verra la ligne par `fusionner`.

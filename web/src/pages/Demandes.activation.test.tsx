@@ -1,15 +1,31 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import type { UserEvent } from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ecritures, lecturesSuivi, reply } from '@/test/helpers';
 import { ELOISE, HUGO, actif, avancer, choisir, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 
 tempsSimule();
+// Espions (console, presse-papiers) rendus même quand un test échoue avant sa fin.
+afterEach(() => vi.restoreAllMocks());
 
 const MOT_DE_PASSE = 'Kp7m-Xq4r-Tz9w-Hb3n';
 const NOUVEAU = 'Rw8c-Nd5t-Yf6v-Gj2s';
 const activer = (nom: string) => screen.getByRole('button', { name: `Activer le compte de ${nom}` });
 const remise = (motDePasseTemporaire = MOT_DE_PASSE, regeneration = false) => reply(200, { id: ELOISE.id, statut: 'Actif', regeneration, motDePasseTemporaire });
 const aValider = [valide(ELOISE, { actions: ['activer'] }), enAttente(HUGO, { actions: [] })];
+
+/** Ouvre la confirmation d'Éloïse et la valide : activation, ou régénération pour « mot de passe perdu ». */
+async function lancer(user: UserEvent, action: 'activer' | 'régénérer') {
+  if (action === 'activer') {
+    await user.click(activer(ELOISE.nom));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
+    return;
+  }
+  await choisir(user, ELOISE.nom, `Régénérer le mot de passe de ${ELOISE.nom}`);
+  const boite = await screen.findByRole('dialog');
+  await user.click(within(boite).getByRole('radio', { name: 'Mot de passe perdu' }));
+  await user.click(within(boite).getByRole('button', { name: 'Régénérer le mot de passe' }));
+}
 
 /** Le mot de passe ne doit apparaître nulle part hors du DOM de la boîte : caches, stockage, adresse, titre, console, requêtes. */
 function nullePart(client: ReturnType<typeof monter>['client'], fetchMock: ReturnType<typeof monter>['fetchMock'], mot: string) {
@@ -99,9 +115,10 @@ describe('Activer', () => {
 
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(document.body.textContent).not.toContain(MOT_DE_PASSE);
+    // Tout le document, attributs compris (pas seulement le texte affiché).
+    expect(document.documentElement.outerHTML).not.toContain(MOT_DE_PASSE);
     await avancer(31_000); // l'actualisation n'en rend rien non plus
-    expect(document.body.textContent).not.toContain(MOT_DE_PASSE);
+    expect(document.documentElement.outerHTML).not.toContain(MOT_DE_PASSE);
     nullePart(client, fetchMock, MOT_DE_PASSE);
   });
 
@@ -121,17 +138,41 @@ describe('Activer', () => {
     expect(await screen.findByText(/Copie impossible/)).toBeInTheDocument();
   });
 
-  it('jamais rien dans la console', async () => {
+  it.each([
+    ['activer', MOT_DE_PASSE],
+    ['régénérer', NOUVEAU],
+  ] as const)('%s : jamais rien dans la console, rien dans le document une fois la boîte fermée', async (action, mot) => {
     const espions = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
-    const { user } = monter({ demandes: aValider, ecrire: () => remise() });
+    const { client, fetchMock, user } = monter({
+      demandes: action === 'activer' ? aValider : [actif(ELOISE), valide(HUGO, { actions: [] })],
+      ecrire: () => remise(mot, action !== 'activer'),
+    });
     await screen.findByText('Hugo Lambert');
-    await user.click(activer(ELOISE.nom));
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
-    await screen.findByText(MOT_DE_PASSE);
+    await lancer(user, action);
+    await screen.findByText(mot);
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
-    expect(espions.flatMap((e) => e.mock.calls.flat().map(String)).some((t) => t.includes(MOT_DE_PASSE))).toBe(false);
-    espions.forEach((e) => e.mockRestore());
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(espions.flatMap((e) => e.mock.calls.flat().map(String)).some((t) => t.includes(mot))).toBe(false);
+    expect(document.documentElement.outerHTML).not.toContain(mot);
+    nullePart(client, fetchMock, mot);
   });
+
+  it.each(['activer', 'régénérer'] as const)(
+    '%s, échec réseau (le serveur a peut-être déjà posé un mot de passe) : erreur dans la ligne, aucune boîte, jamais rejoué',
+    async (action) => {
+      const { fetchMock, user } = monter({
+        demandes: action === 'activer' ? aValider : [actif(ELOISE), valide(HUGO, { actions: [] })],
+        ecrire: () => Promise.reject(new TypeError('Failed to fetch')),
+      });
+      await screen.findByText('Hugo Lambert');
+      await lancer(user, action);
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(await screen.findByRole('alert')).toHaveTextContent('Réseau indisponible.');
+      await avancer(300_000);
+      expect(ecritures(fetchMock)).toHaveLength(1);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    },
+  );
 
   it.each([
     ['409 avant le jour J', reply(409, { error: 'Le compte ne peut pas être activé avant la date d’arrivée', raison: 'avant_arrivee' }), /avant la date d’arrivée/],

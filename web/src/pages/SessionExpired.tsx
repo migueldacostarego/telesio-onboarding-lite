@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LOGIN_URL } from '@/lib/auth';
+import { purger } from '@/lib/synchro';
 
 export function SessionExpired() {
   const queryClient = useQueryClient();
@@ -10,6 +11,7 @@ export function SessionExpired() {
   useEffect(() => {
     void queryClient.cancelQueries();
     queryClient.clear();
+    purger(queryClient);
   }, [queryClient]);
 
   return (

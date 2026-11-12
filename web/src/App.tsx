@@ -59,7 +59,9 @@ export function App() {
       </Frame>
     );
   }
-  if (moi.isError) {
+  // Erreur sans données seulement : une relecture en échec (retour sur l'onglet, réseau coupé) garde l'application montée, boîte
+  // du mot de passe temporaire comprise. Une session expirée passe par le cache de requêtes (lib/query.ts), pas par ici.
+  if (moi.isError && !moi.data) {
     return (
       <Frame>
         <div className="mx-auto max-w-lg space-y-4">
