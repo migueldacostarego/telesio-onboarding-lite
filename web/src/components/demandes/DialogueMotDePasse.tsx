@@ -1,7 +1,7 @@
-import { CheckIcon, CopyIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useId } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 interface Props {
   /** Le mot de passe affiché : ouvert tant que la page le garde, jamais rouvert une fois fermé. */
@@ -11,8 +11,9 @@ interface Props {
 
 /**
  * Mot de passe temporaire, **affiché une seule fois**. Il n'existe que dans le DOM de cette boîte et dans l'état React de la page :
- * ni adresse, ni stockage du navigateur, ni cache de requêtes, ni journal. À la fermeture l'état est vidé et il n'y a aucun moyen
- * de le revoir (Régénérer en pose un autre). Échap et le clic à côté ne ferment pas la boîte, pour ne pas le perdre par accident.
+ * ni adresse, ni stockage du navigateur, ni cache de requêtes, ni journal, ni presse-papiers écrit par l'application. À la
+ * fermeture l'état est vidé et il n'y a aucun moyen de le revoir (Régénérer en pose un autre). Échap et le clic à côté ne ferment
+ * pas la boîte, pour ne pas le perdre par accident.
  */
 export function DialogueMotDePasse({ remise, onFermer }: Props) {
   const bloquer = (e: Event) => e.preventDefault();
@@ -26,15 +27,7 @@ export function DialogueMotDePasse({ remise, onFermer }: Props) {
 }
 
 function Corps({ remise, onFermer }: { remise: NonNullable<Props['remise']>; onFermer: () => void }) {
-  const [copie, setCopie] = useState<'oui' | 'non' | null>(null);
-  const copier = async () => {
-    try {
-      await navigator.clipboard.writeText(remise.motDePasse);
-      setCopie('oui');
-    } catch {
-      setCopie('non');
-    }
-  };
+  const id = useId();
   return (
     <>
       <DialogHeader>
@@ -44,23 +37,25 @@ function Corps({ remise, onFermer }: { remise: NonNullable<Props['remise']>; onF
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-2">
-        <p
+        <Label htmlFor={id}>Mot de passe temporaire</Label>
+        {/*
+          Pas de bouton Copier : le presse-papiers du système (historique, synchronisation) garderait le mot de passe hors du DOM.
+          Champ en lecture seule, premier élément focalisable de la boîte : lu à l'ouverture, sélectionné au focus, copiable à la
+          main au clavier comme à la souris.
+        */}
+        <input
+          id={id}
           data-slot="mot-de-passe-temporaire"
-          className="rounded-md border bg-muted px-3 py-3 text-center font-mono text-xl font-semibold tracking-wider break-all select-all"
-        >
-          {remise.motDePasse}
-        </p>
+          readOnly
+          value={remise.motDePasse}
+          onFocus={(e) => e.currentTarget.select()}
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full rounded-md border bg-muted px-3 py-3 text-center font-mono text-xl font-semibold tracking-wider outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        />
         <p className="text-sm text-muted-foreground">Utilisable dans quelques minutes (le temps qu’Entra le prenne en compte partout).</p>
-        <p role="status" className="min-h-5 text-sm">
-          {copie === 'oui' && 'Copié dans le presse-papiers.'}
-          {copie === 'non' && 'Copie impossible ici : sélectionnez le mot de passe et copiez-le à la main.'}
-        </p>
       </div>
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={() => void copier()}>
-          {copie === 'oui' ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
-          Copier
-        </Button>
         <Button type="button" onClick={onFermer}>
           Fermer
         </Button>

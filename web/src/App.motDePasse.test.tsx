@@ -46,7 +46,7 @@ async function motDePasseAffiche() {
   const vue = renderApp();
   await user.click(await screen.findByRole('button', { name: `Activer le compte de ${ELOISE.nom}` }));
   await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
-  expect(await screen.findByRole('dialog', { name: BOITE })).toHaveTextContent(MOT_DE_PASSE);
+  expect(await screen.findByRole('dialog', { name: BOITE })).toContainElement(screen.getByDisplayValue(MOT_DE_PASSE));
   return { ...vue, api, fetchMock };
 }
 
@@ -59,7 +59,7 @@ describe('boîte du mot de passe temporaire, application complète', () => {
     });
     expect(client.getQueryState(MOI_KEY)?.status).toBe('error');
     await laisserRendre();
-    expect(screen.getByRole('dialog', { name: BOITE })).toHaveTextContent(MOT_DE_PASSE);
+    expect(screen.getByRole('dialog', { name: BOITE })).toContainElement(screen.getByDisplayValue(MOT_DE_PASSE));
     // La page est derrière la boîte modale (masquée aux technologies d'assistance) : lue dans le DOM.
     expect(document.querySelector('h1')).toHaveTextContent('Demandes');
     expect(screen.queryByRole('button', { name: 'Réessayer', hidden: true })).not.toBeInTheDocument();
@@ -89,6 +89,6 @@ describe('boîte du mot de passe temporaire, application complète', () => {
       await client.refetchQueries({ queryKey: SUIVI_KEY });
     });
     expect(await screen.findByText('Une erreur est survenue')).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: BOITE })).toHaveTextContent(MOT_DE_PASSE);
+    expect(screen.getByRole('dialog', { name: BOITE })).toContainElement(screen.getByDisplayValue(MOT_DE_PASSE));
   });
 });

@@ -282,11 +282,11 @@ describe('actions depuis la page de détail (état partagé avec la liste)', () 
     await screen.findByText('Historique');
     await user.click(screen.getByRole('button', { name: 'Activer le compte de Éloïse Dupont' }));
     await user.click(within(await screen.findByRole('dialog', { name: 'Activer le compte de Éloïse Dupont ?' })).getByRole('button', { name: 'Activer le compte' }));
-    expect(await screen.findByText('Kp7m-Xq4r-Tz9w-Hb3n')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('Kp7m-Xq4r-Tz9w-Hb3n')).toBeInTheDocument();
     expect(window.location.href).not.toContain('Kp7m');
     expect(JSON.stringify({ ...localStorage, ...sessionStorage, historique: window.history.state })).not.toContain('Kp7m');
     await user.click(screen.getByRole('button', { name: 'Fermer' }));
-    await waitFor(() => expect(document.body.textContent).not.toContain('Kp7m-Xq4r-Tz9w-Hb3n'));
+    await waitFor(() => expect(document.documentElement.outerHTML).not.toContain('Kp7m-Xq4r-Tz9w-Hb3n'));
   });
 
   it('page ouverte pendant la réplication d’Entra : la ligne de la liste fait foi pour l’étape (statut Validée tout de suite)', async () => {
