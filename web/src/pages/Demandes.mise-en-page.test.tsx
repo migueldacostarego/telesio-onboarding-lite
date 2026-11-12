@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DemandesTableSquelette } from '@/components/demandes/DemandesTable';
 import { reply, stubBureau } from '@/test/helpers';
@@ -13,6 +13,29 @@ const ANNA = { id: 'id-anna', nom: 'Anna Martin' };
 const LONG = 'Directeur adjoint des opérations et de la transformation numérique';
 const entetes = () => within(screen.getByRole('table')).getAllByRole('columnheader').map((th) => th.className);
 const lignes = () => within(screen.getByRole('table')).getAllByRole('row').slice(1);
+
+describe('tableau ou cartes selon la largeur', () => {
+  it('un redimensionnement bascule entre tableau et cartes, sans recharger ni perdre la recherche ; un seul rendu à la fois', async () => {
+    const fenetre = stubBureau(true);
+    const { fetchMock, user } = monter({ demandes: [enAttente(ELOISE), valide(HUGO, { actions: ['activer'] })], ecrire: rien });
+    await screen.findByText('Hugo Lambert');
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    await user.type(screen.getByRole('searchbox'), 'hugo');
+    await avancer(400);
+    const lectures = fetchMock.mock.calls.length;
+
+    act(() => fenetre.basculer(false));
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByText('Hugo Lambert')).toBeInTheDocument();
+    expect(screen.queryByText('Éloïse Dupont')).not.toBeInTheDocument(); // la recherche tient toujours
+    expect(screen.getByRole('searchbox')).toHaveValue('hugo');
+
+    act(() => fenetre.basculer(true));
+    expect(within(screen.getByRole('table')).getByText('Hugo Lambert')).toBeInTheDocument();
+    expect(screen.getAllByText('Hugo Lambert')).toHaveLength(1);
+    expect(fetchMock.mock.calls.length).toBe(lectures);
+  });
+});
 
 describe('mise en page du tableau', () => {
   it('largeurs de colonnes fixes : table-layout fixed, une largeur par colonne sauf Personne (qui prend le reste)', async () => {

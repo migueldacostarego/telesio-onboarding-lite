@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Link, MemoryRouter, Route, Routes } from 'react-router';
 import { LimiteErreur, LimiteErreurParPage } from '@/components/LimiteErreur';
 
@@ -11,7 +11,6 @@ function Casse(): never {
 describe('LimiteErreur', () => {
   // React journalise lui-même l'exception rattrapée : on la masque pour garder la sortie des tests lisible.
   beforeEach(() => void vi.spyOn(console, 'error').mockImplementation(() => {}));
-  afterEach(() => vi.restoreAllMocks());
 
   it('rend les enfants tant qu’il n’y a pas d’erreur', () => {
     render(
@@ -54,7 +53,6 @@ describe('LimiteErreur', () => {
 
 describe('LimiteErreurParPage', () => {
   beforeEach(() => void vi.spyOn(console, 'error').mockImplementation(() => {}));
-  afterEach(() => vi.restoreAllMocks());
 
   it('une exception sur une page n’enferme pas la navigation : changer de page remonte la limite', async () => {
     render(

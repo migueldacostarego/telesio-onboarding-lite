@@ -1,5 +1,6 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { vi } from 'vitest';
 import { App } from '@/App';
@@ -59,9 +60,28 @@ export const verifications = (fn: ReturnType<typeof mockFetch>): string[] =>
 /** Nombre de lectures de GET /api/suivi faites jusqu'ici. */
 export const lecturesSuivi = (fn: ReturnType<typeof mockFetch>): number => fn.mock.calls.filter((c) => c[0] === '/api/suivi').length;
 
-/** matchMedia : `bureau` vrai à partir de 768 px (tableau), faux en dessous (cartes). */
+/**
+ * matchMedia : `bureau` vrai à partir de 768 px (tableau), faux en dessous (cartes). `basculer` change la largeur et prévient les
+ * écouteurs, comme un redimensionnement de la fenêtre.
+ */
 export function stubBureau(bureau: boolean) {
-  vi.stubGlobal('matchMedia', (query: string) => ({ matches: bureau, media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+  let matches = bureau;
+  const ecouteurs = new Set<() => void>();
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    get matches() {
+      return matches;
+    },
+    media: query,
+    addEventListener: (_type: string, ecouteur: () => void) => ecouteurs.add(ecouteur),
+    removeEventListener: (_type: string, ecouteur: () => void) => ecouteurs.delete(ecouteur),
+  }));
+  return {
+    basculer(versBureau: boolean) {
+      matches = versBureau;
+      ecouteurs.forEach((ecouteur) => ecouteur());
+    },
+    ecouteurs: () => ecouteurs.size,
+  };
 }
 
 export const AUCUN_DROIT = { acces: false, creer: false, approuver: false, activer: false };
@@ -71,12 +91,15 @@ export const DROITS_DIRECTION = { acces: true, creer: true, approuver: true, act
 export const CAMILLE = { nom: 'Camille Exemple', email: 'camille@exemple.test', roles: ['RH'], droits: DROITS_RH, domaine: 'exemple.test' };
 
 export function renderApp(path = '/', client: QueryClient = createQueryClient()) {
+  // StrictMode comme en production (main.tsx).
   const view = render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </StrictMode>,
   );
   return { client, ...view };
 }

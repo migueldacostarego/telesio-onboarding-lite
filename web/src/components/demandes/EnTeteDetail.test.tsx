@@ -5,7 +5,7 @@ import type { DemandeDetail } from '@/lib/detail';
 import { ELOISE, detailDe, valide } from '@/test/demandes';
 
 // Date figée au 28 octobre 2026 (midi) : « arrivée le … (demain) » dépend du jour, pas des minuteries.
-beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 9, 28, 12, 0, 0) }));
+beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-28T11:00:00Z') /* 12 h à Paris */ }));
 afterEach(() => vi.useRealTimers());
 
 const detail = (surcharge: Partial<DemandeDetail> = {}) => detailDe(valide(ELOISE), surcharge);

@@ -14,4 +14,6 @@ afterEach(() => {
   cleanup();
   sessionStore.set(false);
   vi.unstubAllGlobals();
+  // Espions (console, presse-papiers, modules) rendus après chaque test, même quand il échoue avant sa fin.
+  vi.restoreAllMocks();
 });

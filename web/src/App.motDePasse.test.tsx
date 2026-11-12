@@ -25,7 +25,6 @@ vi.mock('@/components/demandes/Compteurs', async (original) => {
 
 afterEach(() => {
   exploser.actif = false;
-  vi.restoreAllMocks();
 });
 
 const MOT_DE_PASSE = 'Kp7m-Xq4r-Tz9w-Hb3n';

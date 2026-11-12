@@ -10,7 +10,7 @@ import { FournisseurDemandes } from '@/pages/FournisseurDemandes';
 import { lecturesSuivi, mockApi, reply, stubBureau } from '@/test/helpers';
 
 /** « À venir » dépend du jour : on fige la date (28 octobre 2026) pour que l'ordre ne change pas avec le calendrier. */
-const AUJOURDHUI = new Date(2026, 9, 28, 12, 0, 0);
+const AUJOURDHUI = new Date('2026-10-28T11:00:00Z'); // 12 h à Paris
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: AUJOURDHUI });
 });
@@ -193,7 +193,7 @@ describe('tri', () => {
     expect(noms()).toEqual(['Luc Bernard', 'Éloïse Dupont', 'Anna Martin', 'Sarah Petit']);
     // Le 30 octobre : Luc (29) est passée, Éloïse (3 nov.) reste à venir.
     await act(async () => {
-      vi.setSystemTime(new Date(2026, 9, 30, 9, 0, 0));
+      vi.setSystemTime(new Date('2026-10-30T08:00:00Z')); // 9 h à Paris
       await vi.advanceTimersByTimeAsync(60_000);
     });
     expect(noms()).toEqual(['Éloïse Dupont', 'Luc Bernard', 'Anna Martin', 'Sarah Petit']);
