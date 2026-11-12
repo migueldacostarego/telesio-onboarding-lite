@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NouvelleDemande } from '@/components/demandes/NouvelleDemande';
 
 // Le chunk du formulaire est introuvable (redéploiement : les anciens fichiers hachés répondent 404) : l'import dynamique est rejeté.
@@ -10,7 +10,6 @@ vi.mock('@/components/demandes/FormulaireDemande', () => {
 
 describe('Nouvelle demande : chunk du formulaire introuvable', () => {
   beforeEach(() => void vi.spyOn(console, 'error').mockImplementation(() => {}));
-  afterEach(() => vi.restoreAllMocks());
 
   it('affiche un message et un bouton de rechargement dans la fenêtre, jamais une page blanche', async () => {
     render(<NouvelleDemande onCree={() => {}} onRelire={() => {}} />);

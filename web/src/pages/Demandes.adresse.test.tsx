@@ -1,5 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { reply, stubBureau } from '@/test/helpers';
 import { ELOISE, HUGO, actif, avancer, enAttente, monter, tempsSimule } from '@/test/demandes';
 
@@ -8,7 +8,6 @@ tempsSimule();
 const rien = () => reply(200, {});
 const UPN_ELOISE = 'compte.eloise@exemple.test';
 
-afterEach(() => vi.restoreAllMocks());
 
 describe('adresse professionnelle (UPN)', () => {
   it('tableau : sous le nom, tronquée avec l’adresse entière en infobulle', async () => {

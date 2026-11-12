@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ecritures, lecturesSuivi, reply } from '@/test/helpers';
 import { ELOISE, HUGO, avancer, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 
@@ -92,9 +92,13 @@ describe('Réessayer : reprise du dossier SharePoint manquant', () => {
   });
 
   it('session expirée : l’application est prévenue', async () => {
-    const { user } = monter({ demandes: [sansDossier(), enAttente(HUGO, { actions: [] })], ecrire: () => reply(401, { error: 'Authentification requise' }), surSession: () => {} });
+    const surSession = vi.fn();
+    const { fetchMock, user } = monter({ demandes: [sansDossier(), enAttente(HUGO, { actions: [] })], ecrire: () => reply(401, { error: 'Authentification requise' }), surSession });
     await screen.findByText('Hugo Lambert');
     await user.click(reessayer());
-    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    // Attendre la réponse avant de constater l'absence d'alerte : avant elle, l'absence ne prouverait rien.
+    await waitFor(() => expect(surSession).toHaveBeenCalledTimes(1));
+    expect(ecritures(fetchMock)).toHaveLength(1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

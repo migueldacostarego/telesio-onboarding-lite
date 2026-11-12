@@ -21,12 +21,15 @@ describe('heure de Paris', () => {
   });
 
   it('le fuseau du navigateur ne change rien (instants, jour du jour, date d’arrivée sans heure)', () => {
-    const lire = () => [formatInstant('2026-10-28T07:00:00Z'), jourAParis(new Date('2026-10-28T22:30:00Z')), formatArrivee('2026-11-03'), arriveeRelative('2026-11-03', '2026-10-28')];
-    const attendu = ['28 oct. 2026 à 08:00', '2026-10-28', '3 nov. 2026', 'Dans 6 j'];
-    for (const tz of ['Europe/Paris', 'America/Los_Angeles', 'Pacific/Auckland', 'UTC']) {
-      process.env.TZ = tz;
-      expect(lire(), tz).toEqual(attendu);
-    }
+    // La suite tourne sous Pacific/Auckland (vite.config.ts) : 22 h 30 UTC le 28 y est déjà le 29 au matin.
+    expect(Intl.DateTimeFormat().resolvedOptions().timeZone).toBe('Pacific/Auckland');
+    expect(new Date('2026-10-28T22:30:00Z').getDate()).toBe(29);
+    expect([formatInstant('2026-10-28T07:00:00Z'), jourAParis(new Date('2026-10-28T22:30:00Z')), formatArrivee('2026-11-03'), arriveeRelative('2026-11-03', '2026-10-28')]).toEqual([
+      '28 oct. 2026 à 08:00',
+      '2026-10-28',
+      '3 nov. 2026',
+      'Dans 6 j',
+    ]);
   });
 
   it('date illisible : dite, jamais « Invalid Date »', () => {

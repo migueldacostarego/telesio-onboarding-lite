@@ -1,15 +1,14 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { UserEvent } from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ecritures, lecturesSuivi, reply } from '@/test/helpers';
 import { ELOISE, HUGO, actif, avancer, choisir, enAttente, monter, tempsSimule, valide } from '@/test/demandes';
 
 tempsSimule();
-// Espions (console, presse-papiers) rendus même quand un test échoue avant sa fin.
-afterEach(() => vi.restoreAllMocks());
 
 const MOT_DE_PASSE = 'Kp7m-Xq4r-Tz9w-Hb3n';
 const NOUVEAU = 'Rw8c-Nd5t-Yf6v-Gj2s';
+const MINUTEURS_AU_REPOS_MAX = 20;
 const activer = (nom: string) => screen.getByRole('button', { name: `Activer le compte de ${nom}` });
 const remise = (motDePasseTemporaire = MOT_DE_PASSE, regeneration = false) => reply(200, { id: ELOISE.id, statut: 'Actif', regeneration, motDePasseTemporaire });
 const aValider = [valide(ELOISE, { actions: ['activer'] }), enAttente(HUGO, { actions: [] })];
@@ -95,7 +94,8 @@ describe('Activer', () => {
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Activer le compte' }));
     expect(client.getMutationCache().getAll()).toHaveLength(1);
     await avancer(10_000); // se bloquerait si TanStack réarmait un minuteur de 0 ms sans fin
-    expect(vi.getTimerCount()).toBeLessThan(20);
+    // Au repos, une poignée de minuteurs (actualisation, synchronisation, Testing Library) ; une boucle de 0 ms en laisserait des milliers.
+    expect(vi.getTimerCount()).toBeLessThan(MINUTEURS_AU_REPOS_MAX);
     await act(async () => finir(remise()));
     await screen.findByDisplayValue(MOT_DE_PASSE);
     expect(client.getMutationCache().getAll()).toHaveLength(0);

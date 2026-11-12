@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, vi } from 'vitest';
@@ -15,10 +16,14 @@ import { mockApi, reply } from '@/test/helpers';
 // minuteur de 0 ms en boucle et le suivant, aux minuteries simulées, ne rend plus la main.
 const aLiberer: Array<() => void> = [];
 
-/** À appeler en tête d'un fichier de test : temps simulé (le temps réel continue de couler), date figée au 28 octobre 2026. */
+/**
+ * À appeler en tête d'un fichier de test : temps simulé (le temps réel continue de couler), date figée au 28 octobre 2026.
+ * `shouldAdvanceTime` reste vrai : sans lui, `findBy…` épuise son délai en temps simulé avant qu'un module chargé à la demande
+ * (le formulaire) n'arrive en temps réel (essayé, audit F-25 : 7 tests en échec).
+ */
 export function tempsSimule() {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date(2026, 9, 28, 12, 0, 0) });
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date('2026-10-28T11:00:00Z') /* 12 h à Paris */ });
   });
   afterEach(async () => {
     aLiberer.splice(0).forEach((liberer) => liberer());
@@ -110,17 +115,20 @@ export function monter(o: {
   const client = createQueryClient(o.surSession);
   // BrowserRouter lit l'adresse de jsdom, partagée entre les tests : on la remet à chaque montage.
   window.history.replaceState(null, '', o.chemin ?? '/');
+  // StrictMode comme en production (main.tsx) : effets montés, démontés puis remontés, minuteurs et drapeaux compris.
   const vue = render(
-    <QueryClientProvider client={client}>
-      <BrowserRouter>
-        <FournisseurDemandes>
-          <Routes>
-            <Route index element={<Demandes />} />
-            <Route path="demandes/:id" element={<DetailDemande />} />
-          </Routes>
-        </FournisseurDemandes>
-      </BrowserRouter>
-    </QueryClientProvider>,
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <BrowserRouter>
+          <FournisseurDemandes>
+            <Routes>
+              <Route index element={<Demandes />} />
+              <Route path="demandes/:id" element={<DetailDemande />} />
+            </Routes>
+          </FournisseurDemandes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </StrictMode>,
   );
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   return { etat, fetchMock, client, user, ...vue };

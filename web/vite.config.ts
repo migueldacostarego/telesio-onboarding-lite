@@ -21,5 +21,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Fuseau du processus fixé loin de Paris (UTC+13 en octobre) : la suite donne le même résultat sur tout poste et en CI, et
+    // tout code qui prendrait l'heure du navigateur pour celle de Paris échoue ici plutôt que chez un utilisateur hors de France.
+    env: { TZ: 'Pacific/Auckland' },
   },
 });

@@ -10,7 +10,7 @@ const validee = ligne({ statut: 'Validé', etape: 2, actions: [] });
 
 let client: QueryClient;
 beforeEach(() => {
-  vi.useFakeTimers({ now: new Date(2026, 9, 28, 12, 0, 0) });
+  vi.useFakeTimers({ now: new Date('2026-10-28T11:00:00Z') /* 12 h à Paris */ });
   client = new QueryClient();
 });
 afterEach(() => vi.useRealTimers());
@@ -70,6 +70,17 @@ describe('fusionner', () => {
   it('deux clients de requêtes ne partagent rien', () => {
     attendre(client, validee);
     expect(fusionner(new QueryClient(), [])).toEqual([]);
+  });
+});
+
+describe('échéance sans minuteur (onglet en arrière-plan : minuteurs ralentis)', () => {
+  it('passé 3 minutes à l’horloge, la lecture suivante rend la main à l’API même si le minuteur n’a pas sonné', () => {
+    attendre(client, validee);
+    expect(vi.getTimerCount()).toBe(1);
+    vi.setSystemTime(Date.now() + DELAI_SYNCHRO_MS); // l'horloge avance, le minuteur ne sonne pas
+    expect(fusionner(client, [ligne()])).toEqual([ligne()]);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fusionner(client, [])).toEqual([]);
   });
 });
 
