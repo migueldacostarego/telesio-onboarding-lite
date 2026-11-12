@@ -1,4 +1,5 @@
 import { CircleCheckIcon, CircleDotIcon, CircleIcon, CircleXIcon, type LucideIcon } from 'lucide-react';
+import { useDevientVrai } from '@/hooks/useAnimations';
 import { LIBELLES_JALON, type EtatJalon, type Jalon } from '@/lib/chronologie';
 import { formatInstant } from '@/lib/dates';
 
@@ -9,6 +10,20 @@ const STYLES: Record<EtatJalon, { Icone: LucideIcon; couleur: string }> = {
   echec: { Icone: CircleXIcon, couleur: 'text-destructive' },
   a_venir: { Icone: CircleIcon, couleur: 'text-muted-foreground' },
 };
+
+/** La puce d'une étape ; quand l'étape passe au vert pendant que la page est ouverte, elle pulse une fois. */
+function Puce({ etat }: { etat: EtatJalon }) {
+  const { Icone, couleur } = STYLES[etat];
+  const franchie = useDevientVrai(etat === 'fait');
+  return (
+    <Icone
+      key={etat}
+      aria-hidden="true"
+      data-pulsation={franchie || undefined}
+      className={`relative mt-0.5 size-5 shrink-0 bg-background ${couleur} ${franchie ? 'animate-pulsation' : 'animate-fondu'}`}
+    />
+  );
+}
 
 /** Quand et par qui, sur une ligne : « 30 oct. 2026 à 14:05, par Camille » ; une étape faite sans date dit « date non enregistrée ». */
 function QuandQui({ jalon }: { jalon: Jalon }) {
@@ -29,13 +44,13 @@ export function Chronologie({ jalons }: { jalons: readonly Jalon[] }) {
   return (
     <ol className="relative">
       {jalons.map((j, i) => {
-        const { Icone, couleur } = STYLES[j.etat];
+        const { couleur } = STYLES[j.etat];
         const dernier = i === jalons.length - 1;
         return (
           <li key={j.cle} data-jalon={j.cle} data-etat={j.etat} aria-current={j.etat === 'en_cours' ? 'step' : undefined} className={`relative flex gap-3 ${j.sous ? 'ml-8' : ''} ${dernier ? '' : 'pb-5'}`}>
             {/* Fil qui relie les puces ; la dernière n'en a pas. */}
             {!dernier && <span aria-hidden="true" className="absolute top-6 bottom-0 left-2.5 w-px bg-border" />}
-            <Icone aria-hidden="true" className={`relative mt-0.5 size-5 shrink-0 bg-background ${couleur}`} />
+            <Puce etat={j.etat} />
             <div className="min-w-0 space-y-0.5">
               <p className="text-sm font-medium">
                 {j.titre} <span className={`font-normal ${couleur}`}>: {LIBELLES_JALON[j.etat]}</span>

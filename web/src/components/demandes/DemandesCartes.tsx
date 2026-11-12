@@ -9,15 +9,17 @@ import { actionsDe, ouvrirSiLigne, type PropsLignes } from '@/components/demande
 import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
 import { TypeBadge } from '@/components/demandes/TypeBadge';
+import { retardLigne, useApparitionInitiale } from '@/hooks/useAnimations';
 import { arriveeRelative } from '@/lib/dates';
 import { formatArrivee } from '@/lib/suivi';
 
 /** Mobile : une carte compacte par demande, avec l'action principale et le menu « … ». */
 export function DemandesCartes({ aujourdhui, ...lignes }: PropsLignes & { aujourdhui: string }) {
   const { demandes } = lignes;
+  const animer = useApparitionInitiale(demandes.length);
   return (
     <ul aria-label="Demandes d’onboarding en cours" className="space-y-2">
-      {demandes.map((d) => {
+      {demandes.map((d, i) => {
         const poste = [d.poste, d.service].filter(Boolean).join(' · ');
         const relative = arriveeRelative(d.dateArrivee, aujourdhui);
         return (
@@ -25,7 +27,8 @@ export function DemandesCartes({ aujourdhui, ...lignes }: PropsLignes & { aujour
             key={d.id}
             id={`demande-${d.id}`}
             data-nouvelle={lignes.surlignee === d.id || undefined}
-            className={`cursor-pointer space-y-2 rounded-lg border p-3 text-card-foreground ${lignes.surlignee === d.id ? 'border-ring bg-accent ring-2 ring-ring/40' : 'bg-card'}`}
+            className={`cursor-pointer space-y-2 rounded-lg border p-3 text-card-foreground ${lignes.surlignee === d.id ? 'border-ring bg-accent ring-2 ring-ring/40' : 'bg-card'} ${animer ? 'animate-ligne' : ''}`}
+            style={animer ? { animationDelay: `${retardLigne(i)}ms` } : undefined}
             onClick={(e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
           >
             <div className="flex items-start gap-3">
