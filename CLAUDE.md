@@ -32,3 +32,4 @@ MVP d'onboarding : RH saisit une demande → la direction valide → compte Entr
 - PR avec CI verte avant toute fusion.
 - Logs : jamais de nom, UPN ni mot de passe (seulement des objectId).
 - CORS de la Web App (`infra/main.tf`) : garder l'adresse du site dans `allowed_origins`. Sans elle, la protection CSRF d'Easy Auth répond 403 (corps vide) à tous les POST, même same-origin ; voir README, « Easy Auth ».
+- Animations (2026-11-12) : CSS et Tailwind seulement, pas de Framer Motion. Entrées en ease-out (`--ease-entree`), menus et fenêtres à 200 ms et sorties 20 % plus courtes (160 ms), boutons à 0,97 à l'appui, popovers à 0,95, lignes de la liste décalées de 30 ms au premier affichage seulement (`hooks/useAnimations.ts`), pulsation d'une étape qui vient d'être franchie (barre et chronologie), fondu entre deux états d'une ligne. Pas d'étirement, de courbe, de ressort ni d'élastique. Tout est coupé sous `prefers-reduced-motion` (sauf les spinners).

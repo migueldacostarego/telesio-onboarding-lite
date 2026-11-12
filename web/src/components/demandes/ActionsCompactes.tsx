@@ -34,7 +34,7 @@ export function ActionsCompactes({ demande, etat, onAction }: Omit<PropsActions,
           aria-label={principale.nom(demande.nom)}
           onClick={() => onAction(principale.action)}
         >
-          {principaleEnCours ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : <principale.Icone aria-hidden="true" />}
+          {principaleEnCours ? <Loader2Icon key="attente" aria-hidden="true" className="animate-spin" /> : <principale.Icone key="pret" aria-hidden="true" className="animate-fondu" />}
           {principale.libelle}
         </Button>
       )}

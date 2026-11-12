@@ -11,6 +11,7 @@ import { Progression } from '@/components/demandes/Progression';
 import { StatutBadge } from '@/components/demandes/StatutBadge';
 import { TypeBadge } from '@/components/demandes/TypeBadge';
 import { actionsDe, aUnMessage, ouvrirSiLigne, type PropsLignes } from '@/components/demandes/lignes';
+import { retardLigne, useApparitionInitiale } from '@/hooks/useAnimations';
 import { arriveeRelative } from '@/lib/dates';
 import { formatArrivee, type Tri } from '@/lib/suivi';
 
@@ -47,20 +48,22 @@ function Entete({ tri }: { tri: Tri }) {
 /** Bureau : tableau, avec les actions que l'API propose. Sur mobile, DemandesCartes prend le relais. */
 export function DemandesTable({ tri, aujourdhui, ...lignes }: PropsLignes & { tri: Tri; aujourdhui: string }) {
   const { demandes } = lignes;
+  const animer = useApparitionInitiale(demandes.length);
   return (
     <div className="rounded-lg border">
       <Table className={TABLE}>
         <caption className="sr-only">Demandes d’onboarding en cours</caption>
         <Entete tri={tri} />
         <TableBody>
-          {demandes.map((d) => {
+          {demandes.map((d, i) => {
             const relative = arriveeRelative(d.dateArrivee, aujourdhui);
             return (
               <Fragment key={d.id}>
                 <TableRow
                   id={`demande-${d.id}`}
                   data-nouvelle={lignes.surlignee === d.id || undefined}
-                  className={`${LIGNE} cursor-pointer ${lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : ''}`}
+                  className={`${LIGNE} cursor-pointer ${lignes.surlignee === d.id ? 'bg-accent shadow-[inset_3px_0_0_0_var(--color-ring)]' : ''} ${animer ? 'animate-ligne' : ''}`}
+                  style={animer ? { animationDelay: `${retardLigne(i)}ms` } : undefined}
                   onClick={(e) => ouvrirSiLigne(e, () => lignes.onOuvrir(d))}
                 >
                   <TableCell className="overflow-hidden">

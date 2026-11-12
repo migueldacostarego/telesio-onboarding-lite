@@ -7,8 +7,20 @@ import type { Demande } from '@/lib/suivi';
 /**
  * La ligne de texte sous le statut : une attente en cours (compte en création, licence), la synchronisation d'Entra, ou où en est la
  * demande et ce qu'on attend (lib/etat.ts). Une ligne, tronquée, la phrase entière en infobulle : la hauteur de la ligne ne change pas.
+ * Fondu enchaîné : chaque état a sa clé, le nouvel état apparaît en fondu à la place de l'ancien (« en attente » → « prêt »). Au premier
+ * affichage, le fondu se confond avec l'entrée de la ligne.
  */
-export function EtatLigne({ demande, etat, aujourdhui }: { demande: Demande; etat: Etat | undefined; aujourdhui: string }) {
+export function EtatLigne(props: { demande: Demande; etat: Etat | undefined; aujourdhui: string }) {
+  const { demande, etat } = props;
+  const cle = etat?.phase === 'compte_en_creation' || etat?.phase === 'licence_en_cours' ? etat.phase : demande.synchro ? 'synchro' : demande.statut;
+  return (
+    <div key={cle} className="animate-fondu">
+      <ContenuEtat {...props} />
+    </div>
+  );
+}
+
+function ContenuEtat({ demande, etat, aujourdhui }: { demande: Demande; etat: Etat | undefined; aujourdhui: string }) {
   const attente = etat?.phase === 'compte_en_creation' ? 'Compte en cours de création' : etat?.phase === 'licence_en_cours' ? 'Licence en cours d’attribution' : null;
   if (attente) {
     return (
